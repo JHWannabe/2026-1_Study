@@ -80,6 +80,10 @@ class LiveTrader:
         # 거래 기록
         self.trades: list[dict] = []
 
+        # 연속 손실 추적
+        self._consecutive_losses: int = 0
+        self._halt_until_date: Optional[str] = None  # "YYYY-MM-DD" 형식
+
         # 캔들 캐시 (API 과호출 방지)
         self._df_main_cache: Optional[pd.DataFrame] = None
         self._df_sub_cache:  Optional[pd.DataFrame] = None
@@ -123,6 +127,11 @@ class LiveTrader:
     # ─── 핵심 루프 ────────────────────────────────────────────────────────────
 
     def _step(self):
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if self._halt_until_date == today:
+            log.info("연속 3회 손실 — 당일 거래 중단 중 (%s)", today)
+            return
+
         now = datetime.now(timezone.utc).strftime("%H:%M:%S")
 
         # ① 현재가 조회
@@ -304,6 +313,17 @@ class LiveTrader:
             "reason":      reason,
         })
         self.position = None
+
+        # 연속 손실 카운터 업데이트
+        if pnl < 0:
+            self._consecutive_losses += 1
+            log.info("연속 손실 %d회", self._consecutive_losses)
+            if self._consecutive_losses >= 3:
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                self._halt_until_date = today
+                log.warning("연속 3회 손실 — 오늘(%s) 신규 진입 중단", today)
+        else:
+            self._consecutive_losses = 0
 
     # ─── 유틸리티 ─────────────────────────────────────────────────────────────
 
