@@ -272,7 +272,58 @@ def _compute_metrics(state: BacktestState, initial_capital: float) -> dict:
     return metrics
 
 
+def _print_trade_journal(trades: list):
+    if not trades:
+        return
+    print("\n" + "=" * 100)
+    print("  TRADE JOURNAL")
+    print("=" * 100)
+    header = f"  {'#':>4}  {'Side':>6}  {'Entry Time':>16}  {'Exit Time':>16}  " \
+             f"{'Entry':>9}  {'Exit':>9}  {'Margin':>8}  {'PnL':>9}  {'PnL%':>7}  {'Reason'}"
+    print(header)
+    print("-" * 100)
+    cumulative = 0.0
+    for i, t in enumerate(trades, 1):
+        cumulative += t.pnl
+        sign = "+" if t.pnl >= 0 else ""
+        entry_str = t.entry_time.strftime("%m-%d %H:%M") if t.entry_time else "-"
+        exit_str  = t.exit_time.strftime("%m-%d %H:%M")  if t.exit_time  else "-"
+        print(
+            f"  {i:>4}  {t.side:>6}  {entry_str:>16}  {exit_str:>16}  "
+            f"{t.entry_price:>9.2f}  {t.exit_price:>9.2f}  "
+            f"{t.margin_used:>8.2f}  {sign}{t.pnl:>8.2f}  "
+            f"{sign}{t.pnl_pct*100:>6.1f}%  {t.exit_reason}"
+        )
+    print("-" * 100)
+    sign = "+" if cumulative >= 0 else ""
+    print(f"  {'누적 손익':>50}  {sign}{cumulative:.2f} USD")
+    print("=" * 100 + "\n")
+
+    # CSV 저장
+    rows = [
+        {
+            "trade_no":    i + 1,
+            "side":        t.side,
+            "entry_time":  t.entry_time.strftime("%Y-%m-%d %H:%M") if t.entry_time else "",
+            "exit_time":   t.exit_time.strftime("%Y-%m-%d %H:%M")  if t.exit_time  else "",
+            "entry_price": round(t.entry_price, 4),
+            "exit_price":  round(t.exit_price, 4),
+            "size_usd":    round(t.size_usd, 4),
+            "margin_used": round(t.margin_used, 4),
+            "pnl_usd":     round(t.pnl, 4),
+            "pnl_pct":     round(t.pnl_pct * 100, 2),
+            "exit_reason": t.exit_reason,
+        }
+        for i, t in enumerate(trades)
+    ]
+    save_path = Path("backtest/trade_journal.csv")
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(save_path, index=False)
+    log.info("매매일지 저장 → %s", save_path)
+
+
 def _print_metrics(m: dict):
+    _print_trade_journal(m.get("trades", []))
     print("\n" + "=" * 55)
     print("  BACKTEST RESULTS")
     print("=" * 55)
