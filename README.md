@@ -1,4 +1,6 @@
+
 ## 1. 전체 연구 로드맵 (핵심 구조)
+
 ① Pilot Study (지금 단계)
 AEC가 body composition / bone biomarker와 연관 있는지 확인
 분석:
@@ -55,10 +57,10 @@ Osteosarcopenia phenotype
 
 ## 2. 현재 코드 상태 평가
 
-이미 잘 되어있는 부분 (Strong)
-AEC curve 추출 (HSV 기반) ✅
-성별 / 그룹별 비교 ✅
-BMI/TAMA 분석 ✅
+이미 잘 되어있는 부분 (Strong)  
+AEC curve 추출 (HSV 기반) ✅  
+성별 / 그룹별 비교 ✅  
+BMI/TAMA 분석 ✅  
 클러스터링 (KMeans, Agglo) ✅
 
 👉 결론:
@@ -66,30 +68,23 @@ BMI/TAMA 분석 ✅
 
 부족한 부분 (Critical Gap)
 
-❌ 통계 분석 없음
+❌ 통계 분석 없음  
+p-value 없음  
+단순 시각화 수준  
 
-p-value 없음
+❌ 회귀 분석 없음  
+AEC → muscle / bone 관계 검증 없음  
 
-단순 시각화 수준
+❌ 비선형 분석 없음  
+spline / LOWESS 없음  
 
-❌ 회귀 분석 없음
+❌ 센터 보정 없음  
+normalization 없음  
 
-AEC → muscle / bone 관계 검증 없음
+❌ outcome 없음  
+fracture 연결 안됨  
 
-❌ 비선형 분석 없음
-
-spline / LOWESS 없음
-
-❌ 센터 보정 없음
-
-normalization 없음
-
-❌ outcome 없음
-
-fracture 연결 안됨
-
-❌ 예측 모델 없음
-
+❌ 예측 모델 없음  
 Model A~D 없음
 
 👉 결론:
@@ -97,12 +92,10 @@ Model A~D 없음
 
 ## 3. 가장 중요한 핵심 전환 포인트
 
-현재:
-
+현재:  
 Clustering 기반 탐색 연구
 
-앞으로:
-
+앞으로:  
 Statistical + Predictive modeling 연구
 
 ## 4. 우선순위 (실제 해야 할 것)
@@ -111,16 +104,14 @@ Statistical + Predictive modeling 연구
 
 ### 1. 회귀 분석 코드
 
-muscle ~ AEC + age + sex
-
+muscle ~ AEC + age + sex  
 bone   ~ AEC + age + sex
 
 👉 이게 Pilot Study의 핵심
 
 ### 2. p-value 추가
 
-Mann-Whitney U
-
+Mann-Whitney U  
 Bonferroni correction
 
 🟠 2순위 (단기)
@@ -131,8 +122,7 @@ AEC vs attenuation (비선형 확인)
 
 ### 4. AEC 정규화
 
-z-score (센터별)
-
+z-score (센터별)  
 percentile
 
 👉 이걸 안 하면 다기관 비교 불가능
@@ -141,22 +131,18 @@ percentile
 
 ### 5. fracture 연결
 
-label 추가
-
+label 추가  
 logistic / Cox
 
 ### 6. Model A → D 구축
 
-AUC 비교
-
+AUC 비교  
 calibration
 
 🟢 4순위 (장기)
 
-외부 검증 (강남 → 신촌)
-
-CNN multimodal
-
+외부 검증 (강남 → 신촌)  
+CNN multimodal  
 longitudinal 분석
 
 ## 5. 한 줄 핵심 요약
@@ -169,14 +155,11 @@ longitudinal 분석
 
 ## 6. 실전 조언 (중요)
 
-현재 흐름에서 가장 위험한 포인트:
-
-❌ clustering만 계속 하는 것
-
+현재 흐름에서 가장 위험한 포인트:  
+❌ clustering만 계속 하는 것  
 이건 논문 임팩트가 약함
 
-반대로 가장 중요한 방향:
-
+반대로 가장 중요한 방향:  
 ✅ regression + outcome 연결
 
 결론
