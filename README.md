@@ -65,18 +65,31 @@ BMI/TAMA 분석 ✅
 "탐색적 분석 + 패턴 발견" 단계는 충분히 완료됨
 
 부족한 부분 (Critical Gap)
+
 ❌ 통계 분석 없음
+
 p-value 없음
+
 단순 시각화 수준
+
 ❌ 회귀 분석 없음
+
 AEC → muscle / bone 관계 검증 없음
+
 ❌ 비선형 분석 없음
+
 spline / LOWESS 없음
+
 ❌ 센터 보정 없음
+
 normalization 없음
+
 ❌ outcome 없음
+
 fracture 연결 안됨
+
 ❌ 예측 모델 없음
+
 Model A~D 없음
 
 👉 결론:
@@ -99,6 +112,7 @@ Statistical + Predictive modeling 연구
 ### 1. 회귀 분석 코드
 
 muscle ~ AEC + age + sex
+
 bone   ~ AEC + age + sex
 
 👉 이게 Pilot Study의 핵심
@@ -106,6 +120,7 @@ bone   ~ AEC + age + sex
 ### 2. p-value 추가
 
 Mann-Whitney U
+
 Bonferroni correction
 
 🟠 2순위 (단기)
@@ -117,6 +132,7 @@ AEC vs attenuation (비선형 확인)
 ### 4. AEC 정규화
 
 z-score (센터별)
+
 percentile
 
 👉 이걸 안 하면 다기관 비교 불가능
@@ -126,17 +142,21 @@ percentile
 ### 5. fracture 연결
 
 label 추가
+
 logistic / Cox
 
 ### 6. Model A → D 구축
 
 AUC 비교
+
 calibration
 
 🟢 4순위 (장기)
 
 외부 검증 (강남 → 신촌)
+
 CNN multimodal
+
 longitudinal 분석
 
 ## 5. 한 줄 핵심 요약
