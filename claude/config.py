@@ -17,7 +17,7 @@ WS_URL     = "wss://api.orangex.com/ws/api/v1"
 
 # ─── Trading Parameters ──────────────────────────────────────────────────────
 INSTRUMENT      = "ETH-USDT-PERPETUAL"   # default instrument
-LEVERAGE        = 35                     # 15x leverage
+LEVERAGE        = 35                     # 35x leverage
 RESOLUTION      = "5"                  # main candle: 5-minute
 SUB_RESOLUTION  = "15"                   # sub candle: 15-minute
 

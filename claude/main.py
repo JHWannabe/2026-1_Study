@@ -189,7 +189,7 @@ def main():
                         dest="sub_resolution")
     parser.add_argument("--days",            type=int,   default=1000)
     parser.add_argument("--capital",         type=float, default=config.INITIAL_CAPITAL)
-    parser.add_argument("--min-confidence",  type=float, default=0.75,
+    parser.add_argument("--min-confidence",  type=float, default=0.7,
                         dest="min_confidence")
     parser.add_argument("--plot",            action="store_true", default=True)
     parser.add_argument("--hours",           type=float, default=24,

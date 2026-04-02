@@ -39,7 +39,7 @@ class LiveTrader:
     instrument    : 종목 (기본 ETH-USDT-PERPETUAL)
     resolution    : 메인 캔들 (기본 15분)
     sub_resolution: 서브 캔들 (기본 5분)
-    poll_seconds  : 루프 간격 (기본 30초)
+    poll_seconds  : 루프 간격 (기본 5초)
     min_confidence: 최소 신호 신뢰도 (기본 0.55)
     dry_run       : True면 주문 직전까지만 진행하고 실제 API 호출 안 함
     """
@@ -49,7 +49,7 @@ class LiveTrader:
         instrument:     str   = config.INSTRUMENT,
         resolution:     str   = config.RESOLUTION,
         sub_resolution: str   = config.SUB_RESOLUTION,
-        poll_seconds:   int   = 30,
+        poll_seconds:   int   = 5,
         min_confidence: float = 0.55,
         dry_run:        bool  = False,
     ):
@@ -84,24 +84,11 @@ class LiveTrader:
         self._consecutive_losses: int = 0
         self._halt_until_date: Optional[str] = None  # "YYYY-MM-DD" 형식
 
-        # 캔들 캐시 (API 과호출 방지)
-        self._df_main_cache: Optional[pd.DataFrame] = None
-        self._df_sub_cache:  Optional[pd.DataFrame] = None
-        self._cache_ts: float = 0.0                               # 마지막 캐시 갱신 시각
-        self._cache_ttl: int  = 300  # 5분마다 캔들 캐시 갱신
-
-        mode = "[DRY-RUN]" if dry_run else "[LIVE]"
-        log.info("%s LiveTrader 준비 — %s  leverage=%dx  SL=%.2f%%  TP=%.2f%%",
-                 mode, instrument, config.LEVERAGE,
-                 config.STOP_LOSS_PCT * config.LEVERAGE * 100,
-                 config.TAKE_PROFIT_PCT * config.LEVERAGE * 100)
-
     # ─── 공개 진입점 ──────────────────────────────────────────────────────────
 
     def run(self, duration_hours: float = 24):
         """duration_hours 동안 매매 루프 실행."""
         end_time = time.time() + duration_hours * 3600
-        log.info("매매 시작 — %.1f시간 동안 실행", duration_hours)
 
         # 기존 미결 포지션 동기화
         self._sync_position()
@@ -110,7 +97,6 @@ class LiveTrader:
             try:
                 self._step()
             except KeyboardInterrupt:
-                log.info("사용자 중단 요청")
                 break
             except Exception as e:
                 log.error("루프 오류: %s", e, exc_info=True)
@@ -119,7 +105,6 @@ class LiveTrader:
 
         # 종료 시 포지션 강제 청산
         if self.position:
-            log.info("시간 종료 — 포지션 청산 중 ...")
             self._close_position(reason="time_end")
 
         self._print_summary()
@@ -129,16 +114,12 @@ class LiveTrader:
     def _step(self):
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if self._halt_until_date == today:
-            log.info("연속 3회 손실 — 당일 거래 중단 중 (%s)", today)
             return
-
-        now = datetime.now(timezone.utc).strftime("%H:%M:%S")
 
         # ① 현재가 조회
         ticker = self.client.get_ticker(self.instrument)
         price  = float(ticker.get("last_price", 0))
         if price == 0:
-            log.warning("현재가 조회 실패")
             return
 
         # ② 포지션 API 동기화 (dry-run은 실제 포지션 없으므로 스킵)
@@ -150,26 +131,13 @@ class LiveTrader:
             if self._check_sl_tp(price):
                 return   # 청산 완료 → 이번 스텝 종료
 
-        # ④ 캔들 데이터 조회 (캔들 주기마다만 API 재요청)
-        now_ts = time.time()
-        if self._df_main_cache is None or (now_ts - self._cache_ts) >= self._cache_ttl:
-            df_main = fetch_ohlcv(self.instrument, self.resolution,     days=30,
-                                  client=self.client, use_cache=False)
-            df_sub  = fetch_ohlcv(self.instrument, self.sub_resolution, days=14,
-                                  client=self.client, use_cache=False)
-            if not df_main.empty:
-                self._df_main_cache = df_main
-                self._df_sub_cache  = df_sub
-                self._cache_ts      = now_ts
-                log.info("캔들 캐시 갱신 — main=%d bars  sub=%d bars",
-                         len(df_main), len(df_sub) if not df_sub.empty else 0)
-        else:
-            df_main = self._df_main_cache
-            df_sub  = self._df_sub_cache
-            log.debug("캐시 사용 (%.0f초 후 갱신)", self._cache_ttl - (now_ts - self._cache_ts))
+        # ④ 캔들 데이터 조회 (매 루프마다 API 직접 호출)
+        df_main = fetch_ohlcv(self.instrument, self.resolution,     days=30,
+                              client=self.client, use_cache=False)
+        df_sub  = fetch_ohlcv(self.instrument, self.sub_resolution, days=14,
+                              client=self.client, use_cache=False)
 
         if df_main is None or df_main.empty or len(df_main) < 60:
-            log.warning("캔들 데이터 부족 (%d bars)", len(df_main) if df_main is not None else 0)
             return
 
         # ⑤ 피처 생성 & 신호 예측
@@ -188,22 +156,14 @@ class LiveTrader:
             df_feat = add_all_indicators(df_main_live)
             df_feat.dropna(inplace=True)
 
-        signal, conf, all_probs = predict_signal(
+        signal, conf, _ = predict_signal(
             df_feat, self.model, self.scaler,
             self.feature_cols, self.label_map_inv,
             min_confidence=self.min_confidence,
         )
 
-        log.info(
-            "[%s] price=%.2f  signal=%+d  short=%.4f  long=%.4f  pos=%s",
-            now, price, signal,
-            all_probs["short"], all_probs["long"],
-            self.position["side"] if self.position else "flat",
-        )
-
         # ⑥ 주문 실행
         if self.position and conf <= config.EXIT_CONFIDENCE:
-            log.info("confidence %.4f <= %.2f, closing position", conf, config.EXIT_CONFIDENCE)
             self._close_position(reason="low_confidence")
             return
 
@@ -221,38 +181,19 @@ class LiveTrader:
         """잔고 조회 → 수량 계산 → 시장가 진입."""
         balance = self._get_available_balance()
         if balance <= 0:
-            log.error("사용 가능한 잔고 없음")
             return
 
-        margin_to_use = balance * config.MAX_POSITION_PCT
-        notional      = margin_to_use * config.LEVERAGE
-        amount        = self._calc_amount(notional, price)
-
-        if amount < self.min_order_amount:
-            log.warning("주문 수량 %.4f이 최소값 %s 미만 — 스킵", amount, self.min_order_amount)
-            return
-
-        order_notional = amount * price
-        if order_notional < self.min_notional:
-            log.warning("주문 명목가 %.4f USDT가 최소값 %s 미만 — 스킵", order_notional, self.min_notional)
-            return
+        amount = self._calc_amount(balance, price)
 
         api_side = "buy" if side == "long" else "sell"
 
-        log.info("[ORDER] %s %s  amount=%.4f  price~%.2f  notional~%.2f USDT",
-                 "OPEN", api_side.upper(), amount, price, order_notional)
-
         if not self.dry_run:
-            result = self._place_order_with_mode_retry(
+            self._place_order_with_mode_retry(
                 side=api_side,
                 amount=amount,
                 order_type="market",
                 logical_side=side,
             )
-            order_id = result.get("order", {}).get("order_id", "")
-            log.info("주문 완료 — order_id=%s", order_id)
-        else:
-            log.info("[DRY-RUN] 실제 주문 미실행")
 
         sl_price = price * (1 - config.STOP_LOSS_PCT)  if side == "long" else price * (1 + config.STOP_LOSS_PCT)
         tp_price = price * (1 + config.TAKE_PROFIT_PCT) if side == "long" else price * (1 - config.TAKE_PROFIT_PCT)
@@ -264,9 +205,8 @@ class LiveTrader:
             "entry_time":  datetime.now(timezone.utc),
             "sl":          sl_price,
             "tp":          tp_price,
-            "notional":    order_notional,
+            "notional":    amount,
         }
-        log.info("포지션 오픈 — %s  SL=%.2f  TP=%.2f", side.upper(), sl_price, tp_price)
 
     def _close_position(self, reason: str = "signal"):
         """현재 포지션 전량 청산."""
@@ -279,21 +219,14 @@ class LiveTrader:
         ticker = self.client.get_ticker(self.instrument)
         price  = float(ticker.get("last_price", pos["entry_price"]))
 
-        log.info("[ORDER] CLOSE %s  amount=%.4f  price~%.2f  reason=%s",
-                 api_side.upper(), pos["size"], price, reason)
-
         if not self.dry_run:
-            result = self._place_order_with_mode_retry(
+            self._place_order_with_mode_retry(
                 side=api_side,
                 amount=pos["size"],
                 order_type="market",
                 reduce_only=True,
                 logical_side=pos["side"],
             )
-            order_id = result.get("order", {}).get("order_id", "")
-            log.info("청산 완료 — order_id=%s", order_id)
-        else:
-            log.info("[DRY-RUN] 실제 청산 미실행")
 
         # PnL 계산 (참고용)
         ep = pos["entry_price"]
@@ -317,11 +250,9 @@ class LiveTrader:
         # 연속 손실 카운터 업데이트
         if pnl < 0:
             self._consecutive_losses += 1
-            log.info("연속 손실 %d회", self._consecutive_losses)
             if self._consecutive_losses >= 3:
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 self._halt_until_date = today
-                log.warning("연속 3회 손실 — 오늘(%s) 신규 진입 중단", today)
         else:
             self._consecutive_losses = 0
 
@@ -342,11 +273,9 @@ class LiveTrader:
             hit_tp = price <= pos["tp"]
 
         if hit_sl:
-            log.warning("SL 도달 — price=%.2f  sl=%.2f", price, pos["sl"])
             self._close_position(reason="stop_loss")
             return True
         if hit_tp:
-            log.info("TP 도달 — price=%.2f  tp=%.2f", price, pos["tp"])
             self._close_position(reason="take_profit")
             return True
         return False
@@ -360,17 +289,11 @@ class LiveTrader:
 
             if not eth_pos:
                 if self.position:
-                    log.info("API에 포지션 없음 — 로컬 포지션 초기화")
                     entry_time = self.position.get("entry_time")
                     if isinstance(entry_time, datetime):
                         age_seconds = (datetime.now(timezone.utc) - entry_time).total_seconds()
                         if age_seconds < POSITION_SYNC_GRACE_SECONDS:
-                            log.warning(
-                                "API 포지션 조회가 아직 비었습니다. 주문 직후 %.1f초 경과라 로컬 포지션을 유지합니다.",
-                                age_seconds,
-                            )
                             return
-                    log.info("API에 포지션 없음 — 로컬 포지션 초기화")
                     self.position = None
                 return
 
@@ -393,16 +316,13 @@ class LiveTrader:
                     "tp":          tp_price,
                     "notional":    size,
                 }
-                log.info("외부 포지션 감지 — %s  entry=%.2f  size=%.4f",
-                         api_side.upper(), entry_price, size)
-        except Exception as e:
-            log.error("포지션 동기화 오류: %s", e)
+        except Exception:
+            pass
 
     def _get_available_balance(self) -> float:
         """USDT 가용 잔고 조회."""
         try:
             raw = self.client.get_account_summary(currency="USDT")
-            log.info("잔고 원본 응답: %s", raw)
 
             # 응답이 list면 첫 번째 원소 사용
             summary = raw[0] if isinstance(raw, list) else raw
@@ -426,10 +346,8 @@ class LiveTrader:
                 or summary.get("total")
                 or 0
             )
-            log.info("가용 잔고: %.4f USDT", balance)
             return balance
-        except Exception as e:
-            log.error("잔고 조회 오류: %s", e)
+        except Exception:
             return 0.0
 
     def _calc_amount(self, notional_usdt: float, price: float) -> float:
@@ -466,7 +384,6 @@ class LiveTrader:
             instruments = self.client.get_instruments(currency="PERPETUAL", kind="perpetual")
             instrument = next((x for x in instruments if x.get("instrument_name") == self.instrument), None)
             if not instrument:
-                log.warning("instruments API에서 %s 제약값을 찾지 못해 기본값을 사용합니다.", self.instrument)
                 return
 
             self.min_order_amount = self._safe_float(
@@ -478,20 +395,12 @@ class LiveTrader:
                 self.quantity_precision = int(instrument.get("quantityPrec", 2) or 2)
             except (TypeError, ValueError):
                 self.quantity_precision = 2
-
-            log.info(
-                "주문 제약값 로드 — min_amount=%s  min_notional=%s  quantity_prec=%s",
-                self.min_order_amount,
-                self.min_notional,
-                self.quantity_precision,
-            )
-        except Exception as e:
-            log.warning("instruments API 제약값 조회 실패, 기본값 사용: %s", e)
+        except Exception:
+            pass
 
     def _refresh_position_mode(self) -> bool:
         cfg = self.client.get_perpetual_config(self.instrument)
         self.hedge_mode = self._normalize_dual_side(cfg.get("dual_side_position", False))
-        log.info("포지션 모드 동기화 — hedge_mode=%s", self.hedge_mode)
         return self.hedge_mode
 
     def _place_order_with_mode_retry(
@@ -518,7 +427,6 @@ class LiveTrader:
             if "position mode" not in str(e).lower():
                 raise
 
-            log.warning("포지션 모드 불일치 감지 — 모드를 다시 읽고 한 번 더 주문합니다.")
             retry_hedge_mode = self._refresh_position_mode()
             retry_position_side = "BOTH"
             if retry_hedge_mode:
@@ -537,34 +445,18 @@ class LiveTrader:
         try:
             cfg            = self.client.get_perpetual_config(self.instrument)
             current_lev    = cfg.get("leverage", "?")
-            long_lev       = cfg.get("long_leverage", "?")
-            short_lev      = cfg.get("short_leverage", "?")
-            margin_type    = cfg.get("margin_type", "?")
             dual_side      = self._normalize_dual_side(cfg.get("dual_side_position", False))
-            log.info(
-                "현재 포지션 설정 — margin=%s  leverage=%s  long=%s  short=%s  hedge_mode=%s",
-                margin_type, current_lev, long_lev, short_lev, dual_side
-            )
-        except Exception as e:
-            log.warning("현재 설정 조회 실패: %s", e)
+        except Exception:
             return
 
-        # 헤지 모드이면 API 변경 불가 → 안내만 출력
+        # 헤지 모드이면 API 변경 불가
         if dual_side:
             self.hedge_mode = dual_side
-            log.warning(
-                "헤지 모드(dual_side_position) 감지 — 주문 시 pos_side 자동 추가\n"
-                "  현재: Long %sx / Short %sx\n"
-                "  목표: %dx\n"
-                "  ※ 레버리지는 OrangeX 웹사이트에서 수동 조정 필요",
-                long_lev, short_lev, config.LEVERAGE
-            )
             return
 
         # 단방향 모드: 이미 원하는 레버리지면 스킵
         try:
             if int(current_lev) == config.LEVERAGE:
-                log.info("레버리지 이미 %dx — 변경 불필요", config.LEVERAGE)
                 return
         except (TypeError, ValueError):
             pass
@@ -572,9 +464,8 @@ class LiveTrader:
         # 레버리지 변경 시도
         try:
             self.client.set_leverage(self.instrument, config.LEVERAGE)
-            log.info("레버리지 %dx 설정 완료", config.LEVERAGE)
-        except Exception as e:
-            log.warning("레버리지 자동 설정 실패: %s", e)
+        except Exception:
+            pass
 
     def _print_summary(self):
         print("\n" + "=" * 55)
