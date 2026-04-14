@@ -1,12 +1,19 @@
 """
-Live Trader — OrangeX 실계좌 자동매매
+Live Trader — OrangeX 실계좌 자동매매 (볼린저 밴드 전략)
+
+전략:
+  [롱]  이전 종가 < 중심선, 현재 종가 > 중심선 → 이후 저가가 중심선 도달 시 롱 진입
+        종가 < 중심선 → 청산
+  [숏]  이전 종가 > 중심선, 현재 종가 < 중심선 → 이후 고가가 중심선 도달 시 숏 진입
+        종가 > 중심선 → 청산
 
 실행 흐름:
   1. API 잔고 조회 → 주문 수량 계산
-  2. 모델 신호 생성 (메인 15분 + 서브 5분)
-  3. 시장가 주문 실행 (buy / sell)
-  4. 포지션 모니터링 (SL / TP 소프트웨어 감시)
-  5. 청산 조건 충족 시 reduce_only 주문으로 청산
+  2. 완성된 30분봉 기준 BB 신호 생성
+  3. 현재가 vs BB 중심선으로 청산 여부 실시간 점검
+  4. 시장가 주문 실행 (buy / sell)
+  5. 포지션 모니터링 (SL 소프트웨어 감시)
+  6. 청산 조건 충족 시 reduce_only 주문으로 청산
 """
 
 import time
@@ -17,9 +24,7 @@ from typing import Optional
 
 from api.client import OrangeXClient
 from api.data_fetcher import fetch_ohlcv
-from features.multi_tf import build_multi_tf_features
-from features.indicators import add_all_indicators
-from model.trainer import load_model, predict_signal
+from features.bb_signals import generate_bb_signals, calc_bb_mid
 from utils.logger import get_logger
 import config
 
@@ -32,33 +37,27 @@ POSITION_SYNC_GRACE_SECONDS = 10
 
 class LiveTrader:
     """
-    실계좌 자동매매 루프.
+    실계좌 자동매매 루프 (볼린저 밴드 전략).
 
     Parameters
     ----------
-    instrument    : 종목 (기본 ETH-USDT-PERPETUAL)
-    resolution    : 메인 캔들 (기본 15분)
-    sub_resolution: 서브 캔들 (기본 5분)
-    poll_seconds  : 루프 간격 (기본 5초)
-    min_confidence: 최소 신호 신뢰도 (기본 0.55)
-    dry_run       : True면 주문 직전까지만 진행하고 실제 API 호출 안 함
+    instrument   : 종목 (기본 ETH-USDT-PERPETUAL)
+    resolution   : 캔들 기간 (기본 30분)
+    poll_seconds : 루프 간격 (기본 5초)
+    dry_run      : True면 주문 직전까지만 진행하고 실제 API 호출 안 함
     """
 
     def __init__(
         self,
-        instrument:     str   = config.INSTRUMENT,
-        resolution:     str   = config.RESOLUTION,
-        sub_resolution: str   = config.SUB_RESOLUTION,
-        poll_seconds:   int   = 5,
-        min_confidence: float = 0.55,
-        dry_run:        bool  = False,
+        instrument:   str  = config.INSTRUMENT,
+        resolution:   str  = config.RESOLUTION,
+        poll_seconds: int  = 5,
+        dry_run:      bool = False,
     ):
-        self.instrument     = instrument
-        self.resolution     = resolution
-        self.sub_resolution = sub_resolution
-        self.poll_seconds   = poll_seconds
-        self.min_confidence = min_confidence
-        self.dry_run        = dry_run
+        self.instrument   = instrument
+        self.resolution   = resolution
+        self.poll_seconds = poll_seconds
+        self.dry_run      = dry_run
 
         self.client = OrangeXClient()
         self.hedge_mode: bool = False   # dual_side_position 여부 — _set_leverage에서 설정
@@ -73,9 +72,6 @@ class LiveTrader:
 
         # 현재 포지션 상태 (API에서 동기화)
         self.position: dict | None = None   # {"side", "size", "entry_price", "sl", "tp"}
-
-        # 모델 로드
-        self.model, self.scaler, self.feature_cols, self.label_map, self.label_map_inv = load_model()
 
         # 거래 기록
         self.trades: list[dict] = []
@@ -126,54 +122,59 @@ class LiveTrader:
         if not self.dry_run:
             self._sync_position()
 
-        # ③ SL / TP 점검
+        # ③ SL 점검
         if self.position:
             if self._check_sl_tp(price):
                 return   # 청산 완료 → 이번 스텝 종료
 
-        # ④ 캔들 데이터 조회 (매 루프마다 API 직접 호출)
-        df_main = fetch_ohlcv(self.instrument, self.resolution,     days=30,
-                              client=self.client, use_cache=False)
-        df_sub  = fetch_ohlcv(self.instrument, self.sub_resolution, days=14,
-                              client=self.client, use_cache=False)
-
-        if df_main is None or df_main.empty or len(df_main) < 60:
+        # ④ 30분봉 캔들 조회 (최근 7일 = ~336캔들)
+        df = fetch_ohlcv(self.instrument, self.resolution, days=7,
+                         client=self.client, use_cache=False)
+        if df is None or df.empty or len(df) < config.BB_PERIOD + 5:
             return
 
-        # ⑤ 피처 생성 & 신호 예측
-        # 현재가로 마지막 캔들 갱신 → conf가 매 틱마다 변동
-        df_main_live = df_main.copy()
-        last_idx = df_main_live.index[-1]
-        df_main_live.at[last_idx, 'close'] = price
-        if price > df_main_live.at[last_idx, 'high']:
-            df_main_live.at[last_idx, 'high'] = price
-        if price < df_main_live.at[last_idx, 'low']:
-            df_main_live.at[last_idx, 'low'] = price
+        # ⑤ 완성된 캔들만 사용 (마지막 캔들은 현재 형성 중)
+        df_complete = df.iloc[:-1]
 
-        if not df_sub.empty:
-            df_feat = build_multi_tf_features(df_main_live, df_sub)
-        else:
-            df_feat = add_all_indicators(df_main_live)
-            df_feat.dropna(inplace=True)
-
-        signal, conf, _ = predict_signal(
-            df_feat, self.model, self.scaler,
-            self.feature_cols, self.label_map_inv,
-            min_confidence=self.min_confidence,
-        )
-
-        # ⑥ 주문 실행
-        if self.position and conf <= config.EXIT_CONFIDENCE:
-            self._close_position(reason="low_confidence")
+        # ⑥ 볼린저 밴드 중심선 계산 (완성된 캔들 기준)
+        bb_mid_series = calc_bb_mid(df_complete["close"], period=config.BB_PERIOD)
+        curr_mid = bb_mid_series.iloc[-1]
+        if curr_mid != curr_mid:   # NaN 체크
             return
 
-        if signal == 0:
-            return
+        # ⑦ BB 중심선 기반 청산 점검 (현재가 vs 마지막 완성 캔들 중심선)
+        #    진입 직후 즉시 청산 방지: 최소 1캔들(30분) 경과 후부터 체크
+        if self.position:
+            entry_time = self.position.get("entry_time")
+            candle_seconds = int(self.resolution) * 60
+            age = (datetime.now(timezone.utc) - entry_time).total_seconds() if entry_time else 0
 
-        wanted_side = "long" if signal == 1 else "short"
+            if age >= candle_seconds:
+                pos_side = self.position["side"]
+                if pos_side == "long" and price < curr_mid:
+                    log.info("BB 청산 — 롱 중심선 하향 돌파 (가격=%.2f 중심선=%.2f)", price, curr_mid)
+                    self._close_position(reason="bb_exit")
+                    return
+                elif pos_side == "short" and price > curr_mid:
+                    log.info("BB 청산 — 숏 중심선 상향 돌파 (가격=%.2f 중심선=%.2f)", price, curr_mid)
+                    self._close_position(reason="bb_exit")
+                    return
 
-        if not self.position:
-            self._open_position(wanted_side, price)
+        # ⑧ BB 신호 생성 (완성된 캔들 기준)
+        signals = generate_bb_signals(df_complete,
+                                      period=config.BB_PERIOD,
+                                      std_mult=config.BB_STD_MULT)
+        signal = int(signals.iloc[-1])
+
+        log.info("[%s] 가격=%.2f  BB중심선=%.2f  신호=%+d  포지션=%s",
+                 datetime.now(timezone.utc).strftime("%H:%M"),
+                 price, curr_mid, signal,
+                 self.position["side"] if self.position else "flat")
+
+        # ⑨ 포지션 없을 때 진입
+        if not self.position and signal != 0:
+            side = "long" if signal == 1 else "short"
+            self._open_position(side, price)
 
     # ─── 주문 실행 ────────────────────────────────────────────────────────────
 

@@ -117,12 +117,16 @@ def run_backtest(
             state.tp_price    = tp_price
             state.capital    -= margin_used          # lock margin
 
-        # ── Signal flip: close existing, will open next bar ───────────────────
+        # ── BB 청산 신호(0) 또는 방향 전환 처리 ──────────────────────────────────
         elif state.position != "flat":
-            current_side = state.position
-            expected_side = "long" if signal == 1 else "short"
-            if signal != 0 and current_side != expected_side:
-                _close_position(state, ts, price, "signal", taker_fee)
+            if signal == 0:
+                # 중심선 돌파 청산 신호
+                _close_position(state, ts, price, "bb_exit", taker_fee)
+            else:
+                current_side  = state.position
+                expected_side = "long" if signal == 1 else "short"
+                if current_side != expected_side:
+                    _close_position(state, ts, price, "signal", taker_fee)
 
         state.equity_curve.append({"time": ts, "equity": _total_equity(state, price)})
 

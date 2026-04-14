@@ -22,91 +22,72 @@ def cmd_fetch(args):
     from api.data_fetcher import fetch_ohlcv
     from api.client import OrangeXClient
 
-    client = OrangeXClient() if config.API_KEY else None
+    client   = OrangeXClient() if config.API_KEY else None
+    end_date = args.end_date or config.TRAIN_END_DATE
 
-    for res in [args.resolution, args.sub_resolution]:
-        df = fetch_ohlcv(
-            instrument=args.instrument,
-            resolution=res,
-            days=args.days,
-            client=client,
-            use_cache=False,
-        )
-        if df.empty:
-            log.error("No data fetched for resolution=%s. Check API credentials.", res)
-        else:
-            log.info("Fetched %d bars for %s (%smin)", len(df), args.instrument, res)
+    df = fetch_ohlcv(
+        instrument=args.instrument,
+        resolution=args.resolution,
+        days=args.days,
+        client=client,
+        use_cache=False,
+        end_date=end_date,
+    )
+    if df.empty:
+        log.error("No data fetched for resolution=%s. Check API credentials.", args.resolution)
+    else:
+        log.info("Fetched %d bars for %s (%smin)  end=%s",
+                 len(df), args.instrument, args.resolution, end_date)
 
 
 def cmd_train(args):
     from api.data_fetcher import fetch_ohlcv
     from api.client import OrangeXClient
     from model.trainer import train
-    from features.multi_tf import build_multi_tf_features
 
-    client = OrangeXClient() if config.API_KEY else None
+    client   = OrangeXClient() if config.API_KEY else None
+    end_date = args.end_date or config.TRAIN_END_DATE
 
-    df_main = fetch_ohlcv(args.instrument, args.resolution,     args.days, client, use_cache=True)
-    df_sub  = fetch_ohlcv(args.instrument, args.sub_resolution, args.days, client, use_cache=True)
+    df_main = fetch_ohlcv(
+        args.instrument, args.resolution, args.days,
+        client, use_cache=True, end_date=end_date,
+    )
 
     if df_main.empty:
         log.error("No main timeframe data available.")
         return
 
-    if df_sub.empty:
-        log.warning("No sub timeframe data — training on main TF only.")
-        df_feat = df_main
-    else:
-        df_feat = build_multi_tf_features(df_main, df_sub)
-
-    log.info("Training on %d bars with %d features.", len(df_feat), df_feat.shape[1])
-    train(df_feat)
+    log.info("Training on %d bars  end=%s", len(df_main), end_date)
+    train(df_main)
 
 
 def cmd_backtest(args):
     from api.data_fetcher import fetch_ohlcv
     from api.client import OrangeXClient
-    from model.trainer import build_features_and_labels, load_model, predict_signal
-    from features.indicators import add_all_indicators
-    from features.multi_tf import build_multi_tf_features
+    from features.bb_signals import generate_bb_signals
     from backtest.engine import run_backtest, plot_results
 
-    client = OrangeXClient() if config.API_KEY else None
+    client   = OrangeXClient() if config.API_KEY else None
+    end_date = args.end_date or config.TRAIN_END_DATE
 
-    df_main = fetch_ohlcv(args.instrument, args.resolution,     args.days, client, use_cache=True)
-    df_sub  = fetch_ohlcv(args.instrument, args.sub_resolution, args.days, client, use_cache=True)
+    df_main = fetch_ohlcv(
+        args.instrument, args.resolution, args.days,
+        client, use_cache=True, end_date=end_date,
+    )
 
     if df_main.empty:
         log.error("No data for backtest.")
         return
 
-    if df_sub.empty:
-        df_feat = add_all_indicators(df_main.copy())
-        df_feat.dropna(inplace=True)
-    else:
-        df_feat = build_multi_tf_features(df_main, df_sub)
+    log.info("BB 신호 생성 중 (%d 캔들, 기간=%d) ...", len(df_main), config.BB_PERIOD)
+    signals = generate_bb_signals(df_main, period=config.BB_PERIOD, std_mult=config.BB_STD_MULT)
 
-    df = df_main  # price reference is always main TF
-
-    model, scaler, feature_cols, label_map, label_map_inv = load_model()
-
-    log.info("Generating signals for %d bars ...", len(df_feat))
-
-    X = scaler.transform(df_feat[feature_cols].values)
-    import numpy as np
-    import lightgbm as lgb
-    prob_long   = model.predict(X)                # shape (N,): prob of long
-    prob_short  = 1.0 - prob_long
-    confs       = np.maximum(prob_long, prob_short)
-    signals_raw = np.where(prob_long >= 0.5, 1, -1).astype(int)
-    signals_raw[confs < args.min_confidence] = 0  # below threshold → hold
-
-    signals = pd.Series(signals_raw, index=df_feat.index, name="signal")
-
-    log.info("Signal distribution: %s", dict(pd.Series(signals_raw).value_counts()))
+    dist = dict(signals.value_counts().sort_index())
+    log.info("신호 분포: 숏(%d)  플랫(%d)  롱(%d)",
+             dist.get(-1, 0), dist.get(0, 0), dist.get(1, 0))
 
     metrics = run_backtest(
-        df=df.loc[df_feat.index],
+        df=df_main,
         signals=signals,
         leverage=config.LEVERAGE,
         initial_capital=args.capital,
@@ -119,10 +100,9 @@ def cmd_backtest(args):
 def cmd_paper(args):
     from trading.paper_trader import PaperTrader
     trader = PaperTrader(
-        instrument    = args.instrument,
-        resolution    = args.resolution,
-        poll_seconds  = args.poll,
-        min_confidence= args.min_confidence,
+        instrument   = args.instrument,
+        resolution   = args.resolution,
+        poll_seconds = args.poll,
     )
     trader.run(duration_hours=args.hours)
 
@@ -169,36 +149,38 @@ def cmd_live(args):
         return
 
     trader = LiveTrader(
-        instrument     = args.instrument,
-        resolution     = args.resolution,
-        sub_resolution = args.sub_resolution,
-        poll_seconds   = args.poll,
-        min_confidence = args.min_confidence,
-        dry_run        = args.dry_run,
+        instrument   = args.instrument,
+        resolution   = args.resolution,
+        poll_seconds = args.poll,
+        dry_run      = args.dry_run,
     )
     trader.run(duration_hours=args.hours)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="OrangeX Auto-Trader")
+    parser = argparse.ArgumentParser(description="OrangeX Auto-Trader (BB 전략)")
     parser.add_argument("--mode", choices=["fetch", "train", "backtest", "paper", "live"],
                         default="backtest")
-    parser.add_argument("--instrument",       default=config.INSTRUMENT)
-    parser.add_argument("--resolution",      default=config.RESOLUTION)
-    parser.add_argument("--sub-resolution",  default=config.SUB_RESOLUTION,
-                        dest="sub_resolution")
-    parser.add_argument("--days",            type=int,   default=1000)
-    parser.add_argument("--capital",         type=float, default=config.INITIAL_CAPITAL)
-    parser.add_argument("--min-confidence",  type=float, default=0.7,
-                        dest="min_confidence")
-    parser.add_argument("--plot",            action="store_true", default=True)
-    parser.add_argument("--hours",           type=float, default=24,
-                        help="Duration for paper trading (hours)")
-    parser.add_argument("--poll",            type=int,   default=1,
-                        help="Poll interval for paper/live trading (seconds)")
-    parser.add_argument("--dry-run",         action="store_true", default=False,
+    parser.add_argument("--instrument",  default=config.INSTRUMENT)
+    parser.add_argument("--resolution",  default=config.RESOLUTION,
+                        help="캔들 기간 (기본 30분봉)")
+    parser.add_argument("--days",        type=int,   default=config.TRAIN_DAYS,
+                        help=f"조회 기간(일). 기본={config.TRAIN_DAYS} (10년)")
+    parser.add_argument("--end-date",    default=None,
+                        dest="end_date",
+                        help=f"데이터 종료 날짜 YYYY-MM-DD. 기본={config.TRAIN_END_DATE}")
+    parser.add_argument("--capital",     type=float, default=config.INITIAL_CAPITAL)
+    parser.add_argument("--plot",        action="store_true", default=True)
+    parser.add_argument("--hours",       type=float, default=24,
+                        help="모의/실매매 실행 시간 (hours)")
+    parser.add_argument("--poll",        type=int,   default=5,
+                        help="모의/실매매 폴링 간격 (seconds)")
+    parser.add_argument("--dry-run",     action="store_true", default=True,
                         dest="dry_run",
                         help="Live 모드에서 신호만 확인하고 실제 주문은 내지 않음")
+    # 하위 호환용
+    parser.add_argument("--sub-resolution", default=config.SUB_RESOLUTION,
+                        dest="sub_resolution")
     args = parser.parse_args()
 
     log.info("Mode: %s | Instrument: %s | Resolution: %s",

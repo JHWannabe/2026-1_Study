@@ -26,13 +26,21 @@ def fetch_ohlcv(
     days: int = 365,
     client: OrangeXClient = None,
     use_cache: bool = True,
+    end_date: str | None = None,   # "YYYY-MM-DD" 형식. None이면 현재 시각 사용
 ) -> pd.DataFrame:
     """
     Download OHLCV data and return a clean DataFrame.
 
     Columns: open, high, low, close, volume  (index = datetime UTC)
+
+    Parameters
+    ----------
+    end_date : 종료 날짜 ("YYYY-MM-DD"). None이면 현재 시각까지 조회.
+               예: "2025-12-31" → 2025-12-31 23:59:59 UTC 까지만 수집.
     """
-    cache_path = Path(config.DATA_DIR) / f"{instrument}_{resolution}_{days}d.csv"
+    # 캐시 파일명에 종료 날짜 포함 (날짜가 다를 때 재사용 방지)
+    date_tag   = f"_{end_date}" if end_date else ""
+    cache_path = Path(config.DATA_DIR) / f"{instrument}_{resolution}_{days}d{date_tag}.csv"
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
     if use_cache and cache_path.exists():
@@ -43,7 +51,12 @@ def fetch_ohlcv(
     if client is None:
         client = OrangeXClient()
 
-    end_ts   = int(time.time())
+    if end_date:
+        end_ts = int(pd.Timestamp(end_date, tz="UTC").replace(
+            hour=23, minute=59, second=59).timestamp())
+    else:
+        end_ts = int(time.time())
+
     start_ts = end_ts - days * 86400
 
     # OrangeX limits the number of candles per request; chunk if needed

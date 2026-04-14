@@ -18,8 +18,12 @@ WS_URL     = "wss://api.orangex.com/ws/api/v1"
 # ─── Trading Parameters ──────────────────────────────────────────────────────
 INSTRUMENT      = "ETH-USDT-PERPETUAL"   # default instrument
 LEVERAGE        = 35                     # 35x leverage
-RESOLUTION      = "5"                  # main candle: 5-minute
-SUB_RESOLUTION  = "15"                   # sub candle: 15-minute
+RESOLUTION      = "30"                   # main candle: 30-minute
+SUB_RESOLUTION  = "30"                   # sub candle (unused in BB strategy)
+
+# ─── Bollinger Band Parameters ────────────────────────────────────────────────
+BB_PERIOD   = 20     # 볼린저 밴드 기간 (20캔들 = 10시간 @ 30분봉)
+BB_STD_MULT = 2.0    # 표준편차 배수
 
 # ─── Model Parameters ────────────────────────────────────────────────────────
 LOOK_BACK          = 30          # number of candles for feature window
@@ -40,3 +44,7 @@ EXIT_CONFIDENCE    = 0.35        # close open positions when confidence is 0.35 
 # ─── Data ────────────────────────────────────────────────────────────────────
 DATA_DIR   = "data"
 MODEL_DIR  = "model/saved"
+
+# ─── 학습 데이터 범위 ──────────────────────────────────────────────────────────
+TRAIN_DAYS     = 3650          # 학습 기간: 10년 (365 * 10)
+TRAIN_END_DATE = "2025-12-31"  # 학습 데이터 종료일 (이후는 실제 미래)
