@@ -1,323 +1,287 @@
 """
-Multivariable Analysis Pipeline
-- 연속형 outcome  → 다변량 선형 회귀
-- 이진형 outcome  → 다변량 로지스틱 회귀
-- 변수 선택 전략  → Univariable screening (p < 0.05 또는 p < 0.1) → Multivariable
-- 의학 연구 표준 보고 형식 (Table 2 스타일) 출력
+multivariable_analysis.py - Part 3: Multivariable Analysis (Case 비교)
+
+3가지 feature set을 점진적으로 구축하여 AEC·모델명의 기여도 정량화.
+
+Case 1: [Sex, Age]
+Case 2: [Sex, Age, 선택 AEC features]
+Case 3: [Sex, Age, 선택 AEC features, ManufacturerModelName]
+
+각 Case마다:
+  - Linear OLS: R², Adj R², RMSE, AIC, BIC, F-test
+  - Logistic:   AUC (Bootstrap 95%CI), Nagelkerke R², HL-test, AIC, BIC
+
+결과 저장: results/multivariable_results.xlsx
+  - Sheet: 'Case_비교_요약'         ← 3 Case 핵심 지표 비교
+  - Sheet: 'Case1_linear_coef'     ← Case 1 선형 회귀 계수
+  - Sheet: 'Case1_logistic_coef'   ← Case 1 로지스틱 회귀 계수
+  - … Case2, Case3 동일 구조
+
+실행: python multivariable_analysis.py
 """
 
+import os
 import numpy as np
 import pandas as pd
-import scipy.stats as stats
 import statsmodels.api as sm
-from sklearn.metrics import roc_auc_score, brier_score_loss, confusion_matrix
-
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
+from scipy.stats import chi2
+from sklearn.metrics import roc_auc_score, mean_squared_error, mean_absolute_error
 import warnings
 warnings.filterwarnings('ignore')
 
+import config
+import data_loader
+from logistic_regression import (bootstrap_auc_ci, hosmer_lemeshow_test,
+                                  nagelkerke_r2, optimal_threshold_metrics)
 
-# ─────────────────────────────────────────────
-# 1. 데이터 로드 (입력 확정 후 수정)
-# ─────────────────────────────────────────────
-def load_data() -> tuple[pd.DataFrame, str, list[str], str]:
-    """
-    Returns
-    -------
-    df          : 전처리 완료된 DataFrame
-    outcome     : 종속변수 컬럼명
-    features    : 독립변수 컬럼명 리스트
-    outcome_type: "continuous" 또는 "binary"
-    """
-    # TODO: 실제 데이터 경로 및 컬럼명으로 교체
-    raise NotImplementedError("load_data()를 구현하세요.")
+os.makedirs(config.RESULTS_DIR, exist_ok=True)
 
 
-# ─────────────────────────────────────────────
-# 2. 변수 선택: Univariable Screening
-# ─────────────────────────────────────────────
-def univariable_screening(
-    df: pd.DataFrame,
-    outcome: str,
-    features: list[str],
-    outcome_type: str,
-    threshold: float = 0.05,
-) -> tuple[pd.DataFrame, list[str]]:
+# ─────────────────────────────────────────────────────────────────────────────
+# Case별 선형 회귀
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fit_linear_case(df: pd.DataFrame, feature_cols: list) -> tuple:
     """
-    단변량 분석 후 p < threshold 변수를 다변량 후보로 선택.
-    의학 연구에서는 threshold=0.1 또는 0.2 를 쓰기도 함.
+    지정 feature_cols로 OLS 실행.
+    반환: (statsmodels result, 계수 DataFrame, 요약 dict)
+    """
+    y   = df['TAMA'].values
+    X   = df[feature_cols].values.astype(float)
+    X_c = sm.add_constant(X, has_constant='add')
+    res = sm.OLS(y, X_c).fit()
+
+    # 계수 테이블
+    ci = res.conf_int()
+    param_names = ['Intercept'] + feature_cols
+    coef_rows = []
+    for i, name in enumerate(param_names):
+        coef_rows.append({
+            'Variable': name,
+            'β':        round(float(res.params[i]), 4),
+            'CI_Lower': round(float(ci[i, 0]), 4),
+            'CI_Upper': round(float(ci[i, 1]), 4),
+            'SE':       round(float(res.bse[i]), 4),
+            't_stat':   round(float(res.tvalues[i]), 4),
+            'p_value':  f"{res.pvalues[i]:.4e}",
+        })
+    coef_df = pd.DataFrame(coef_rows)
+
+    y_pred = res.predict(X_c)
+    rmse   = float(np.sqrt(mean_squared_error(y, y_pred)))
+    mae    = float(mean_absolute_error(y, y_pred))
+
+    summary = {
+        'N':        len(y),
+        'R2':       round(res.rsquared,     4),
+        'Adj_R2':   round(res.rsquared_adj, 4),
+        'F_stat':   round(res.fvalue,       4),
+        'F_pvalue': f"{res.f_pvalue:.4e}",
+        'RMSE':     round(rmse, 4),
+        'MAE':      round(mae,  4),
+        'AIC':      round(res.aic, 2),
+        'BIC':      round(res.bic, 2),
+    }
+    return res, coef_df, summary
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case별 로지스틱 회귀
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fit_logistic_case(df: pd.DataFrame, feature_cols: list) -> tuple:
+    """
+    지정 feature_cols로 Logit 실행.
+    반환: (statsmodels result, 계수 DataFrame, 요약 dict)
+    """
+    y   = df['TAMA_binary'].values
+    n   = len(y)
+    X   = df[feature_cols].values.astype(float)
+    X_c = sm.add_constant(X, has_constant='add')
+    res = sm.Logit(y, X_c).fit(disp=False, method='bfgs', maxiter=1000)
+
+    # 계수 테이블
+    ci_log = res.conf_int()
+    ci_exp = np.exp(ci_log)
+    param_names = ['Intercept'] + feature_cols
+    coef_rows = []
+    for i, name in enumerate(param_names):
+        coef_rows.append({
+            'Variable': name,
+            'log_OR':   round(float(res.params[i]), 4),
+            'OR':       round(float(np.exp(res.params[i])), 4),
+            'CI_Lower': round(float(ci_exp[i, 0]), 4),
+            'CI_Upper': round(float(ci_exp[i, 1]), 4),
+            'SE':       round(float(res.bse[i]), 4),
+            'z_stat':   round(float(res.tvalues[i]), 4),
+            'p_value':  f"{res.pvalues[i]:.4e}",
+        })
+    coef_df = pd.DataFrame(coef_rows)
+
+    y_prob = res.predict(X_c)
+
+    auc_mean, auc_lo, auc_hi = bootstrap_auc_ci(y, y_prob)
+    hl_stat, hl_p            = hosmer_lemeshow_test(y, y_prob)
+
+    res_null = sm.Logit(y, np.ones((n, 1))).fit(disp=False)
+    nag_r2   = nagelkerke_r2(res.llf, res_null.llf, n)
+    brier    = float(np.mean((y_prob - y) ** 2))
+
+    summary = {
+        'N':              n,
+        'N_events':       int(y.sum()),
+        'AUC':            round(auc_mean, 4),
+        'AUC_CI_lower':   round(auc_lo,   4),
+        'AUC_CI_upper':   round(auc_hi,   4),
+        'HL_stat':        hl_stat,
+        'HL_p':           f"{hl_p:.4e}",
+        'HL_result':      '보정 양호' if hl_p > 0.05 else '보정 불량',
+        'Nagelkerke_R2':  nag_r2,
+        'Brier_score':    round(brier, 4),
+        'AIC':            round(res.aic, 2),
+        'BIC':            round(res.bic, 2),
+        'converged':      res.mle_retvals.get('converged', True),
+    }
+    return res, coef_df, summary
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 비교 요약 테이블 생성
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_comparison_table(lin_summaries: list, log_summaries: list) -> pd.DataFrame:
+    """
+    Case 1·2·3의 선형/로지스틱 요약을 하나의 비교 테이블로 통합.
     """
     rows = []
-    y = df[outcome]
 
-    for feat in features:
-        X = sm.add_constant(df[feat])
+    linear_metrics = [
+        ('선형 회귀',           None,         None),
+        ('N',                  'N',           '총 환자 수'),
+        ('R²',                 'R2',          'TAMA 분산 설명 비율'),
+        ('Adjusted R²',        'Adj_R2',      '변수 수 페널티 적용 R²'),
+        ('F p-value',          'F_pvalue',    '전체 모델 유의성'),
+        ('RMSE (cm²)',         'RMSE',        '예측 오차'),
+        ('MAE (cm²)',          'MAE',         '평균 절대 오차'),
+        ('AIC',                'AIC',         '모델 복잡도 대비 적합도'),
+        ('BIC',                'BIC',         '강화 복잡도 페널티'),
+    ]
+    logistic_metrics = [
+        ('로지스틱 회귀',        None,          None),
+        ('N',                  'N',           '총 환자 수'),
+        ('양성 수 (events)',    'N_events',    'low TAMA 환자 수'),
+        ('AUC',                'AUC',         '판별 능력 (0.5~1)'),
+        ('AUC CI Lower',       'AUC_CI_lower','Bootstrap 95%CI 하한'),
+        ('AUC CI Upper',       'AUC_CI_upper','Bootstrap 95%CI 상한'),
+        ('HL p-value',         'HL_p',        '보정도 (p>0.05 양호)'),
+        ('HL 결과',             'HL_result',   ''),
+        ('Nagelkerke R²',      'Nagelkerke_R2','로지스틱 설명력'),
+        ('Brier Score',        'Brier_score', '확률 예측 정밀도'),
+        ('AIC',                'AIC',         '모델 복잡도 대비 적합도'),
+        ('BIC',                'BIC',         '강화 복잡도 페널티'),
+    ]
 
-        if outcome_type == "binary":
-            model = sm.Logit(y, X).fit(disp=False)
-            coef  = model.params[feat]
-            p_val = model.pvalues[feat]
-            ci    = model.conf_int().loc[feat]
-            stat  = {"effect": np.exp(coef), "effect_name": "OR",
-                     "ci_lo": np.exp(ci[0]), "ci_hi": np.exp(ci[1])}
+    for label, key, note in linear_metrics:
+        if key is None:
+            rows.append({'지표': f'── {label} ──', 'Case_1': '', 'Case_2': '', 'Case_3': '', '근거': ''})
         else:
-            model = sm.OLS(y, X).fit()
-            coef  = model.params[feat]
-            p_val = model.pvalues[feat]
-            ci    = model.conf_int().loc[feat]
-            stat  = {"effect": coef, "effect_name": "β",
-                     "ci_lo": ci[0], "ci_hi": ci[1]}
+            rows.append({
+                '지표':   label,
+                'Case_1': lin_summaries[0].get(key, ''),
+                'Case_2': lin_summaries[1].get(key, ''),
+                'Case_3': lin_summaries[2].get(key, ''),
+                '근거':   note,
+            })
 
-        rows.append({
-            "Variable":      feat,
-            stat["effect_name"]: round(stat["effect"], 4),
-            "95% CI":        f"{stat['ci_lo']:.3f} – {stat['ci_hi']:.3f}",
-            "P-value":       round(p_val, 4),
-            "Selected":      "✓" if p_val < threshold else "",
-        })
+    for label, key, note in logistic_metrics:
+        if key is None:
+            rows.append({'지표': f'── {label} ──', 'Case_1': '', 'Case_2': '', 'Case_3': '', '근거': ''})
+        else:
+            rows.append({
+                '지표':   label,
+                'Case_1': log_summaries[0].get(key, ''),
+                'Case_2': log_summaries[1].get(key, ''),
+                'Case_3': log_summaries[2].get(key, ''),
+                '근거':   note,
+            })
 
-    result_df = pd.DataFrame(rows).sort_values("P-value")
-    selected  = result_df.loc[result_df["Selected"] == "✓", "Variable"].tolist()
-    return result_df, selected
-
-
-# ─────────────────────────────────────────────
-# 3. 다변량 분석 (공통 인터페이스)
-# ─────────────────────────────────────────────
-def multivariable_analysis(
-    df: pd.DataFrame,
-    outcome: str,
-    features: list[str],
-    outcome_type: str,
-) -> dict:
-    y = df[outcome]
-    X = sm.add_constant(df[features])
-
-    if outcome_type == "binary":
-        model = sm.Logit(y, X).fit(disp=False)
-    else:
-        model = sm.OLS(y, X).fit()
-
-    coefs = model.params.drop("const", errors="ignore")
-    ci    = model.conf_int().drop("const", errors="ignore")
-    pvals = model.pvalues.drop("const", errors="ignore")
-
-    if outcome_type == "binary":
-        effect      = np.exp(coefs)
-        effect_lo   = np.exp(ci[0])
-        effect_hi   = np.exp(ci[1])
-        effect_name = "Odds Ratio"
-    else:
-        effect      = coefs
-        effect_lo   = ci[0]
-        effect_hi   = ci[1]
-        effect_name = "Coefficient (β)"
-
-    coef_table = pd.DataFrame({
-        effect_name:    effect,
-        "95% CI Lower": effect_lo,
-        "95% CI Upper": effect_hi,
-        "P-value":      pvals,
-    }).round(4)
-
-    metrics = _compute_metrics(model, y, X, outcome_type)
-
-    return {
-        "model":        model,
-        "coef_table":   coef_table,
-        "metrics":      metrics,
-        "outcome_type": outcome_type,
-        "y_true":       y,
-        "y_prob":       model.predict(X) if outcome_type == "binary" else None,
-        "y_fitted":     model.fittedvalues,
-    }
+    return pd.DataFrame(rows)
 
 
-def _compute_metrics(model, y, X, outcome_type: str) -> dict:
-    metrics: dict = {"N": len(y), "AIC": round(model.aic, 4), "BIC": round(model.bic, 4)}
+# ─────────────────────────────────────────────────────────────────────────────
+# 메인
+# ─────────────────────────────────────────────────────────────────────────────
 
-    if outcome_type == "continuous":
-        residuals = model.resid
-        metrics.update({
-            "R²":          round(model.rsquared, 4),
-            "Adjusted R²": round(model.rsquared_adj, 4),
-            "F-statistic": round(model.fvalue, 4),
-            "F p-value":   round(model.f_pvalue, 4),
-            "RMSE":        round(np.sqrt(np.mean(residuals**2)), 4),
-            "MAE":         round(np.mean(np.abs(residuals)), 4),
-        })
-    else:
-        y_prob = model.predict(X)
-        y_pred = (y_prob >= 0.5).astype(int)
-        auc    = roc_auc_score(y, y_prob)
-        brier  = brier_score_loss(y, y_prob)
-        tn, fp, fn, tp = confusion_matrix(y, y_pred).ravel()
-        sensitivity = tp / (tp + fn) if (tp + fn) > 0 else np.nan
-        specificity = tn / (tn + fp) if (tn + fp) > 0 else np.nan
-        ppv = tp / (tp + fp) if (tp + fp) > 0 else np.nan
-        npv = tn / (tn + fn) if (tn + fn) > 0 else np.nan
+def main():
+    print("=" * 60)
+    print("  Part 3 - Multivariable Analysis (Case 1·2·3 비교)")
+    print("=" * 60)
+    print(f"\n  Case 1: [Sex, Age]")
+    print(f"  Case 2: [Sex, Age, AEC: {config.SELECTED_AEC_FEATURES}]")
+    print(f"  Case 3: [Sex, Age, AEC, ManufacturerModelName]")
+    print(f"\n  임계값: M < {config.TAMA_THRESHOLD_MALE} cm², "
+          f"F < {config.TAMA_THRESHOLD_FEMALE} cm²")
 
-        hl_stat, hl_p = _hosmer_lemeshow(y.values, y_prob.values)
-        nagelkerke    = _nagelkerke_r2(model, len(y))
+    print("\n[데이터 준비]")
+    # 로지스틱용 (TAMA_binary 포함)
+    df_log = data_loader.prepare_full(mode='logistic')
+    # 선형용 (동일 DataFrame, mode='linear' 결과와 동일)
+    df_lin = df_log.copy()   # TAMA_binary 컬럼 존재해도 선형 회귀에서 사용 안 함
 
-        metrics.update({
-            "Events (outcome=1)":  int(y.sum()),
-            "AUC-ROC":             round(auc, 4),
-            "Brier Score":         round(brier, 4),
-            "Sensitivity":         round(sensitivity, 4),
-            "Specificity":         round(specificity, 4),
-            "PPV":                 round(ppv, 4),
-            "NPV":                 round(npv, 4),
-            "Nagelkerke R²":       round(nagelkerke, 4),
-            "Hosmer-Lemeshow χ²":  round(hl_stat, 4),
-            "Hosmer-Lemeshow p":   round(hl_p, 4),
-        })
+    lin_summaries = []
+    log_summaries = []
+    lin_coef_dfs  = {}
+    log_coef_dfs  = {}
 
-    return metrics
+    for case in [1, 2, 3]:
+        feat_cols = data_loader.get_feature_cols(case, df_lin)
+        print(f"\n── Case {case} ({'  '.join(feat_cols[:4])}{'...' if len(feat_cols) > 4 else ''}) ──")
 
+        # 선형 회귀
+        _, lin_coef, lin_sum = fit_linear_case(df_lin, feat_cols)
+        lin_summaries.append(lin_sum)
+        lin_coef_dfs[case] = lin_coef
+        print(f"  [Linear ] R²={lin_sum['R2']}, Adj R²={lin_sum['Adj_R2']}, "
+              f"RMSE={lin_sum['RMSE']}, AIC={lin_sum['AIC']}")
 
-def _hosmer_lemeshow(y_true: np.ndarray, y_prob: np.ndarray, g: int = 10):
-    df_hl = pd.DataFrame({"y": y_true, "prob": y_prob})
-    df_hl["decile"] = pd.qcut(df_hl["prob"], q=g, duplicates="drop", labels=False)
-    obs_list, exp_list = [], []
-    for _, grp in df_hl.groupby("decile"):
-        obs_list.append([grp["y"].sum(), len(grp) - grp["y"].sum()])
-        exp_list.append([grp["prob"].sum(), len(grp) - grp["prob"].sum()])
-    obs, exp = np.array(obs_list), np.array(exp_list)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        chi2 = np.nansum((obs - exp) ** 2 / np.where(exp == 0, np.nan, exp))
-    return chi2, 1 - stats.chi2.cdf(chi2, df=g - 2)
+        # 로지스틱 회귀
+        _, log_coef, log_sum = fit_logistic_case(df_log, feat_cols)
+        log_summaries.append(log_sum)
+        log_coef_dfs[case] = log_coef
+        print(f"  [Logistic] AUC={log_sum['AUC']} "
+              f"[{log_sum['AUC_CI_lower']}–{log_sum['AUC_CI_upper']}], "
+              f"Nagelkerke R²={log_sum['Nagelkerke_R2']}, "
+              f"HL p={log_sum['HL_p']}, {log_sum['HL_result']}")
+        if not log_sum.get('converged', True):
+            print(f"  ⚠ Case {case} 로지스틱 수렴 실패 주의")
 
+    # ── 비교 요약 ────────────────────────────────────────────────────────────
+    print("\n[Case 비교 요약]")
+    comp_df = build_comparison_table(lin_summaries, log_summaries)
+    print(comp_df.to_string(index=False))
 
-def _nagelkerke_r2(model, n: int) -> float:
-    r2_cs = 1 - np.exp((2 / n) * (model.llnull - model.llf))
-    r2_max = 1 - np.exp((2 / n) * model.llnull)
-    return r2_cs / r2_max if r2_max != 0 else np.nan
+    # ── 저장 ────────────────────────────────────────────────────────────────
+    out_path = os.path.join(config.RESULTS_DIR, 'multivariable_results.xlsx')
+    with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
+        comp_df.to_excel(writer, sheet_name='Case_비교_요약', index=False)
 
+        for case in [1, 2, 3]:
+            lin_coef_dfs[case].to_excel(
+                writer, sheet_name=f'Case{case}_linear_coef', index=False)
+            log_coef_dfs[case].to_excel(
+                writer, sheet_name=f'Case{case}_logistic_coef', index=False)
 
-# ─────────────────────────────────────────────
-# 4. 의학 논문 Table 스타일 출력
-# ─────────────────────────────────────────────
-def build_paper_table(uni_df: pd.DataFrame, multi_result: dict, outcome_type: str) -> pd.DataFrame:
-    """
-    Univariable + Multivariable 결과를 하나의 테이블로 병합.
-    의학 저널 Table 2 형식.
-    """
-    effect_col = "OR" if outcome_type == "binary" else "β"
-    ct = multi_result["coef_table"].copy()
-    col_effect = "Odds Ratio" if outcome_type == "binary" else "Coefficient (β)"
+            # 각 Case 요약도 저장
+            lin_sum_df = pd.DataFrame(
+                list(lin_summaries[case - 1].items()), columns=['항목', '값'])
+            log_sum_df = pd.DataFrame(
+                list(log_summaries[case - 1].items()), columns=['항목', '값'])
+            lin_sum_df.to_excel(writer, sheet_name=f'Case{case}_linear_summary',   index=False)
+            log_sum_df.to_excel(writer, sheet_name=f'Case{case}_logistic_summary', index=False)
 
-    # Multivariable 컬럼 이름 정리
-    ct = ct.rename(columns={
-        col_effect:      f"Multi {effect_col}",
-        "95% CI Lower":  "Multi CI Lo",
-        "95% CI Upper":  "Multi CI Hi",
-        "P-value":       "Multi P",
-    })
-    ct["Multi 95% CI"] = ct.apply(
-        lambda r: f"{r['Multi CI Lo']:.3f} – {r['Multi CI Hi']:.3f}", axis=1
-    )
-
-    # Univariable 컬럼 정리
-    uni = uni_df[["Variable", effect_col, "95% CI", "P-value"]].rename(columns={
-        effect_col:  f"Uni {effect_col}",
-        "95% CI":    "Uni 95% CI",
-        "P-value":   "Uni P",
-    }).set_index("Variable")
-
-    table = uni.join(
-        ct[[f"Multi {effect_col}", "Multi 95% CI", "Multi P"]],
-        how="left"
-    ).reset_index()
-
-    return table
+    print(f"\n[저장] {out_path}")
+    print("=" * 60)
 
 
-# ─────────────────────────────────────────────
-# 5. 시각화
-# ─────────────────────────────────────────────
-def plot_forest(coef_table: pd.DataFrame, outcome_type: str, save_path: str = None):
-    """Forest plot (OR or β with 95% CI)"""
-    col_effect = "Odds Ratio" if outcome_type == "binary" else "Coefficient (β)"
-    ref_line   = 1.0 if outcome_type == "binary" else 0.0
-
-    vars_  = coef_table.index.tolist()
-    effects = coef_table[col_effect].values
-    lo      = coef_table["95% CI Lower"].values
-    hi      = coef_table["95% CI Upper"].values
-    pvals   = coef_table["P-value"].values
-
-    y_pos = np.arange(len(vars_))
-    colors = ["#c0392b" if p < 0.05 else "#2980b9" for p in pvals]
-
-    fig, ax = plt.subplots(figsize=(8, max(4, len(vars_) * 0.55)))
-    for i, (eff, l, h, c) in enumerate(zip(effects, lo, hi, colors)):
-        ax.plot([l, h], [i, i], color=c, lw=1.5)
-        ax.plot(eff, i, 'o', color=c, ms=7)
-
-    ax.axvline(ref_line, color='gray', linestyle='--', lw=1)
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(vars_)
-    ax.set_xlabel(col_effect)
-    ax.set_title("Forest Plot — Multivariable Analysis\n(red: p < 0.05, blue: p ≥ 0.05)")
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
-
-
-# ─────────────────────────────────────────────
-# 6. 결과 출력
-# ─────────────────────────────────────────────
-def print_results(uni_df: pd.DataFrame, multi_result: dict, paper_table: pd.DataFrame):
-    print("=" * 70)
-    print("[ Step 1: Univariable Screening ]")
-    print("=" * 70)
-    print(uni_df.to_string(index=False))
-
-    print("\n" + "=" * 70)
-    print("[ Step 2: Multivariable Analysis — Model Metrics ]")
-    print("=" * 70)
-    for k, v in multi_result["metrics"].items():
-        print(f"  {k:<30}: {v}")
-
-    print("\n[ Step 2: Multivariable Analysis — Effect Estimates ]")
-    print(multi_result["coef_table"].to_string())
-
-    print("\n" + "=" * 70)
-    print("[ Combined Table (Paper Format) ]")
-    print("=" * 70)
-    print(paper_table.to_string(index=False))
-
-
-# ─────────────────────────────────────────────
-# 7. 실행 진입점
-# ─────────────────────────────────────────────
-if __name__ == "__main__":
-    df, outcome, features, outcome_type = load_data()
-
-    # Step 1: Univariable screening
-    uni_df, selected_features = univariable_screening(
-        df, outcome, features, outcome_type, threshold=0.05
-    )
-
-    if not selected_features:
-        print("p < 0.05 변수가 없습니다. threshold를 0.1 또는 0.2로 조정하세요.")
-        selected_features = features  # fallback: 전체 변수 투입
-
-    # Step 2: Multivariable analysis
-    multi_result = multivariable_analysis(df, outcome, selected_features, outcome_type)
-
-    # 논문 형식 테이블
-    paper_table = build_paper_table(uni_df, multi_result, outcome_type)
-
-    # 출력
-    print_results(uni_df, multi_result, paper_table)
-
-    # 시각화
-    plot_forest(multi_result["coef_table"], outcome_type, save_path="forest_plot.png")
-
-    # 저장
-    paper_table.to_csv("multivariable_paper_table.csv", index=False)
-    multi_result["coef_table"].to_csv("multivariable_coef.csv")
+if __name__ == '__main__':
+    main()
