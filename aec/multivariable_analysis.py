@@ -5,7 +5,7 @@ multivariable_analysis.py - Part 3: Multivariable Analysis (Case 비교)
 
 Case 1: [Sex, Age]
 Case 2: [Sex, Age, 선택 AEC features]
-Case 3: [Sex, Age, 선택 AEC features, ManufacturerModelName]
+Case 3: [Sex, Age, 선택 AEC features, KVP, ManufacturerModelName]
 
 각 Case마다:
   - Linear OLS: R², Adj R², RMSE, AIC, BIC, F-test
@@ -218,7 +218,7 @@ def main():
     print("=" * 60)
     print(f"\n  Case 1: [Sex, Age]")
     print(f"  Case 2: [Sex, Age, AEC: {config.SELECTED_AEC_FEATURES}]")
-    print(f"  Case 3: [Sex, Age, AEC, ManufacturerModelName]")
+    print(f"  Case 3: [Sex, Age, AEC, KVP, ManufacturerModelName]")
     print(f"\n  임계값: M < {config.TAMA_THRESHOLD_MALE} cm², "
           f"F < {config.TAMA_THRESHOLD_FEMALE} cm²")
 

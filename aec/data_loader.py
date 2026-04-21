@@ -132,6 +132,21 @@ def prepare_full(mode: str = 'linear') -> pd.DataFrame:
     # AEC features 표준화
     df, _ = standardize_cols(df, config.SELECTED_AEC_FEATURES)
 
+    # KVP 표준화 (Case 3용)
+    if 'KVP' in df.columns:
+        n_before = len(df)
+        df = df.dropna(subset=['KVP'])
+        if len(df) < n_before:
+            print(f"  [load] KVP 결측 제거: {n_before - len(df)}건")
+        df, _ = standardize_cols(df, ['KVP'])
+        df = df.rename(columns={'KVP_z': 'kvp_z'})
+    elif 'kvp' in df.columns:
+        n_before = len(df)
+        df = df.dropna(subset=['kvp'])
+        if len(df) < n_before:
+            print(f"  [load] kvp 결측 제거: {n_before - len(df)}건")
+        df, _ = standardize_cols(df, ['kvp'])
+
     # ManufacturerModelName 더미 변수
     df = add_model_dummies(df)
 
@@ -151,18 +166,22 @@ def get_feature_cols(case: int, df: pd.DataFrame) -> list:
 
     Case 1: [Sex, Age_z]
     Case 2: [Sex, Age_z] + 선택 AEC features (표준화)
-    Case 3: [Sex, Age_z] + 선택 AEC features + ManufacturerModelName 더미
+    Case 3: [Sex, Age_z] + 선택 AEC features + KVP + ManufacturerModelName 더미
     """
     base  = ['Sex', 'Age_z']
     aec   = [f + '_z' for f in config.SELECTED_AEC_FEATURES]
     model = sorted([c for c in df.columns if c.startswith('Model_')])
+
+    kvp_col = []
+    if 'kvp_z' in df.columns:
+        kvp_col = ['kvp_z']
 
     if case == 1:
         return base
     elif case == 2:
         return base + aec
     elif case == 3:
-        return base + aec + model
+        return base + aec + kvp_col + model
     else:
         raise ValueError(f"Case는 1, 2, 3 중 하나여야 합니다 (입력값: {case})")
 
@@ -193,6 +212,15 @@ def prepare_cv_fold(df_raw: pd.DataFrame,
     aec = config.SELECTED_AEC_FEATURES
     df_tr, sc_aec = standardize_cols(df_tr, aec)
     df_te, _      = standardize_cols(df_te, aec, scaler=sc_aec)
+
+    # KVP 표준화 (Case 3용)
+    kvp_raw = 'KVP' if 'KVP' in df_tr.columns else ('kvp' if 'kvp' in df_tr.columns else None)
+    if kvp_raw:
+        df_tr, sc_kvp = standardize_cols(df_tr, [kvp_raw])
+        df_te, _      = standardize_cols(df_te, [kvp_raw], scaler=sc_kvp)
+        if kvp_raw == 'KVP':
+            df_tr = df_tr.rename(columns={'KVP_z': 'kvp_z'})
+            df_te = df_te.rename(columns={'KVP_z': 'kvp_z'})
 
     # ManufacturerModelName 더미 (전체 데이터셋 기준 카테고리 유지)
     df_tr = add_model_dummies(df_tr)

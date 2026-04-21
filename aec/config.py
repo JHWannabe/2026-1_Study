@@ -8,8 +8,9 @@ import pandas as pd
 
 # ── 데이터 경로 ───────────────────────────────────────────────────────────────
 SITE = "신촌"
-EXCEL_PATH  = rf"C:\Users\jhjun\OneDrive\Desktop\aec\{SITE}_merged_features.xlsx"
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(EXCEL_PATH)), f"results/{SITE}")
+EXCEL_PATH  = f"{SITE}_merged_features.xlsx"
+
+RESULTS_DIR = f"results/{SITE}"
 
 # ── Logistic regression: 성별 특이적 TAMA 이진화 임계값 ────────────────────────
 # TAMA < 임계값 → low muscle (label=1), 이상 → normal (label=0)
