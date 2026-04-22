@@ -4,13 +4,16 @@ TAMA 예측 회귀분석 연구 (강남 데이터셋)
 """
 
 import os
+from pathlib import Path
 import pandas as pd
 
 # ── 데이터 경로 ───────────────────────────────────────────────────────────────
-SITE = "신촌"
-EXCEL_PATH  = f"{SITE}_merged_features.xlsx"
+_ROOT = Path(__file__).parent.parent   # aec/ 루트
 
-RESULTS_DIR = f"results/{SITE}"
+SITE = "신촌"
+EXCEL_PATH  = str(_ROOT / "data" / f"{SITE}_merged_features.xlsx")
+
+RESULTS_DIR = str(_ROOT / "results" / SITE)
 
 # ── Logistic regression: 성별 특이적 TAMA 이진화 임계값 ────────────────────────
 # TAMA < 임계값 → low muscle (label=1), 이상 → normal (label=0)

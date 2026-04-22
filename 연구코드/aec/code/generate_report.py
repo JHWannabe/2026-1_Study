@@ -18,13 +18,13 @@ import statsmodels.api as sm
 import warnings
 warnings.filterwarnings('ignore')
 
-import code.config as config
-import code.data_loader as data_loader
-from code.logistic_regression import (bootstrap_auc_ci, hosmer_lemeshow_test,
+import config as config
+import data_loader as data_loader
+from logistic_regression import (bootstrap_auc_ci, hosmer_lemeshow_test,
                                   nagelkerke_r2, optimal_threshold_metrics)
-from code.linear_regression   import run_univariate as lin_uni, residual_diagnostics
-from code.logistic_regression  import run_univariate as log_uni
-from code.multivariable_analysis import fit_linear_case, fit_logistic_case
+from linear_regression   import run_univariate as lin_uni, residual_diagnostics
+from logistic_regression  import run_univariate as log_uni
+from multivariable_analysis import fit_linear_case, fit_logistic_case
 import pandas as pd
 
 

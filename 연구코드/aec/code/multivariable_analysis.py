@@ -29,9 +29,9 @@ from sklearn.metrics import roc_auc_score, mean_squared_error, mean_absolute_err
 import warnings
 warnings.filterwarnings('ignore')
 
-import code.config as config
-import code.data_loader as data_loader
-from code.logistic_regression import (bootstrap_auc_ci, hosmer_lemeshow_test,
+import config as config
+import data_loader as data_loader
+from logistic_regression import (bootstrap_auc_ci, hosmer_lemeshow_test,
                                   nagelkerke_r2, optimal_threshold_metrics)
 
 os.makedirs(config.RESULTS_DIR, exist_ok=True)

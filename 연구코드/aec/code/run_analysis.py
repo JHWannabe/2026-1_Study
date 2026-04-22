@@ -27,7 +27,7 @@ import os
 import time
 import traceback
 
-import code.config as config
+import config as config
 
 SKIP_FEATURE_SELECTION = '--skip-fs' in sys.argv
 
@@ -65,7 +65,7 @@ def main():
 
     # Step 1: Feature Selection
     if not SKIP_FEATURE_SELECTION:
-        import code.feature_selection as feature_selection
+        import feature_selection
         ok = run_step("Step 1 - Feature Selection (AEC 상관분석)", feature_selection.main)
         results['feature_selection'] = ok
         if ok:
@@ -77,27 +77,27 @@ def main():
         print("\n  [Step 1 건너뜀: --skip-fs 옵션 사용]")
 
     # Step 2: Linear Regression
-    import code.linear_regression as linear_regression
+    import linear_regression
     ok = run_step("Step 2 - Part 1: 선형 회귀 (Linear Regression)", linear_regression.main)
     results['linear'] = ok
 
     # Step 3: Logistic Regression
-    import code.logistic_regression as logistic_regression
+    import logistic_regression
     ok = run_step("Step 3 - Part 2: 로지스틱 회귀 (Logistic Regression)", logistic_regression.main)
     results['logistic'] = ok
 
     # Step 4: Multivariable Analysis
-    import code.multivariable_analysis as multivariable_analysis
+    import multivariable_analysis
     ok = run_step("Step 4 - Part 3: Multivariable Analysis (Case 1·2·3)", multivariable_analysis.main)
     results['multivariable'] = ok
 
     # Step 5: Generate Plots
-    import code.generate_plots as generate_plots
+    import generate_plots
     ok = run_step("Step 5 - 시각화 생성 (15개 그래프)", generate_plots.main)
     results['plots'] = ok
 
     # Step 6: Generate Report
-    import code.generate_report as generate_report
+    import generate_report
     ok = run_step("Step 6 - Markdown 연구 보고서 생성", generate_report.generate_report)
     results['report'] = ok
 

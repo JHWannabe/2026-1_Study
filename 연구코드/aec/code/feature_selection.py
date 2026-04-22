@@ -19,8 +19,8 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 import warnings
 warnings.filterwarnings('ignore')
 
-import code.config as config
-import code.data_loader as data_loader
+import config as config
+import data_loader as data_loader
 
 os.makedirs(config.RESULTS_DIR, exist_ok=True)
 

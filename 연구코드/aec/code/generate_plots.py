@@ -44,16 +44,17 @@ from scipy.stats import chi2
 from sklearn.metrics import roc_auc_score, roc_curve, confusion_matrix
 import statsmodels.api as sm
 
-import code.config as config
-import code.data_loader as data_loader
-from code.logistic_regression import (bootstrap_auc_ci, hosmer_lemeshow_test,
+import config as config
+import data_loader as data_loader
+from logistic_regression import (bootstrap_auc_ci, hosmer_lemeshow_test,
                                   nagelkerke_r2, optimal_threshold_metrics)
-from code.feature_selection import compute_correlations, AEC_FEATURE_COLS
+from feature_selection import compute_correlations, AEC_FEATURE_COLS
 
 # ── 한글 폰트 설정 ─────────────────────────────────────────────────────────────
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['Malgun Gothic', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams['mathtext.fontset'] = 'cm'
 plt.rcParams['figure.dpi'] = 150
 
 DPI      = 300
@@ -677,16 +678,16 @@ def main():
     })
 
     # 로지스틱 단변량 (forest plot용)
-    from code.logistic_regression import run_univariate as log_uni
+    from logistic_regression import run_univariate as log_uni
     uni_log_df = log_uni(df_log)
 
     # 선형 단변량 (R² bar용)
-    from code.linear_regression import run_univariate as lin_uni
+    from linear_regression import run_univariate as lin_uni
     uni_lin_df = lin_uni(df_lin)
 
     # Multivariable Analysis 재계산 (summary용)
     print("\n[Multivariable Case 결과 재계산]")
-    from code.multivariable_analysis import fit_linear_case, fit_logistic_case
+    from multivariable_analysis import fit_linear_case, fit_logistic_case
     lin_sums, log_sums = [], []
     for case in [1, 2, 3]:
         feat_cols = data_loader.get_feature_cols(case, df_lin)

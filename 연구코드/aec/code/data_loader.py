@@ -6,7 +6,7 @@ data_loader.py - 데이터 로드·전처리 공통 유틸리티
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-import code.config as config
+import config as config
 
 
 # ─────────────────────────────────────────────────────────────────────────────
