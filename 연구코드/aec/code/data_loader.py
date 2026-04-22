@@ -13,15 +13,23 @@ import config as config
 # 1. 원시 데이터 로드
 # ─────────────────────────────────────────────────────────────────────────────
 
-def load_raw_data() -> pd.DataFrame:
+def load_raw_data() -> tuple:
     """
     'metadata' + 'features' 시트를 PatientID 기준으로 병합.
     - 중복 PatientID: 첫 번째 레코드만 유지
     - 결측치: 어느 컬럼이라도 값이 없는 행 전체 제거 (완전 제거법)
+
+    반환: (df, cleaning_log)
+      cleaning_log: 각 정제 단계별 환자 수 기록 list[dict]
     """
     meta  = pd.read_excel(config.EXCEL_PATH, sheet_name='metadata-value')
     feats = pd.read_excel(config.EXCEL_PATH, sheet_name='features')
     print(f"  [load] metadata: {len(meta)}명, features: {len(feats)}명 → 병합 중...")
+
+    cleaning_log = [
+        {'단계': '원시 데이터 (metadata 시트)', '환자수': len(meta)},
+        {'단계': '원시 데이터 (features 시트)', '환자수': len(feats)},
+    ]
 
     ids_meta  = set(meta['PatientID'])
     ids_feats = set(feats['PatientID'])
@@ -35,20 +43,23 @@ def load_raw_data() -> pd.DataFrame:
         print(f"  [load] 모든 PatientID가 양쪽 시트에 존재 (누락 없음)")
 
     df = meta.merge(feats, on='PatientID', how='inner')
+    cleaning_log.append({'단계': 'Inner join (공통 PatientID)', '환자수': len(df)})
 
     n_before = len(df)
     df = df.drop_duplicates(subset='PatientID', keep='first')
     if len(df) < n_before:
         print(f"  [load] 중복 PatientID 제거: {n_before - len(df)}건")
+    cleaning_log.append({'단계': '중복 PatientID 제거 후', '환자수': len(df)})
 
     n_before = len(df)
     df = df.dropna()
     if len(df) < n_before:
         print(f"  [load] 결측치 행 제거: {n_before - len(df)}건 (전체 컬럼 기준)")
+    cleaning_log.append({'단계': '결측치 행 제거 후 (최종)', '환자수': len(df)})
 
     df = df.reset_index(drop=True)
     print(f"  [load] 최종 데이터셋: {len(df)}명, {df.shape[1]}개 컬럼")
-    return df
+    return df, cleaning_log
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -120,7 +131,7 @@ def prepare_full(mode: str = 'linear') -> pd.DataFrame:
     """
     # AEC feature 컬럼 존재 여부 확인
     missing = set(config.SELECTED_AEC_FEATURES)
-    df = load_raw_data()
+    df, _ = load_raw_data()
 
     missing -= set(df.columns)
     if missing:
@@ -144,20 +155,15 @@ def prepare_full(mode: str = 'linear') -> pd.DataFrame:
     # AEC features 표준화
     df, _ = standardize_cols(df, config.SELECTED_AEC_FEATURES)
 
-    # KVP 표준화 (Case 3용)
-    if 'KVP' in df.columns:
+    # KVP 표준화 (Case 3용) — KVP / kvp / kVp 컬럼 자동 탐지
+    kvp_raw = next((c for c in ['KVP', 'kvp', 'kVp'] if c in df.columns), None)
+    if kvp_raw:
         n_before = len(df)
-        df = df.dropna(subset=['KVP'])
+        df = df.dropna(subset=[kvp_raw])
         if len(df) < n_before:
-            print(f"  [load] KVP 결측 제거: {n_before - len(df)}건")
-        df, _ = standardize_cols(df, ['KVP'])
-        df = df.rename(columns={'KVP_z': 'kvp_z'})
-    elif 'kvp' in df.columns:
-        n_before = len(df)
-        df = df.dropna(subset=['kvp'])
-        if len(df) < n_before:
-            print(f"  [load] kvp 결측 제거: {n_before - len(df)}건")
-        df, _ = standardize_cols(df, ['kvp'])
+            print(f"  [load] {kvp_raw} 결측 제거: {n_before - len(df)}건")
+        df, _ = standardize_cols(df, [kvp_raw])
+        df = df.rename(columns={f'{kvp_raw}_z': 'kvp_z'})
 
     # ManufacturerModelName 더미 변수
     df = add_model_dummies(df)
@@ -188,14 +194,16 @@ def get_feature_cols(case: int, df: pd.DataFrame) -> list:
     if 'kvp_z' in df.columns:
         kvp_col = ['kvp_z']
 
-    if case == 1:
+    if case == 0:
+        return aec                          # AEC 단독 (Sex, Age 없음)
+    elif case == 1:
         return base
     elif case == 2:
         return base + aec
     elif case == 3:
         return base + aec + kvp_col + model
     else:
-        raise ValueError(f"Case는 1, 2, 3 중 하나여야 합니다 (입력값: {case})")
+        raise ValueError(f"Case는 0, 1, 2, 3 중 하나여야 합니다 (입력값: {case})")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,14 +233,13 @@ def prepare_cv_fold(df_raw: pd.DataFrame,
     df_tr, sc_aec = standardize_cols(df_tr, aec)
     df_te, _      = standardize_cols(df_te, aec, scaler=sc_aec)
 
-    # KVP 표준화 (Case 3용)
-    kvp_raw = 'KVP' if 'KVP' in df_tr.columns else ('kvp' if 'kvp' in df_tr.columns else None)
+    # KVP 표준화 (Case 3용) — KVP / kvp / kVp 컬럼 자동 탐지
+    kvp_raw = next((c for c in ['KVP', 'kvp', 'kVp'] if c in df_tr.columns), None)
     if kvp_raw:
         df_tr, sc_kvp = standardize_cols(df_tr, [kvp_raw])
         df_te, _      = standardize_cols(df_te, [kvp_raw], scaler=sc_kvp)
-        if kvp_raw == 'KVP':
-            df_tr = df_tr.rename(columns={'KVP_z': 'kvp_z'})
-            df_te = df_te.rename(columns={'KVP_z': 'kvp_z'})
+        df_tr = df_tr.rename(columns={f'{kvp_raw}_z': 'kvp_z'})
+        df_te = df_te.rename(columns={f'{kvp_raw}_z': 'kvp_z'})
 
     # ManufacturerModelName 더미 (전체 데이터셋 기준 카테고리 유지)
     df_tr = add_model_dummies(df_tr)

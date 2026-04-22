@@ -48,7 +48,8 @@ import config as config
 import data_loader as data_loader
 from logistic_regression import (bootstrap_auc_ci, hosmer_lemeshow_test,
                                   nagelkerke_r2, optimal_threshold_metrics)
-from feature_selection import compute_correlations, AEC_FEATURE_COLS
+from feature_selection import (compute_correlations, AEC_FEATURE_COLS,
+                               scanner_distribution, kvp_distribution)
 
 # ── 한글 폰트 설정 ─────────────────────────────────────────────────────────────
 plt.rcParams['font.family'] = 'sans-serif'
@@ -641,6 +642,65 @@ def plot_case_progression(lin_sums, log_sums):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 16 - CT 스캐너 분포
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_scanner_distribution(df_raw):
+    df_sc = scanner_distribution(df_raw)
+    top_n = 10
+    top   = df_sc.head(top_n).copy()
+    other_n = df_sc['N'][top_n:].sum() if len(df_sc) > top_n else 0
+    if other_n > 0:
+        other_pct = round(other_n / df_sc['N'].sum() * 100, 1)
+        top = pd.concat([top, pd.DataFrame([{'Model': '기타', 'N': other_n, 'Pct': other_pct}])],
+                        ignore_index=True)
+
+    fig, ax = plt.subplots(figsize=(10, max(5, len(top) * 0.55)))
+    colors = [COLORS['case1'] if i == 0 else COLORS['gray'] for i in range(len(top))]
+    bars = ax.barh(top['Model'][::-1], top['N'][::-1], color=colors[::-1],
+                   edgecolor='white', linewidth=0.5)
+    for bar, n, pct in zip(bars, top['N'][::-1], top['Pct'][::-1]):
+        ax.text(bar.get_width() + df_sc['N'].max() * 0.01,
+                bar.get_y() + bar.get_height() / 2,
+                f"{n} ({pct}%)", va='center', fontsize=9)
+    ax.set_xlabel('환자 수', fontsize=11)
+    ax.set_title(f'CT 스캐너 모델 분포 (총 {len(df_sc)}종)', fontsize=13, fontweight='bold')
+    ax.set_xlim(0, df_sc['N'].max() * 1.25)
+    ax.grid(axis='x', alpha=0.3)
+    fig.tight_layout()
+    savefig("16_scanner_distribution.png")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 17 - kVp 분포
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_kvp_distribution(df_raw):
+    kvp_df = kvp_distribution(df_raw)
+    if kvp_df.empty:
+        print("  [스킵] kVp 컬럼 없음")
+        return
+
+    dominant_kvp = kvp_df.loc[kvp_df['N'].idxmax(), 'kVp']
+    colors = [COLORS['case1'] if v == dominant_kvp else COLORS['gray']
+              for v in kvp_df['kVp']]
+
+    fig, ax = plt.subplots(figsize=(max(6, len(kvp_df) * 0.9), 5))
+    bars = ax.bar(kvp_df['kVp'].astype(str), kvp_df['N'], color=colors,
+                  edgecolor='white', linewidth=0.5)
+    for bar, n, pct in zip(bars, kvp_df['N'], kvp_df['Pct']):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + kvp_df['N'].max() * 0.01,
+                f"{n}\n({pct}%)", ha='center', va='bottom', fontsize=9)
+    ax.set_xlabel('kVp', fontsize=11)
+    ax.set_ylabel('환자 수', fontsize=11)
+    ax.set_title(f'kVp 분포 (주요값: {dominant_kvp} kVp)', fontsize=13, fontweight='bold')
+    ax.set_ylim(0, kvp_df['N'].max() * 1.2)
+    ax.grid(axis='y', alpha=0.3)
+    fig.tight_layout()
+    savefig("17_kvp_distribution.png")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 메인 실행
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -652,7 +712,7 @@ def main():
 
     # ── 데이터 준비 ─────────────────────────────────────────────────────────
     print("\n[데이터 로드]")
-    df_raw  = data_loader.load_raw_data()
+    df_raw, _ = data_loader.load_raw_data()
     df_lin  = data_loader.prepare_full(mode='linear')
     df_log  = data_loader.prepare_full(mode='logistic')
 
@@ -714,8 +774,10 @@ def main():
     plot_case_auc(log_sums)                      # 13
     plot_case_aic(lin_sums, log_sums)            # 14
     plot_case_progression(lin_sums, log_sums)    # 15
+    plot_scanner_distribution(df_raw)           # 16
+    plot_kvp_distribution(df_raw)               # 17
 
-    print(f"\n[완료] 15개 그래프 저장 → {FIG_DIR}")
+    print(f"\n[완료] 17개 그래프 저장 → {FIG_DIR}")
     print("=" * 60)
 
 

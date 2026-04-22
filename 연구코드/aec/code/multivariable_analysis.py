@@ -151,7 +151,8 @@ def fit_logistic_case(df: pd.DataFrame, feature_cols: list) -> tuple:
 
 def build_comparison_table(lin_summaries: list, log_summaries: list) -> pd.DataFrame:
     """
-    Case 1·2·3의 선형/로지스틱 요약을 하나의 비교 테이블로 통합.
+    Case 0·1·2·3의 선형/로지스틱 요약을 하나의 비교 테이블로 통합.
+    lin_summaries / log_summaries: [case0, case1, case2, case3] 순서
     """
     rows = []
 
@@ -183,26 +184,30 @@ def build_comparison_table(lin_summaries: list, log_summaries: list) -> pd.DataF
 
     for label, key, note in linear_metrics:
         if key is None:
-            rows.append({'지표': f'── {label} ──', 'Case_1': '', 'Case_2': '', 'Case_3': '', '근거': ''})
+            rows.append({'지표': f'── {label} ──',
+                         'Case_0(AEC단독)': '', 'Case_1': '', 'Case_2': '', 'Case_3': '', '근거': ''})
         else:
             rows.append({
-                '지표':   label,
-                'Case_1': lin_summaries[0].get(key, ''),
-                'Case_2': lin_summaries[1].get(key, ''),
-                'Case_3': lin_summaries[2].get(key, ''),
-                '근거':   note,
+                '지표':            label,
+                'Case_0(AEC단독)': lin_summaries[0].get(key, ''),
+                'Case_1':         lin_summaries[1].get(key, ''),
+                'Case_2':         lin_summaries[2].get(key, ''),
+                'Case_3':         lin_summaries[3].get(key, ''),
+                '근거':            note,
             })
 
     for label, key, note in logistic_metrics:
         if key is None:
-            rows.append({'지표': f'── {label} ──', 'Case_1': '', 'Case_2': '', 'Case_3': '', '근거': ''})
+            rows.append({'지표': f'── {label} ──',
+                         'Case_0(AEC단독)': '', 'Case_1': '', 'Case_2': '', 'Case_3': '', '근거': ''})
         else:
             rows.append({
-                '지표':   label,
-                'Case_1': log_summaries[0].get(key, ''),
-                'Case_2': log_summaries[1].get(key, ''),
-                'Case_3': log_summaries[2].get(key, ''),
-                '근거':   note,
+                '지표':            label,
+                'Case_0(AEC단독)': log_summaries[0].get(key, ''),
+                'Case_1':         log_summaries[1].get(key, ''),
+                'Case_2':         log_summaries[2].get(key, ''),
+                'Case_3':         log_summaries[3].get(key, ''),
+                '근거':            note,
             })
 
     return pd.DataFrame(rows)
@@ -216,7 +221,8 @@ def main():
     print("=" * 60)
     print("  Part 3 - Multivariable Analysis (Case 1·2·3 비교)")
     print("=" * 60)
-    print(f"\n  Case 1: [Sex, Age]")
+    print(f"\n  Case 0 (AEC 단독): {config.SELECTED_AEC_FEATURES}")
+    print(f"  Case 1: [Sex, Age]")
     print(f"  Case 2: [Sex, Age, AEC: {config.SELECTED_AEC_FEATURES}]")
     print(f"  Case 3: [Sex, Age, AEC, KVP, ManufacturerModelName]")
     print(f"\n  임계값: M < {config.TAMA_THRESHOLD_MALE} cm², "
@@ -233,9 +239,10 @@ def main():
     lin_coef_dfs  = {}
     log_coef_dfs  = {}
 
-    for case in [1, 2, 3]:
+    for case in [0, 1, 2, 3]:
         feat_cols = data_loader.get_feature_cols(case, df_lin)
-        print(f"\n── Case {case} ({'  '.join(feat_cols[:4])}{'...' if len(feat_cols) > 4 else ''}) ──")
+        label = 'AEC 단독' if case == 0 else f'Case {case}'
+        print(f"\n── {label} ({'  '.join(feat_cols[:4])}{'...' if len(feat_cols) > 4 else ''}) ──")
 
         # 선형 회귀
         _, lin_coef, lin_sum = fit_linear_case(df_lin, feat_cols)
@@ -249,11 +256,11 @@ def main():
         log_summaries.append(log_sum)
         log_coef_dfs[case] = log_coef
         print(f"  [Logistic] AUC={log_sum['AUC']} "
-              f"[{log_sum['AUC_CI_lower']}–{log_sum['AUC_CI_upper']}], "
-              f"Nagelkerke R²={log_sum['Nagelkerke_R2']}, "
+              f"[{log_sum['AUC_CI_lower']}-{log_sum['AUC_CI_upper']}], "
+              f"Nagelkerke R2={log_sum['Nagelkerke_R2']}, "
               f"HL p={log_sum['HL_p']}, {log_sum['HL_result']}")
         if not log_sum.get('converged', True):
-            print(f"  ⚠ Case {case} 로지스틱 수렴 실패 주의")
+            print(f"  ⚠ {label} 로지스틱 수렴 실패 주의")
 
     # ── 비교 요약 ────────────────────────────────────────────────────────────
     print("\n[Case 비교 요약]")
@@ -265,19 +272,19 @@ def main():
     with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
         comp_df.to_excel(writer, sheet_name='Case_비교_요약', index=False)
 
-        for case in [1, 2, 3]:
+        for i, case in enumerate([0, 1, 2, 3]):
+            sheet_prefix = 'Case0_AEC단독' if case == 0 else f'Case{case}'
             lin_coef_dfs[case].to_excel(
-                writer, sheet_name=f'Case{case}_linear_coef', index=False)
+                writer, sheet_name=f'{sheet_prefix}_linear_coef', index=False)
             log_coef_dfs[case].to_excel(
-                writer, sheet_name=f'Case{case}_logistic_coef', index=False)
+                writer, sheet_name=f'{sheet_prefix}_logistic_coef', index=False)
 
-            # 각 Case 요약도 저장
             lin_sum_df = pd.DataFrame(
-                list(lin_summaries[case - 1].items()), columns=['항목', '값'])
+                list(lin_summaries[i].items()), columns=['항목', '값'])
             log_sum_df = pd.DataFrame(
-                list(log_summaries[case - 1].items()), columns=['항목', '값'])
-            lin_sum_df.to_excel(writer, sheet_name=f'Case{case}_linear_summary',   index=False)
-            log_sum_df.to_excel(writer, sheet_name=f'Case{case}_logistic_summary', index=False)
+                list(log_summaries[i].items()), columns=['항목', '값'])
+            lin_sum_df.to_excel(writer, sheet_name=f'{sheet_prefix}_linear_summary',   index=False)
+            log_sum_df.to_excel(writer, sheet_name=f'{sheet_prefix}_logistic_summary', index=False)
 
     print(f"\n[저장] {out_path}")
     print("=" * 60)

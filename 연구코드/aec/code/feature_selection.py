@@ -102,6 +102,31 @@ def compute_vif(df: pd.DataFrame, features: list) -> pd.DataFrame:
     return pd.DataFrame(records).sort_values('VIF', ascending=False)
 
 
+def scanner_distribution(df: pd.DataFrame) -> pd.DataFrame:
+    """CT 스캐너 모델별 환자 수 및 비율 집계."""
+    counts = df['ManufacturerModelName'].value_counts()
+    pct    = counts / counts.sum() * 100
+    return pd.DataFrame({
+        'Model': counts.index,
+        'N':     counts.values,
+        'Pct':   pct.round(1).values,
+    }).reset_index(drop=True)
+
+
+def kvp_distribution(df: pd.DataFrame) -> pd.DataFrame:
+    """kVp 값별 환자 수 및 비율 집계. KVP / kvp / kVp 컬럼 자동 탐지."""
+    col = next((c for c in ['KVP', 'kvp', 'kVp'] if c in df.columns), None)
+    if col is None:
+        return pd.DataFrame()
+    counts = df[col].value_counts().sort_index()
+    pct    = counts / counts.sum() * 100
+    return pd.DataFrame({
+        'kVp': counts.index,
+        'N':   counts.values,
+        'Pct': pct.round(1).values,
+    }).reset_index(drop=True)
+
+
 def tama_distribution_summary(df: pd.DataFrame) -> pd.DataFrame:
     """성별별 TAMA 기술통계 (logistic regression 임계값 설정 참고용)."""
     rows = []
@@ -133,7 +158,7 @@ def main():
     print("=" * 60)
 
     # 데이터 로드 (전처리 없이 원시 데이터 사용)
-    df = data_loader.load_raw_data()
+    df, _ = data_loader.load_raw_data()
 
     # 1. 상관계수 계산
     print("\n[1] TAMA와 AEC feature 상관계수 계산 중...")
@@ -143,26 +168,45 @@ def main():
     print(corr_df[['Rank', 'Feature', 'Pearson_r', 'Pearson_p',
                     'Spearman_r', 'Spearman_p']].head(10).to_string(index=False))
 
-    # 2. 현재 SELECTED_AEC_FEATURES VIF 계산
-    print(f"\n[2] 현재 SELECTED_AEC_FEATURES VIF 계산: {config.SELECTED_AEC_FEATURES}")
-    vif_cols = config.SELECTED_AEC_FEATURES
-    available = [c for c in vif_cols if c in df.columns]
-    if len(available) >= 2:
-        # Age, Sex 포함한 전체 예측변수에서 VIF 계산
-        vif_input_cols = ['PatientAge'] + available
-        df_vif = df[vif_input_cols].dropna()
-        # 성별 인코딩
-        df_enc = data_loader.encode_sex(df.copy())
-        vif_input_cols2 = ['PatientAge', 'Sex'] + available
-        df_vif2 = df_enc[vif_input_cols2].dropna()
-        vif_df = compute_vif(df_vif2, vif_input_cols2)
-        print(vif_df.to_string(index=False))
-        vif_alert = vif_df[vif_df['VIF'] > 10]
-        if not vif_alert.empty:
-            print(f"\n  ⚠ VIF > 10인 feature (다중공선성 주의): {vif_alert['Feature'].tolist()}")
-    else:
-        vif_df = pd.DataFrame()
-        print("  VIF 계산 생략 (feature 수 부족)")
+    # 2. VIF 계산 — 현재 선택, mean/AUC_normalized 부분 제거 비교
+    print(f"\n[2] VIF 계산 (현재 + 부분 제거 비교): {config.SELECTED_AEC_FEATURES}")
+    df_enc = data_loader.encode_sex(df.copy())
+    base_demo = ['PatientAge', 'Sex']
+
+    base_aec = config.SELECTED_AEC_FEATURES
+    available = [c for c in base_aec if c in df.columns]
+
+    # mean / AUC_normalized 부분 제거 비교 집합 구성
+    without_mean     = [f for f in available if f != 'mean'] + (['AUC_normalized'] if 'AUC_normalized' in df.columns else [])
+    without_auc_norm = [f for f in available if f != 'AUC_normalized'] + (['mean'] if 'mean' in df.columns else [])
+    both_included    = available + [f for f in ['mean', 'AUC_normalized'] if f in df.columns and f not in available]
+
+    vif_scenarios = [
+        ('현재 선택 (SELECTED_AEC_FEATURES)', available),
+        ('mean 제외, AUC_normalized 포함',    without_mean),
+        ('AUC_normalized 제외, mean 포함',    without_auc_norm),
+        ('mean + AUC_normalized 둘 다 포함',  both_included),
+    ]
+
+    vif_df = pd.DataFrame()
+    vif_partial_rows = []
+    for label, feats in vif_scenarios:
+        feats_avail = [f for f in feats if f in df_enc.columns]
+        if len(feats_avail) < 2:
+            continue
+        cols = base_demo + feats_avail
+        vdf  = compute_vif(df_enc[cols].dropna(), cols)
+        print(f"\n  VIF - {label}:")
+        print(vdf.to_string(index=False))
+        alert = vdf[vdf['VIF'] > 10]
+        if not alert.empty:
+            print(f"  [!] VIF > 10: {alert['Feature'].tolist()}")
+        vdf['Scenario'] = label
+        vif_partial_rows.append(vdf)
+        if label.startswith('현재'):
+            vif_df = vdf
+
+    vif_partial_df = pd.concat(vif_partial_rows, ignore_index=True) if vif_partial_rows else pd.DataFrame()
 
     # 3. 성별 TAMA 분포 (임계값 설정 참고)
     print("\n[3] 성별 TAMA 분포 (임계값 설정 참고):")
@@ -170,18 +214,38 @@ def main():
     print(tama_dist.to_string(index=False))
     print(f"\n  현재 설정된 임계값: M < {config.TAMA_THRESHOLD_MALE} cm², "
           f"F < {config.TAMA_THRESHOLD_FEMALE} cm²")
-    # 현재 임계값 적용 시 양성 비율 미리보기
-    df_enc2 = data_loader.encode_sex(df.copy())
-    df_bin  = data_loader.add_tama_binary(df_enc2)
+    df_bin = data_loader.add_tama_binary(df_enc.copy())
 
-    # 4. Excel 저장
+    # 4. CT 스캐너 분포
+    print("\n[4] CT 스캐너 분포:")
+    scanner_df = scanner_distribution(df)
+    print(scanner_df.head(10).to_string(index=False))
+    print(f"  총 {len(scanner_df)}종 스캐너, 상위 스캐너: {scanner_df.iloc[0]['Model']} "
+          f"({scanner_df.iloc[0]['N']}명, {scanner_df.iloc[0]['Pct']}%)")
+
+    # 5. kVp 분포
+    print("\n[5] kVp 분포:")
+    kvp_df = kvp_distribution(df)
+    if not kvp_df.empty:
+        print(kvp_df.to_string(index=False))
+        dominant = kvp_df.loc[kvp_df['N'].idxmax()]
+        print(f"  주요 kVp: {dominant['kVp']} ({dominant['N']}명, {dominant['Pct']}%)")
+    else:
+        print("  kVp 컬럼 없음 (KVP / kvp)")
+
+    # 6. Excel 저장
     out_path = os.path.join(config.RESULTS_DIR, 'feature_selection_report.xlsx')
     with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
         corr_df.to_excel(writer, sheet_name='상관계수_전체', index=False)
         corr_df.head(20).to_excel(writer, sheet_name='상관계수_Top20', index=False)
         if not vif_df.empty:
             vif_df.to_excel(writer, sheet_name='VIF_선택feature', index=False)
+        if not vif_partial_df.empty:
+            vif_partial_df.to_excel(writer, sheet_name='VIF_부분제거_비교', index=False)
         tama_dist.to_excel(writer, sheet_name='TAMA_분포_성별', index=False)
+        scanner_df.to_excel(writer, sheet_name='CT_스캐너_분포', index=False)
+        if not kvp_df.empty:
+            kvp_df.to_excel(writer, sheet_name='kVp_분포', index=False)
 
     print(f"\n[저장] {out_path}")
     print("\n" + "=" * 60)

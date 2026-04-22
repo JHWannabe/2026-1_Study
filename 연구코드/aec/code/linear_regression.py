@@ -268,7 +268,7 @@ def main():
     # 데이터 준비
     print("\n[데이터 준비]")
     df     = data_loader.prepare_full(mode='linear')
-    df_raw = data_loader.load_raw_data()   # CV fold용 원시 데이터
+    df_raw, _ = data_loader.load_raw_data()   # CV fold용 원시 데이터
     df_raw = df_raw.dropna(subset=config.SELECTED_AEC_FEATURES).reset_index(drop=True)
 
     print(f"  예측변수 (AEC): {config.SELECTED_AEC_FEATURES}")

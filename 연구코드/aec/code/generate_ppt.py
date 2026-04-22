@@ -118,7 +118,7 @@ def parse_report(site):
 
     # ── 2.1 데이터셋 기본 정보 ───────────────────────────────
     sec = find_section('### 2.1 데이터셋 기본 정보')
-    r = table_rows(sec, max_rows=6)
+    r = table_rows(sec, max_rows=7)
 
     mm = re.search(r'(\d[\d,]*)', strip_bold(r[0][1]))
     D['n_total'] = int(mm.group(1).replace(',', '')) if mm else 0
@@ -144,6 +144,24 @@ def parse_report(site):
         D['tama_sd'] = mm.group(2)
 
     D['ct_models'] = sint(r[5][1])
+
+    # kVp 주요값 (row 6 있으면 파싱)
+    D['kvp_dominant'] = 'N/A'
+    D['kvp_dominant_pct'] = ''
+    if len(r) > 6:
+        kraw = strip_bold(r[6][1])
+        mm = re.search(r'(\d+)\s*kVp.*?([\d.]+)%', kraw)
+        if mm:
+            D['kvp_dominant']     = mm.group(1)
+            D['kvp_dominant_pct'] = mm.group(2)
+
+    # 스캐너 Top 1 (CT 스캐너 분포 표에서 파싱)
+    D['scanner_top1'] = ''
+    sec_sc = find_section('CT 스캐너 분포 (상위 5종)')
+    if sec_sc >= 0:
+        rs = table_rows(sec_sc, max_rows=1)
+        if rs:
+            D['scanner_top1'] = rs[0][0]
 
     # ── 2.2 성별 TAMA 분포 ───────────────────────────────────
     sec = find_section('### 2.2 성별 TAMA 분포')
@@ -292,11 +310,12 @@ def parse_report(site):
     D['log_aic_disp']   = f"{float(D['log_aic']):,.2f}"
 
     # ── 4.3.1 선형 Case 비교 ─────────────────────────────────
+    # 열 순서: 지표 | Case0(AEC단독) | Case1(Sex+Age) | Case2(+AEC) | Case3(+CT/kVp) | 1→2 | 2→3
     sec = find_section('#### 4.3.1 선형 회귀 성능 비교')
     r = table_rows(sec, max_rows=4)
     # 0=R², 1=Adj R², 2=RMSE, 3=AIC
 
-    for col, ckey in [(1, 'c1'), (2, 'c2'), (3, 'c3')]:
+    for col, ckey in [(1, 'c0'), (2, 'c1'), (3, 'c2'), (4, 'c3')]:
         D[f'lin_{ckey}_r2']    = strip_bold(r[0][col])
         D[f'lin_{ckey}_adjr2'] = strip_bold(r[1][col])
         D[f'lin_{ckey}_rmse']  = strip_bold(r[2][col])
@@ -311,30 +330,32 @@ def parse_report(site):
     ai_12  = flt(D['lin_c2_aic'])   - flt(D['lin_c1_aic'])
     ai_23  = flt(D['lin_c3_aic'])   - flt(D['lin_c2_aic'])
 
-    D['lin_delta12_r2']    = f"+{r2_12:.4f} ▲"
-    D['lin_delta23_r2']    = f"+{r2_23:.4f} ▲"
-    D['lin_delta12_adjr2'] = f"+{ar2_12:.4f} ▲"
-    D['lin_delta23_adjr2'] = f"+{ar2_23:.4f} ▲"
-    D['lin_delta12_rmse']  = f"{rm_12:.2f} ▼"
-    D['lin_delta23_rmse']  = f"{rm_23:.2f} ▼"
-    D['lin_delta12_aic']   = f"{ai_12:.0f} ▼"
-    D['lin_delta23_aic']   = f"{ai_23:.0f} ▼"
+    D['lin_delta12_r2']    = f"+{r2_12:.4f}"
+    D['lin_delta23_r2']    = f"+{r2_23:.4f}"
+    D['lin_delta12_adjr2'] = f"+{ar2_12:.4f}"
+    D['lin_delta23_adjr2'] = f"+{ar2_23:.4f}"
+    D['lin_delta12_rmse']  = f"{rm_12:.2f}"
+    D['lin_delta23_rmse']  = f"{rm_23:.2f}"
+    D['lin_delta12_aic']   = f"{ai_12:.0f}"
+    D['lin_delta23_aic']   = f"{ai_23:.0f}"
     D['lin_summary'] = (
         f"AEC 특징 추가(Case1→2)로 R² +{r2_12 * 100:.1f}%p 향상  |  "
-        f"CT 모델명 추가(Case2→3)로 추가 +{r2_23 * 100:.1f}%p"
+        f"CT 모델명/kVp 추가(Case2→3)로 추가 +{r2_23 * 100:.1f}%p"
     )
 
     # ── 4.3.2 로지스틱 Case 비교 ─────────────────────────────
+    # 열 순서: 지표 | Case0(AEC단독) | Case1(Sex+Age) | Case2(+AEC) | Case3(+CT/kVp) | 1→2 | 2→3
     sec = find_section('#### 4.3.2 로지스틱 회귀 성능 비교')
     r = table_rows(sec, max_rows=4)
     # 0=AUC, 1=Nagelkerke, 2=AIC, 3=HL p
 
-    for col, ckey in [(1, 'c1'), (2, 'c2'), (3, 'c3')]:
+    for col, ckey in [(1, 'c0'), (2, 'c1'), (3, 'c2'), (4, 'c3')]:
         D[f'log_{ckey}_auc'] = strip_bold(r[0][col])
         D[f'log_{ckey}_nag'] = strip_bold(r[1][col])
         D[f'log_{ckey}_aic'] = strip_bold(r[2][col])
         D[f'log_{ckey}_hl']  = strip_bold(r[3][col])
 
+    D['log_c0_hl_disp'] = _hl_disp(D['log_c0_hl'])
     D['log_c1_hl_disp'] = _hl_disp(D['log_c1_hl'])
     D['log_c2_hl_disp'] = _hl_disp(D['log_c2_hl'])
     D['log_c3_hl_disp'] = _hl_disp(D['log_c3_hl'])
@@ -346,15 +367,15 @@ def parse_report(site):
     la_12 = flt(D['log_c2_aic']) - flt(D['log_c1_aic'])
     la_23 = flt(D['log_c3_aic']) - flt(D['log_c2_aic'])
 
-    D['log_delta12_auc'] = f"+{au_12:.3f} ▲▲"
-    D['log_delta23_auc'] = f"+{au_23:.3f} ▲"
-    D['log_delta12_nag'] = f"+{na_12:.3f} ▲▲"
-    D['log_delta23_nag'] = f"+{na_23:.3f} ▲"
-    D['log_delta12_aic'] = f"{la_12:.0f} ▼▼"
-    D['log_delta23_aic'] = f"{la_23:.0f} ▼"
+    D['log_delta12_auc'] = f"+{au_12:.3f}"
+    D['log_delta23_auc'] = f"+{au_23:.3f}"
+    D['log_delta12_nag'] = f"+{na_12:.3f}"
+    D['log_delta23_nag'] = f"+{na_23:.3f}"
+    D['log_delta12_aic'] = f"{la_12:.0f}"
+    D['log_delta23_aic'] = f"{la_23:.0f}"
     D['log_summary'] = (
-        f"AEC 추가(Case1→2)로 AUC +{au_12 * 100:.1f}%p 대폭 향상  |  "
-        f"CT 모델명 추가(Case2→3)로 +{au_23 * 100:.1f}%p 추가 개선"
+        f"AEC 추가(Case1→2)로 AUC +{au_12 * 100:.1f}%p 향상  |  "
+        f"CT 모델명/kVp 추가(Case2→3)로 +{au_23 * 100:.1f}%p 추가 개선"
     )
 
     return D
@@ -595,17 +616,24 @@ for i, (p, m, g) in enumerate(parts):
     add_text(slide, g, x+0.15, 3.8, 3.7, 0.7, size=11, color=DARK)
 
 # Feature Set 표
-add_text(slide, "Feature Set (3 Case)", 0.35, 4.85, 4.0, 0.35,
+add_text(slide, "Feature Set (Case 구성)", 0.35, 4.85, 6.0, 0.35,
          size=13, bold=True, color=NAVY)
+add_text(slide, "* 성별·나이는 필수 공변량 — Case 1·2·3에 항상 포함. Case 0은 AEC 단독 진단력 참조용.",
+         6.5, 4.9, 6.5, 0.35, size=10, italic=True, color=BLUE)
 add_table(slide,
-          ["Case", "예측 변수"],
+          ["Case", "예측 변수", "목적"],
           [
-              ["Case 1", "성별 (Sex) + 나이 (Age)"],
-              ["Case 2", "Case 1 + AEC 특징 (p25, CV, skewness, slope_abs_mean, mean)"],
+              ["Case 0\n(AEC 단독)",
+               "AEC 특징 (p25, CV, skewness, slope_abs_mean, mean)",
+               "AEC 독립 진단력 확인"],
+              ["Case 1", "성별 (Sex) + 나이 (Age)", "인구통계 기반선"],
+              ["Case 2", "Case 1 + AEC 특징 (p25, CV, skewness, slope_abs_mean, mean)",
+               "AEC 기여도 정량화"],
               ["Case 3",
-               f"Case 2 + CT 모델명 (ManufacturerModelName — {D['ct_dummy_count']}개 dummy) + KVP"],
+               f"Case 2 + CT 모델명 ({D['ct_dummy_count']}개 dummy) + kVp",
+               "스캐너·전압 보정"],
           ],
-          0.35, 5.2, 12.6, 1.9, font_size=11)
+          0.35, 5.25, 12.6, 2.0, font_size=10)
 
 
 # ════════════════════════════════════════════════════════════
@@ -616,11 +644,13 @@ add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
 slide_header(slide, "02  데이터 기술 통계", "Descriptive Statistics")
 
 # 기본 정보 카드
+_kvp_card = (f"{D['kvp_dominant']} kVp ({D['kvp_dominant_pct']}%)"
+             if D['kvp_dominant'] != 'N/A' else 'N/A')
 stats = [
     ("총 환자 수",      f"{D['n_total']:,}명"),
     ("남성",           f"{D['n_male']:,}명 ({D['male_pct']}%)"),
     ("여성",           f"{D['n_female']:,}명 ({D['female_pct']}%)"),
-    ("CT 스캐너 모델",  f"{D['ct_models']}종"),
+    ("CT 스캐너 / 주요 kVp", f"{D['ct_models']}종  |  {_kvp_card}"),
     ("TAMA 범위",       f"{D['tama_min']} ~ {D['tama_max']} cm²"),
     ("TAMA 평균 (SD)",  f"{D['tama_mean']} (±{D['tama_sd']}) cm²"),
 ]
@@ -975,23 +1005,23 @@ add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
 slide_header(slide, "06  Case 비교 — 선형 회귀 성능 향상", "Multivariable Analysis: Linear Regression")
 
 add_table(slide,
-          ["지표", "Case 1\n(Sex+Age)", "Case 2\n(+AEC)", "Case 3\n(+CT Model)",
-           "Case1→2 Δ", "Case2→3 Δ"],
+          ["지표", "Case 0\n(AEC 단독)", "Case 1\n(Sex+Age)", "Case 2\n(+AEC)",
+           "Case 3\n(+CT/kVp)", "C1→2 Δ", "C2→3 Δ"],
           [
               ["R²",
-               D['lin_c1_r2'],   D['lin_c2_r2'],   D['lin_c3_r2'],
+               D['lin_c0_r2'],   D['lin_c1_r2'],   D['lin_c2_r2'],   D['lin_c3_r2'],
                D['lin_delta12_r2'],   D['lin_delta23_r2']],
               ["Adj R²",
-               D['lin_c1_adjr2'], D['lin_c2_adjr2'], D['lin_c3_adjr2'],
+               D['lin_c0_adjr2'], D['lin_c1_adjr2'], D['lin_c2_adjr2'], D['lin_c3_adjr2'],
                D['lin_delta12_adjr2'], D['lin_delta23_adjr2']],
               ["RMSE (cm²)",
-               D['lin_c1_rmse'],  D['lin_c2_rmse'],  D['lin_c3_rmse'],
+               D['lin_c0_rmse'],  D['lin_c1_rmse'],  D['lin_c2_rmse'],  D['lin_c3_rmse'],
                D['lin_delta12_rmse'],  D['lin_delta23_rmse']],
               ["AIC",
-               D['lin_c1_aic'],   D['lin_c2_aic'],   D['lin_c3_aic'],
+               D['lin_c0_aic'],   D['lin_c1_aic'],   D['lin_c2_aic'],   D['lin_c3_aic'],
                D['lin_delta12_aic'],   D['lin_delta23_aic']],
           ],
-          0.35, 1.25, 12.6, 2.3, font_size=12)
+          0.35, 1.25, 12.6, 2.3, font_size=10)
 
 add_text(slide, D['lin_summary'],
          0.35, 3.65, 12.6, 0.45, size=13, bold=True, color=BLUE)
@@ -1011,23 +1041,23 @@ add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
 slide_header(slide, "06  Case 비교 — 로지스틱 회귀 성능 향상", "Multivariable Analysis: Logistic Regression")
 
 add_table(slide,
-          ["지표", "Case 1\n(Sex+Age)", "Case 2\n(+AEC)", "Case 3\n(+CT Model)",
-           "Case1→2 Δ", "Case2→3 Δ"],
+          ["지표", "Case 0\n(AEC 단독)", "Case 1\n(Sex+Age)", "Case 2\n(+AEC)",
+           "Case 3\n(+CT/kVp)", "C1→2 Δ", "C2→3 Δ"],
           [
               ["AUC-ROC",
-               D['log_c1_auc'], D['log_c2_auc'], D['log_c3_auc'],
+               D['log_c0_auc'], D['log_c1_auc'], D['log_c2_auc'], D['log_c3_auc'],
                D['log_delta12_auc'], D['log_delta23_auc']],
               ["Nagelkerke R²",
-               D['log_c1_nag'], D['log_c2_nag'], D['log_c3_nag'],
+               D['log_c0_nag'], D['log_c1_nag'], D['log_c2_nag'], D['log_c3_nag'],
                D['log_delta12_nag'], D['log_delta23_nag']],
               ["AIC",
-               D['log_c1_aic'], D['log_c2_aic'], D['log_c3_aic'],
+               D['log_c0_aic'], D['log_c1_aic'], D['log_c2_aic'], D['log_c3_aic'],
                D['log_delta12_aic'], D['log_delta23_aic']],
               ["HL p-value",
-               D['log_c1_hl_disp'], D['log_c2_hl_disp'], D['log_c3_hl_disp'],
-               "보정도 개선 ✔", "보정도 양호 ✔"],
+               D['log_c0_hl_disp'], D['log_c1_hl_disp'], D['log_c2_hl_disp'], D['log_c3_hl_disp'],
+               "보정도 개선", "보정도 양호"],
           ],
-          0.35, 1.25, 12.6, 2.3, font_size=12)
+          0.35, 1.25, 12.6, 2.3, font_size=10)
 
 add_text(slide, D['log_summary'],
          0.35, 3.65, 12.6, 0.45, size=13, bold=True, color=BLUE)
