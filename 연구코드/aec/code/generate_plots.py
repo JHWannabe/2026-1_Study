@@ -49,6 +49,7 @@ import data_loader as data_loader
 from logistic_regression import (bootstrap_auc_ci, hosmer_lemeshow_test,
                                   nagelkerke_r2, optimal_threshold_metrics)
 from feature_selection import (compute_correlations, AEC_FEATURE_COLS,
+                               compute_correlation_matrix,
                                scanner_distribution, kvp_distribution)
 
 # ── 한글 폰트 설정 ─────────────────────────────────────────────────────────────
@@ -700,6 +701,39 @@ def plot_kvp_distribution(df_raw):
     savefig("17_kvp_distribution.png")
 
 
+def plot_correlation_matrix(df_raw):
+    """선택 feature 간 Pearson 상관행렬 히트맵 (다중공선성 확인용)."""
+    import data_loader as dl
+    df_enc = dl.encode_sex(df_raw.copy())
+    feats = ['PatientAge', 'Sex'] + config.SELECTED_AEC_FEATURES
+    corr_mat = compute_correlation_matrix(df_enc, feats)
+
+    fig, ax = plt.subplots(figsize=(max(7, len(corr_mat) * 0.9),
+                                    max(6, len(corr_mat) * 0.8)))
+    import matplotlib.colors as mcolors
+    cmap = plt.cm.RdBu_r
+    im = ax.imshow(corr_mat.values, cmap=cmap, vmin=-1, vmax=1, aspect='auto')
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label='Pearson r')
+
+    labels = corr_mat.columns.tolist()
+    ax.set_xticks(range(len(labels)))
+    ax.set_yticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
+    ax.set_yticklabels(labels, fontsize=9)
+
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            val = corr_mat.values[i, j]
+            color = 'white' if abs(val) > 0.6 else 'black'
+            ax.text(j, i, f'{val:.2f}', ha='center', va='center',
+                    fontsize=7.5, color=color)
+
+    ax.set_title('선택 Feature 간 Pearson 상관행렬\n(|r| > 0.8: 다중공선성 주의)',
+                 fontsize=13, fontweight='bold', pad=12)
+    fig.tight_layout()
+    savefig("18_correlation_matrix.png")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 메인 실행
 # ─────────────────────────────────────────────────────────────────────────────
@@ -776,8 +810,9 @@ def main():
     plot_case_progression(lin_sums, log_sums)    # 15
     plot_scanner_distribution(df_raw)           # 16
     plot_kvp_distribution(df_raw)               # 17
+    plot_correlation_matrix(df_raw)             # 18
 
-    print(f"\n[완료] 17개 그래프 저장 → {FIG_DIR}")
+    print(f"\n[완료] 18개 그래프 저장 → {FIG_DIR}")
     print("=" * 60)
 
 

@@ -3,6 +3,7 @@ TAMA 예측 회귀분석 연구 보고서 PPT 생성 스크립트
 """
 
 import re
+import pandas as pd
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.enum.text import PP_ALIGN
@@ -10,6 +11,8 @@ from pptx.dml.color import RGBColor
 from pptx.util import Inches, Pt
 import os
 import config
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ── 색상 팔레트 ──────────────────────────────────────────────
 NAVY    = RGBColor(0x1A, 0x35, 0x5E)   # 제목 배경
@@ -21,12 +24,12 @@ GRAY    = RGBColor(0xF2, 0xF2, 0xF2)
 ORANGE  = RGBColor(0xFF, 0x7F, 0x27)
 GREEN   = RGBColor(0x00, 0x8B, 0x45)
 
-FIGURES = f"results/{config.SITE}/figures"
+FIGURES = os.path.join(_ROOT, "results", config.SITE, "figures")
 
 
 def parse_report(site):
     """results/{site}/research_report.md 를 파싱해 슬라이드에 쓸 값을 dict로 반환."""
-    path = os.path.join("results", site, "research_report.md")
+    path = os.path.join(_ROOT, "results", site, "research_report.md")
     with open(path, encoding="utf-8") as fh:
         lines = fh.readlines()
 
@@ -116,6 +119,19 @@ def parse_report(site):
         except ValueError:
             return raw_s
 
+    # ── 2.0 데이터 정제 단계 ─────────────────────────────────
+    sec20 = find_section('### 2.0 데이터 정제 단계')
+    r20 = table_rows(sec20, max_rows=5)
+    _clean_steps = [
+        ('원시 데이터 (metadata)', r20[0][1] if r20 else 'N/A'),
+        ('원시 데이터 (features)', r20[1][1] if len(r20)>1 else 'N/A'),
+        ('Inner join (공통 PatientID)', r20[2][1] if len(r20)>2 else 'N/A'),
+        ('중복 PatientID 제거 후', r20[3][1] if len(r20)>3 else 'N/A'),
+        ('결측치 행 제거 후 (최종)', strip_bold(r20[4][1]) if len(r20)>4 else 'N/A'),
+    ]
+    D['clean_steps'] = _clean_steps
+    D['raw_n'] = re.sub(r'[^\d]', '', _clean_steps[0][1]) if _clean_steps else '?'
+
     # ── 2.1 데이터셋 기본 정보 ───────────────────────────────
     sec = find_section('### 2.1 데이터셋 기본 정보')
     r = table_rows(sec, max_rows=7)
@@ -197,8 +213,8 @@ def parse_report(site):
 
     # ── 2.4 AEC Feature ──────────────────────────────────────
     sec = find_section('### 2.4 AEC Feature 선택 근거')
-    r = table_rows(sec, max_rows=4)
-    for i, key in enumerate(['p25', 'CV', 'skewness', 'slope_abs_mean']):
+    r = table_rows(sec, max_rows=len(config.SELECTED_AEC_FEATURES))
+    for i, key in enumerate(config.SELECTED_AEC_FEATURES):
         D[f'pearson_{key}'] = strip_bold(r[i][1])
         D[f'vif_{key}']     = strip_bold(r[i][3])
 
@@ -213,9 +229,9 @@ def parse_report(site):
 
     # ── 4.1.1 선형 단변량 ────────────────────────────────────
     sec = find_section('#### 4.1.1 단변량 분석 (Univariate)')
-    r = table_rows(sec, max_rows=8)
-    lin_uni_keys = ['Sex', 'Age', 'p25', 'CV', 'skewness', 'slope_abs_mean',
-                    'mean', 'ManufacturerModelName']
+    _aec_keys = config.SELECTED_AEC_FEATURES
+    lin_uni_keys = ['Sex', 'Age'] + _aec_keys + ['ManufacturerModelName']
+    r = table_rows(sec, max_rows=len(lin_uni_keys))
     for i, key in enumerate(lin_uni_keys):
         raw_beta = strip_bold(r[i][1])
         D[f'linu_{key}_beta']      = raw_beta
@@ -270,9 +286,8 @@ def parse_report(site):
         D['resid_kappa_res']    = r[3][3]
 
     # ── 4.2.1 로지스틱 단변량 ────────────────────────────────
-    r = table_rows(sec421, max_rows=8)
-    log_uni_keys = ['Sex', 'Age', 'p25', 'CV', 'skewness', 'slope_abs_mean',
-                    'mean', 'ManufacturerModelName']
+    log_uni_keys = ['Sex', 'Age'] + _aec_keys + ['ManufacturerModelName']
+    r = table_rows(sec421, max_rows=len(log_uni_keys))
     for i, key in enumerate(log_uni_keys):
         D[f'logu_{key}_or']   = fmt_beta(strip_bold(r[i][1]), 3)
         D[f'logu_{key}_ci']   = fmt_ci(r[i][2], 3)
@@ -620,14 +635,15 @@ add_text(slide, "Feature Set (Case 구성)", 0.35, 4.85, 6.0, 0.35,
          size=13, bold=True, color=NAVY)
 add_text(slide, "* 성별·나이는 필수 공변량 — Case 1·2·3에 항상 포함. Case 0은 AEC 단독 진단력 참조용.",
          6.5, 4.9, 6.5, 0.35, size=10, italic=True, color=BLUE)
+_aec_feat_str = ", ".join(config.SELECTED_AEC_FEATURES)
 add_table(slide,
           ["Case", "예측 변수", "목적"],
           [
               ["Case 0\n(AEC 단독)",
-               "AEC 특징 (p25, CV, skewness, slope_abs_mean, mean)",
+               f"AEC 특징 ({_aec_feat_str})",
                "AEC 독립 진단력 확인"],
               ["Case 1", "성별 (Sex) + 나이 (Age)", "인구통계 기반선"],
-              ["Case 2", "Case 1 + AEC 특징 (p25, CV, skewness, slope_abs_mean, mean)",
+              ["Case 2", f"Case 1 + AEC 특징 ({_aec_feat_str})",
                "AEC 기여도 정량화"],
               ["Case 3",
                f"Case 2 + CT 모델명 ({D['ct_dummy_count']}개 dummy) + kVp",
@@ -695,45 +711,111 @@ add_image(slide, "01_feature_correlation.png", 6.65, 5.72, 6.33, 1.55)
 
 
 # ════════════════════════════════════════════════════════════
+# 슬라이드 4-A — 데이터 정제 과정
+# ════════════════════════════════════════════════════════════
+slide = prs.slides.add_slide(BLANK)
+add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
+slide_header(slide, "02  데이터 정제 과정", "Data Cleaning Pipeline")
+
+add_text(slide, f"원시 데이터 {D['raw_n']}명에서 결측치 제거 후 최종 분석 대상 {D['n_total']:,}명 확정",
+         0.35, 1.15, 12.6, 0.4, size=12, color=DARK)
+
+_steps = D.get('clean_steps', [])
+_step_colors = [BLUE, BLUE, BLUE, BLUE, GREEN]
+for i, (label, val) in enumerate(_steps):
+    y = 1.65 + i * 0.95
+    fill = _step_colors[i] if i < len(_step_colors) else BLUE
+    add_rect(slide, 0.35, y, 8.5, 0.82, fill_rgb=fill)
+    add_text(slide, f"  {i+1}.  {label}", 0.45, y+0.06, 7.5, 0.38, size=12, bold=True, color=WHITE)
+    add_rect(slide, 9.1, y, 3.9, 0.82, fill_rgb=WHITE, line_rgb=fill, line_w=Pt(1.5))
+    add_text(slide, val, 9.1, y+0.15, 3.9, 0.5, size=14, bold=True, color=fill, align=PP_ALIGN.CENTER)
+    if i < len(_steps) - 1:
+        add_text(slide, "▼", 4.7, y+0.82, 0.5, 0.3, size=10, color=NAVY, align=PP_ALIGN.CENTER)
+
+add_rect(slide, 0.35, 6.42, 12.6, 0.72, fill_rgb=NAVY)
+add_text(slide,
+         f"제거 이유: 결측 컬럼(AEC feature) 포함 행 — "
+         f"{int(D['raw_n'] or 0) - D['n_total']}명 제외 "
+         f"({(int(D['raw_n'] or 0) - D['n_total']) / max(int(D['raw_n'] or 1), 1) * 100:.1f}%)",
+         0.55, 6.5, 12.0, 0.55, size=12, color=WHITE)
+
+
+# ════════════════════════════════════════════════════════════
+# 슬라이드 4-B — CT 스캐너 & kVp 분포
+# ════════════════════════════════════════════════════════════
+slide = prs.slides.add_slide(BLANK)
+add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
+slide_header(slide, "02  CT 스캐너 & kVp 분포", "Scanner & kVp Distribution")
+
+_kvp_card = (f"{D['kvp_dominant']} kVp ({D['kvp_dominant_pct']}%)"
+             if D.get('kvp_dominant', 'N/A') != 'N/A' else 'N/A')
+_scan_stats = [
+    ("총 CT 스캐너 종류", f"{D.get('ct_models', '?')}종"),
+    ("최다 스캐너",       D.get('scanner_top1', 'N/A')),
+    ("주요 kVp",         _kvp_card),
+    ("총 분석 환자",      f"{D['n_total']:,}명"),
+]
+for i, (lbl, val) in enumerate(_scan_stats):
+    x = 0.35 + (i % 2) * 6.4
+    y = 1.2 + (i // 2) * 1.0
+    add_rect(slide, x, y, 6.1, 0.85, fill_rgb=WHITE, line_rgb=BLUE, line_w=Pt(1))
+    add_text(slide, lbl, x+0.15, y+0.04, 5.8, 0.32, size=10, color=BLUE)
+    add_text(slide, val, x+0.15, y+0.38, 5.8, 0.42, size=13, bold=True, color=NAVY)
+
+add_text(slide, "CT 스캐너 모델 분포", 0.35, 3.3, 5.5, 0.35, size=13, bold=True, color=NAVY)
+add_image(slide, "16_scanner_distribution.png", 0.35, 3.68, 6.2, 3.6)
+
+add_text(slide, "kVp 분포", 6.8, 3.3, 5.5, 0.35, size=13, bold=True, color=NAVY)
+add_image(slide, "17_kvp_distribution.png", 6.8, 3.68, 6.18, 3.6)
+
+
+# ════════════════════════════════════════════════════════════
 # 슬라이드 5 — AEC Feature 선택
 # ════════════════════════════════════════════════════════════
 slide = prs.slides.add_slide(BLANK)
 add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
 slide_header(slide, "02  AEC Feature 선택", "Feature Selection")
 
+_n_feat = len(config.SELECTED_AEC_FEATURES)
 add_text(slide,
-         "Pearson/Spearman 상관계수 + VIF 검사를 통해 다중공선성이 없는 4개 핵심 Feature 선택 (mean 포함 사용)",
-         0.35, 1.15, 12.6, 0.45, size=13, color=DARK)
+         f"Pearson/Spearman 상관계수 + VIF 검사로 선택한 {_n_feat}개 AEC Feature "
+         f"({', '.join(config.SELECTED_AEC_FEATURES)}) — amplitude 그룹(mean≈p25≈AUC_normalized) 중 1개 대표 선택, VIF max<2",
+         0.35, 1.15, 12.6, 0.45, size=12, color=DARK)
+
+_feat_desc = {
+    'mean':           "AEC 평균값 → 체격 전반 반영 (amplitude 그룹 대표)",
+    'p25':            "AEC 하위 25% 값 → 저선량 구간 tube current",
+    'CV':             "변동계수(std/mean) → 체형 불균일성 반영",
+    'skewness':       "AEC 곡선 비대칭성 → 체형 분포 특성",
+    'slope_abs_mean': "평균 절대 기울기 → 곡선 동역학",
+    'peak_max_height':"최대 피크 높이 → 최고 tube current 지점",
+}
+_selected_rows = [
+    [f,
+     D.get(f'pearson_{f}', 'N/A'),
+     _feat_desc.get(f, f),
+     D.get(f'vif_{f}', 'N/A'),
+     "✔"]
+    for f in config.SELECTED_AEC_FEATURES
+]
+_excluded_rows = [
+    ["p25",            "높음", "mean과 amplitude 동일 그룹 (r=0.97)", ">70",      "✗ 제외"],
+    ["AUC_normalized", "높음", "mean과 r≈1.00, 사실상 동일 feature",  ">57,000", "✗ 제외"],
+]
+# 이미 선택 목록에 있는 feature는 제외 행에서 빼기
+_excluded_rows = [row for row in _excluded_rows
+                  if row[0] not in config.SELECTED_AEC_FEATURES]
 
 add_table(slide,
           ["Feature", "Pearson r", "해석", "VIF", "선택"],
-          [
-              ["p25",
-               D['pearson_p25'],
-               "AEC 하위 25% 값 → 저선량 구간 tube current",
-               D['vif_p25'], "✔"],
-              ["CV",
-               D['pearson_CV'],
-               "변동계수(std/mean) → 체형 불균일성 반영",
-               D['vif_CV'], "✔"],
-              ["skewness",
-               D['pearson_skewness'],
-               "AEC 곡선 비대칭성 → 체형 분포 특성",
-               D['vif_skewness'], "✔"],
-              ["slope_abs_mean",
-               D['pearson_slope_abs_mean'],
-               "평균 절대 기울기 → 곡선 동역학",
-               D['vif_slope_abs_mean'], "✔"],
-              ["mean",            "+0.297",
-               "AEC 평균값 → 체격 전반 반영",
-               "확인됨", "✔ (포함)"],
-              ["AUC_normalized",  "높음",
-               "mean과 심각한 공선성",
-               ">50,000", "✗ 제외"],
-          ],
+          _selected_rows + _excluded_rows,
           0.35, 1.65, 12.6, 2.6, font_size=11)
 
-add_text(slide, "⚠  AUC_normalized는 VIF > 50,000으로 다중공선성 심각 → 제외 / mean은 모델에 포함",
+_excl_names = [row[0] for row in _excluded_rows]
+_excl_str = "·".join(_excl_names) if _excl_names else "없음"
+add_text(slide,
+         f"⚠  {_excl_str}: mean과 동일 amplitude 그룹(r≥0.88) → 다중공선성 제거 / "
+         f"mean을 대표로 포함",
          0.35, 4.3, 12.6, 0.5, size=12, italic=True, color=ORANGE)
 
 # 두 그림 나란히
@@ -742,6 +824,42 @@ add_image(slide, "01_feature_correlation.png", 0.35, 5.22, 6.0, 2.0)
 
 add_text(slide, "VIF 비교", 6.65, 4.85, 5.5, 0.35, size=12, bold=True, color=NAVY)
 add_image(slide, "02_vif_comparison.png", 6.65, 5.22, 6.33, 2.0)
+
+
+# ════════════════════════════════════════════════════════════
+# 슬라이드 6 — Correlation Matrix (다중공선성)
+# ════════════════════════════════════════════════════════════
+slide = prs.slides.add_slide(BLANK)
+add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
+slide_header(slide, "02  Correlation Matrix", "Multicollinearity Check")
+
+add_text(slide,
+         "선택 Feature 간 Pearson 상관행렬 — |r| > 0.8 쌍은 다중공선성(Multicollinearity) 위험 신호",
+         0.35, 1.15, 12.6, 0.4, size=12, color=DARK)
+
+add_image(slide, "18_correlation_matrix.png", 0.35, 1.6, 8.5, 5.65)
+
+# 해석 카드
+add_rect(slide, 9.1, 1.6, 3.9, 2.6, fill_rgb=NAVY)
+add_text(slide, "해석 기준", 9.25, 1.68, 3.6, 0.4, size=12, bold=True, color=ORANGE)
+add_text(slide,
+         "• |r| < 0.5  →  낮은 상관\n"
+         "• 0.5 ≤ |r| < 0.8  →  중간 상관\n"
+         "• |r| ≥ 0.8  →  다중공선성 주의\n\n"
+         "VIF > 10 과 함께 확인하여\n"
+         "제거 여부 결정",
+         9.25, 2.12, 3.6, 2.0, size=11, color=WHITE)
+
+add_rect(slide, 9.1, 4.4, 3.9, 2.85, fill_rgb=WHITE, line_rgb=ORANGE, line_w=Pt(1.5))
+add_text(slide, "⚠  제외 결정 사례", 9.25, 4.48, 3.6, 0.38, size=11, bold=True, color=ORANGE)
+_amp_group = ['mean', 'p25', 'AUC_normalized', 'peak_max_height', 'peak_mean_height']
+_amp_excl = [f for f in _amp_group if f not in config.SELECTED_AEC_FEATURES]
+_amp_sel  = [f for f in _amp_group if f in config.SELECTED_AEC_FEATURES]
+_amp_excl_str = "\n".join([f"• {f}: 제외 (amplitude 중복)" for f in _amp_excl[:3]])
+_amp_sel_str  = ", ".join(_amp_sel) if _amp_sel else "없음"
+add_text(slide,
+         f"제외된 amplitude 그룹:\n{_amp_excl_str}\n\n선택 대표: {_amp_sel_str}\n(VIF 확인 후 포함)",
+         9.25, 4.9, 3.6, 2.25, size=11, color=DARK)
 
 
 # ════════════════════════════════════════════════════════════
@@ -800,35 +918,27 @@ slide = prs.slides.add_slide(BLANK)
 add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
 slide_header(slide, "04  선형 회귀 — 단변량 분석", "Univariate Linear Regression")
 
+_lin_uni_rows = [
+    ["Sex (M=1, F=0)",
+     D['linu_Sex_beta_disp'], D['linu_Sex_ci'],
+     _pdisp(D['linu_Sex_pval']), D['linu_Sex_r2']],
+    ["Age (표준화)",
+     D['linu_Age_beta_disp'], D['linu_Age_ci'],
+     _pdisp(D['linu_Age_pval']), D['linu_Age_r2']],
+] + [
+    [f"AEC: {f} (표준화)",
+     D[f'linu_{f}_beta_disp'], D[f'linu_{f}_ci'],
+     _pdisp(D[f'linu_{f}_pval']), D[f'linu_{f}_r2']]
+    for f in config.SELECTED_AEC_FEATURES
+] + [
+    ["ManufacturerModelName",
+     D['linu_ManufacturerModelName_beta_disp'], "N/A",
+     _pdisp(D['linu_ManufacturerModelName_pval']),
+     D['linu_ManufacturerModelName_r2']],
+]
 add_table(slide,
           ["변수", "β 계수", "95% CI", "p-value", "R²"],
-          [
-              ["Sex (M=1, F=0)",
-               D['linu_Sex_beta_disp'],        D['linu_Sex_ci'],
-               _pdisp(D['linu_Sex_pval']),     D['linu_Sex_r2']],
-              ["Age (표준화)",
-               D['linu_Age_beta_disp'],         D['linu_Age_ci'],
-               _pdisp(D['linu_Age_pval']),      D['linu_Age_r2']],
-              ["AEC: p25 (표준화)",
-               D['linu_p25_beta_disp'],         D['linu_p25_ci'],
-               _pdisp(D['linu_p25_pval']),      D['linu_p25_r2']],
-              ["AEC: CV (표준화)",
-               D['linu_CV_beta_disp'],          D['linu_CV_ci'],
-               _pdisp(D['linu_CV_pval']),       D['linu_CV_r2']],
-              ["AEC: skewness (표준화)",
-               D['linu_skewness_beta_disp'],    D['linu_skewness_ci'],
-               _pdisp(D['linu_skewness_pval']), D['linu_skewness_r2']],
-              ["AEC: slope_abs_mean (표준화)",
-               D['linu_slope_abs_mean_beta_disp'], D['linu_slope_abs_mean_ci'],
-               _pdisp(D['linu_slope_abs_mean_pval']), D['linu_slope_abs_mean_r2']],
-              ["AEC: mean (표준화)",
-               D['linu_mean_beta_disp'],        D['linu_mean_ci'],
-               _pdisp(D['linu_mean_pval']),     D['linu_mean_r2']],
-              ["ManufacturerModelName",
-               D['linu_ManufacturerModelName_beta_disp'], "N/A",
-               _pdisp(D['linu_ManufacturerModelName_pval']),
-               D['linu_ManufacturerModelName_r2']],
-          ],
+          _lin_uni_rows,
           0.35, 1.25, 12.6, 3.3, font_size=11)
 
 add_text(slide, "* p < 0.05 유의",
@@ -897,45 +1007,73 @@ add_image(slide, "05_linear_residuals.png", 7.1, 6.25, 5.9, 1.0)
 
 
 # ════════════════════════════════════════════════════════════
+# 슬라이드 8-C — 선형 회귀 다변량 핵심 계수 상세
+# ════════════════════════════════════════════════════════════
+slide = prs.slides.add_slide(BLANK)
+add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
+slide_header(slide, "04  선형 회귀 — 핵심 변수 계수 (Case 3)", "Key Predictor Coefficients")
+
+_lin_xl = os.path.join(_ROOT, 'results', config.SITE, 'linear_results.xlsx')
+_lin_coef = pd.read_excel(_lin_xl, sheet_name='다변량_coefficients')
+_key_vars = ['Sex', 'Age_z'] + [f + '_z' for f in config.SELECTED_AEC_FEATURES]
+_lc = _lin_coef[_lin_coef['Variable'].isin(_key_vars)].copy()
+_lc_rows = []
+for _, row in _lc.iterrows():
+    vname = str(row['Variable']).replace('_z', ' (표준화)').replace('Age_z', 'Age (표준화)')
+    sig = ' *' if float(row['p_value']) < 0.05 else ''
+    _lc_rows.append([
+        vname,
+        f"{float(row['β']):.4f}{sig}",
+        f"[{float(row['CI_Lower']):.3f}, {float(row['CI_Upper']):.3f}]",
+        f"{float(row['SE']):.4f}",
+        f"{float(row['t_stat']):.3f}",
+        f"{float(row['p_value']):.4e}",
+    ])
+add_table(slide,
+          ["변수", "β 계수", "95% CI", "SE", "t", "p-value"],
+          _lc_rows,
+          0.35, 1.25, 12.6, len(_lc_rows) * 0.55 + 0.45, font_size=11)
+
+_note_y = 1.25 + len(_lc_rows) * 0.55 + 0.55
+add_text(slide, "* p < 0.05 유의  |  CT 모델명 더미는 생략 (별도 슬라이드)  |  표준화 계수: 1 SD 변화 시 TAMA 변화량",
+         0.35, _note_y, 12.6, 0.4, size=10, italic=True, color=ORANGE)
+
+add_text(slide, "선형 Forest Plot", 0.35, _note_y + 0.5, 5.5, 0.35, size=13, bold=True, color=NAVY)
+add_image(slide, "06_linear_forest.png", 0.35, _note_y + 0.88, 12.6, 7.5 - _note_y - 1.1)
+
+
+# ════════════════════════════════════════════════════════════
 # 슬라이드 9 — 로지스틱 회귀: 단변량 OR
 # ════════════════════════════════════════════════════════════
 slide = prs.slides.add_slide(BLANK)
 add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
 slide_header(slide, "05  로지스틱 회귀 — 단변량 분석 (Crude OR)", "Univariate Logistic Regression")
 
+_log_uni_rows = [
+    ["Sex (M=1, F=0)",
+     D['logu_Sex_or'], D['logu_Sex_ci'],
+     _pdisp(D['logu_Sex_pval']), D['logu_Sex_auc']],
+    ["Age (표준화)",
+     D['logu_Age_or'], D['logu_Age_ci'],
+     _pdisp(D['logu_Age_pval']), D['logu_Age_auc']],
+] + [
+    [f"AEC: {f} (표준화)",
+     D[f'logu_{f}_or'], D[f'logu_{f}_ci'],
+     _pdisp(D[f'logu_{f}_pval']), D[f'logu_{f}_auc']]
+    for f in config.SELECTED_AEC_FEATURES
+] + [
+    ["ManufacturerModelName",
+     D['logu_ManufacturerModelName_or'], "N/A",
+     _pdisp(D['logu_ManufacturerModelName_pval']),
+     D['logu_ManufacturerModelName_auc']],
+]
 add_table(slide,
           ["변수", "Crude OR", "95% CI", "p-value", "AUC"],
-          [
-              ["Sex (M=1, F=0)",
-               D['logu_Sex_or'],        D['logu_Sex_ci'],
-               _pdisp(D['logu_Sex_pval']),  D['logu_Sex_auc']],
-              ["Age (표준화)",
-               D['logu_Age_or'],        D['logu_Age_ci'],
-               _pdisp(D['logu_Age_pval']),  D['logu_Age_auc']],
-              ["AEC: p25 (표준화)",
-               D['logu_p25_or'],        D['logu_p25_ci'],
-               _pdisp(D['logu_p25_pval']),  D['logu_p25_auc']],
-              ["AEC: CV (표준화)",
-               D['logu_CV_or'],         D['logu_CV_ci'],
-               _pdisp(D['logu_CV_pval']),   D['logu_CV_auc']],
-              ["AEC: skewness (표준화)",
-               D['logu_skewness_or'],   D['logu_skewness_ci'],
-               _pdisp(D['logu_skewness_pval']), D['logu_skewness_auc']],
-              ["AEC: slope_abs_mean (표준화)",
-               D['logu_slope_abs_mean_or'],  D['logu_slope_abs_mean_ci'],
-               _pdisp(D['logu_slope_abs_mean_pval']), D['logu_slope_abs_mean_auc']],
-              ["AEC: mean (표준화)",
-               D['logu_mean_or'],       D['logu_mean_ci'],
-               _pdisp(D['logu_mean_pval']),  D['logu_mean_auc']],
-              ["ManufacturerModelName",
-               D['logu_ManufacturerModelName_or'], "N/A",
-               _pdisp(D['logu_ManufacturerModelName_pval']),
-               D['logu_ManufacturerModelName_auc']],
-          ],
+          _log_uni_rows,
           0.35, 1.25, 12.6, 3.3, font_size=11)
 
 add_text(slide,
-         "* p < 0.05 유의  |  p25·mean: OR < 1 → 해당 변수↑ 시 Low TAMA 위험 감소  |  Sex: 이진화 후 단변량 비유의",
+         f"* p < 0.05 유의  |  {', '.join(config.SELECTED_AEC_FEATURES)}: OR 방향 확인  |  Sex: 이진화 후 단변량 비유의",
          0.35, 4.65, 12.0, 0.4, size=11, italic=True, color=ORANGE)
 
 # Crude OR Forest plot
@@ -995,6 +1133,42 @@ add_image(slide, "09_logistic_calibration.png", 7.5, 4.1, 5.48, 2.2)
 # Confusion matrix
 add_text(slide, "Confusion Matrix", 0.35, 5.85, 5.5, 0.35, size=13, bold=True, color=NAVY)
 add_image(slide, "10_logistic_confusion.png", 0.35, 6.22, 3.5, 1.05)
+
+
+# ════════════════════════════════════════════════════════════
+# 슬라이드 10-D — 로지스틱 회귀 다변량 핵심 변수 Adjusted OR
+# ════════════════════════════════════════════════════════════
+slide = prs.slides.add_slide(BLANK)
+add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
+slide_header(slide, "05  로지스틱 회귀 — 핵심 변수 Adjusted OR (Case 3)", "Adjusted Odds Ratios")
+
+_log_xl = os.path.join(_ROOT, 'results', config.SITE, 'logistic_results.xlsx')
+_log_coef = pd.read_excel(_log_xl, sheet_name='다변량_coefficients')
+_key_vars_log = ['Sex', 'Age_z'] + [f + '_z' for f in config.SELECTED_AEC_FEATURES]
+_lc_log = _log_coef[_log_coef['Variable'].isin(_key_vars_log)].copy()
+_lor_rows = []
+for _, row in _lc_log.iterrows():
+    vname = str(row['Variable']).replace('_z', ' (표준화)')
+    adj_or = float(row['Adj_OR'])
+    _lor_rows.append([
+        vname,
+        f"{float(row['log_OR']):.4f}",
+        f"{adj_or:.4f}",
+        "< 1 → 위험 감소" if adj_or < 1 else "> 1 → 위험 증가",
+    ])
+add_table(slide,
+          ["변수", "log(OR)", "Adjusted OR", "방향 해석"],
+          _lor_rows,
+          0.35, 1.25, 8.0, len(_lor_rows) * 0.58 + 0.45, font_size=11)
+
+_ory = 1.25 + len(_lor_rows) * 0.58 + 0.55
+add_text(slide,
+         "* Adjusted OR: exp(β). 표준화 변수 기준 1 SD 변화 시 Low TAMA 오즈 배율\n"
+         "  OR < 1: 해당 변수 증가 → Low TAMA 위험 감소 / OR > 1: 위험 증가",
+         0.35, _ory, 8.0, 0.65, size=10, italic=True, color=ORANGE)
+
+add_text(slide, "Adjusted OR Forest Plot", 8.3, 1.25, 5.0, 0.35, size=13, bold=True, color=NAVY)
+add_image(slide, "11_logistic_forest.png", 8.3, 1.62, 4.68, 5.65)
 
 
 # ════════════════════════════════════════════════════════════
@@ -1070,6 +1244,113 @@ add_image(slide, "15_case_progression.png", 6.65, 4.58, 6.33, 2.7)
 
 
 # ════════════════════════════════════════════════════════════
+# 슬라이드 12-E — Case 0 AEC 단독 진단력 심층 분석
+# ════════════════════════════════════════════════════════════
+slide = prs.slides.add_slide(BLANK)
+add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
+slide_header(slide, "06  Case 0 — AEC 단독 진단력", "AEC-Only Baseline (Case 0)")
+
+add_text(slide,
+         "성별·나이 없이 AEC 특징만으로 TAMA를 예측할 수 있는가?  "
+         "— 인구통계 보정 전 AEC 신호의 독립적 진단력 정량화",
+         0.35, 1.15, 12.6, 0.42, size=12, color=DARK)
+
+_c0_kpis = [
+    ("선형 R²\n(Case 0)",            D['lin_c0_r2'],   "AEC 단독 TAMA 설명력"),
+    ("선형 RMSE\n(Case 0)",          D['lin_c0_rmse'],  "예측 오차 (cm²)"),
+    ("로지스틱 AUC\n(Case 0)",       D['log_c0_auc'],  "AEC 단독 판별 능력"),
+    ("Nagelkerke R²\n(Case 0)",      D['log_c0_nag'],  "로지스틱 설명력"),
+]
+for i, (lbl, val, desc) in enumerate(_c0_kpis):
+    x = 0.35 + i * 3.22
+    add_rect(slide, x, 1.72, 3.1, 1.6, fill_rgb=NAVY)
+    add_text(slide, lbl,  x+0.12, 1.78, 2.9, 0.55, size=11, bold=True, color=ORANGE)
+    add_text(slide, val,  x+0.12, 2.33, 2.9, 0.55, size=20, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+    add_text(slide, desc, x+0.12, 2.9,  2.9, 0.35, size=10, color=RGBColor(0xB0,0xC8,0xE8))
+
+add_table(slide,
+          ["지표", "Case 0\n(AEC 단독)", "Case 1\n(Sex+Age)", "Case 1→0 비교", "의미"],
+          [
+              ["선형 R²",
+               D['lin_c0_r2'], D['lin_c1_r2'],
+               f"Case1 - Case0 = {float(D['lin_c1_r2'])-float(D['lin_c0_r2']):.3f}",
+               "인구통계 추가 효과"],
+              ["선형 RMSE",
+               D['lin_c0_rmse'], D['lin_c1_rmse'],
+               f"RMSE 개선: {float(D['lin_c0_rmse'])-float(D['lin_c1_rmse']):.2f} cm²",
+               "오차 감소"],
+              ["로지스틱 AUC",
+               D['log_c0_auc'], D['log_c1_auc'],
+               f"ΔAUC = {float(D['log_c1_auc'])-float(D['log_c0_auc']):.3f}",
+               "Sex+Age 기여"],
+              ["Nagelkerke R²",
+               D['log_c0_nag'], D['log_c1_nag'],
+               f"ΔNag = {float(D['log_c1_nag'])-float(D['log_c0_nag']):.3f}",
+               "설명력 변화"],
+          ],
+          0.35, 3.5, 12.6, 2.3, font_size=10)
+
+add_rect(slide, 0.35, 5.95, 12.6, 0.8, fill_rgb=BLUE)
+add_text(slide,
+         f"해석: AEC 단독(Case 0)으로도 선형 R²={D['lin_c0_r2']}, AUC={D['log_c0_auc']} 달성 "
+         f"→ AEC 신호에 근육량 관련 정보가 내포되어 있음을 확인",
+         0.55, 6.02, 12.1, 0.65, size=12, bold=True, color=WHITE)
+
+
+# ════════════════════════════════════════════════════════════
+# 슬라이드 12-F — 성능 평가지표 해석 기준
+# ════════════════════════════════════════════════════════════
+slide = prs.slides.add_slide(BLANK)
+add_rect(slide, 0, 0, 13.33, 7.5, fill_rgb=GRAY)
+slide_header(slide, "06  성능 평가지표 해석 기준", "Statistical Metric Reference")
+
+add_text(slide, "선형 회귀 지표", 0.35, 1.18, 6.0, 0.35, size=13, bold=True, color=NAVY)
+add_table(slide,
+          ["지표", "해석 기준"],
+          [
+              ["R² / Adj R²",  "0~1 사이, 1에 가까울수록 설명력↑ — Case 간 비교에 Adj R² 우선"],
+              ["RMSE",         "단위 cm², 낮을수록 우수 — 임상 허용 오차 기준으로 해석"],
+              ["AIC / BIC",    "낮을수록 선호 — 모델 복잡도 대비 적합도 (Case 비교 기준)"],
+              ["Durbin-Watson","1.5~2.5 정상 — 잔차 자기상관 없음"],
+              ["Shapiro-Wilk", "p > 0.05: 정규분포 충족 / p ≤ 0.05: 비정규 (주의)"],
+              ["Breusch-Pagan","p > 0.05: 등분산 충족 / p ≤ 0.05: 이분산 (Robust SE 권장)"],
+          ],
+          0.35, 1.55, 6.3, 3.3, font_size=10)
+
+add_text(slide, "로지스틱 회귀 지표", 6.8, 1.18, 6.0, 0.35, size=13, bold=True, color=NAVY)
+add_table(slide,
+          ["지표", "해석 기준"],
+          [
+              ["AUC-ROC",          "0.5=무작위, 0.7↑=양호, 0.8↑=우수, 1.0=완벽"],
+              ["Bootstrap 95%CI",  "n=1000 비모수 — CI가 좁을수록 안정적 추정"],
+              ["Sensitivity",       "실제 Low TAMA를 얼마나 탐지 (TP율)"],
+              ["Specificity",       "정상 TAMA를 얼마나 식별 (TN율)"],
+              ["Hosmer-Lemeshow",   "p > 0.05: 보정 양호 / ≤ 0.05: 체계적 오차"],
+              ["Nagelkerke R²",     "0~1 pseudo-R² — 설명력 비교용"],
+              ["Brier Score",       "0=완벽, 0.25=무작위 — 확률 예측 정밀도"],
+          ],
+          6.8, 1.55, 6.18, 3.7, font_size=10)
+
+add_rect(slide, 0.35, 5.0, 12.6, 0.75, fill_rgb=NAVY)
+add_text(slide, "임계값 해석 기준  (Low TAMA)",
+         0.55, 5.07, 4.0, 0.35, size=11, bold=True, color=ORANGE)
+add_text(slide,
+         f"남성: TAMA < {D['thr_male']} cm²  →  Low Muscle (Positive=1)  |  "
+         f"여성: TAMA < {D['thr_female']} cm²  →  Low Muscle (Positive=1)  |  "
+         f"양성 비율: {D['n_pos']} / {D['n_total']:,} = {D['pos_rate']} %",
+         0.55, 5.42, 12.1, 0.28, size=11, color=WHITE)
+
+add_rect(slide, 0.35, 5.85, 12.6, 1.42, fill_rgb=WHITE, line_rgb=BLUE, line_w=Pt(1))
+add_text(slide, "모델 선택 원칙",
+         0.55, 5.92, 4.0, 0.35, size=11, bold=True, color=NAVY)
+add_text(slide,
+         "① 연속형 TAMA 예측(Part 1): R², Adj R², RMSE 기준으로 모델 평가\n"
+         "② 이진 분류(Part 2): AUC, Sensitivity/Specificity 균형, HL 보정도 확인\n"
+         "③ Case 비교(Part 3): AIC/BIC 감소 + ΔR²/ΔAUC 임상 유의성 동시 검토",
+         0.55, 6.3, 12.1, 0.9, size=11, color=DARK)
+
+
+# ════════════════════════════════════════════════════════════
 # 슬라이드 13 — 결론
 # ════════════════════════════════════════════════════════════
 slide = prs.slides.add_slide(BLANK)
@@ -1084,19 +1365,21 @@ _au_23 = float(D['log_c3_auc']) - float(D['log_c2_auc'])
 conclusions = [
     ("성별의 압도적 기여",
      f"선형 단변량: Sex 단독 R²={D['linu_Sex_r2']}  |  "
-     f"남성 TAMA가 여성 대비 평균 +{D['linu_Sex_beta_num']:.1f} cm²"),
-    ("AEC 특징의 독립적 기여",
-     f"Case1→2  선형 R²  +{_r2_12:.3f} "
-     f"({float(D['lin_c1_r2']):.3f}→{float(D['lin_c2_r2']):.3f})\n"
-     f"Case1→2  로지스틱 AUC  +{_au_12:.3f} "
-     f"({float(D['log_c1_auc']):.3f}→{float(D['log_c2_auc']):.3f})"),
-    ("CT 모델명의 추가 기여",
-     f"Case2→3  선형 R²  +{_r2_23:.3f}  |  로지스틱 AUC  +{_au_23:.3f}\n"
-     "AIC 추가 감소 → 모델 적합도 개선 확인"),
-    ("최종 모델 (Case 3) 요약",
-     f"선형: R²={D['lin_r2']}, RMSE={D['lin_rmse_disp']}\n"
-     f"로지스틱: AUC={D['log_auc']} {D['log_auc_ci_disp']}  |  "
-     f"HL p={D['log_hl_p']} (보정도 양호)"),
+     f"남성 TAMA가 여성 대비 평균 +{D['linu_Sex_beta_num']:.1f} cm²\n"
+     "성별·나이는 필수 공변량으로 모든 모델에 포함 (제외 불가)"),
+    ("AEC 단독 진단력 (Case 0)",
+     f"성별·나이 없이 AEC만으로:\n"
+     f"  선형 R²={D['lin_c0_r2']}  |  로지스틱 AUC={D['log_c0_auc']}\n"
+     "AEC 신호가 독립적인 근육량 정보를 내포"),
+    ("AEC 특징의 추가 기여 (Case 1→2)",
+     f"선형 R²  {float(D['lin_c1_r2']):.3f} → {float(D['lin_c2_r2']):.3f}  "
+     f"(+{_r2_12:.3f})\n"
+     f"로지스틱 AUC  {float(D['log_c1_auc']):.3f} → {float(D['log_c2_auc']):.3f}  "
+     f"(+{_au_12:.3f})"),
+    ("CT 모델명·kVp 추가 기여 및 최종 성능",
+     f"Case2→3  선형 R²+{_r2_23:.3f}  |  AUC +{_au_23:.3f}\n"
+     f"최종(Case3): R²={D['lin_r2']}, RMSE={D['lin_rmse_disp']}\n"
+     f"AUC={D['log_auc']} {D['log_auc_ci_disp']}  (HL p={D['log_hl_p']})"),
 ]
 for i, (title, body) in enumerate(conclusions):
     row = i // 2
@@ -1106,11 +1389,11 @@ for i, (title, body) in enumerate(conclusions):
     add_rect(slide, x, y, 6.1, 2.2, fill_rgb=NAVY)
     add_rect(slide, x, y, 0.18, 2.2, fill_rgb=ORANGE)
     add_text(slide, f"{i+1}. {title}", x+0.3, y+0.1, 5.6, 0.45,
-             size=13, bold=True, color=ORANGE)
-    add_text(slide, body, x+0.3, y+0.6, 5.6, 1.5, size=12, color=WHITE)
+             size=12, bold=True, color=ORANGE)
+    add_text(slide, body, x+0.3, y+0.6, 5.6, 1.55, size=11, color=WHITE)
 
 add_text(slide,
-         "AEC 특징은 성별·나이 외에 TAMA 예측에 독립적이고 유의미한 기여를 함 — CT 촬영 시 수집되는 AEC 데이터의 임상적 활용 가능성 확인",
+         "AEC 특징은 성별·나이와 독립적으로 TAMA 예측에 기여 — CT 촬영 시 수집되는 AEC 데이터의 임상적 활용 가능성 확인",
          0.35, 6.8, 12.6, 0.55, size=12, bold=True, color=NAVY, align=PP_ALIGN.CENTER)
 
 
@@ -1125,16 +1408,16 @@ other_site = "신촌" if D['site'] == "강남" else "강남"
 
 limits = [
     "잔차 정규성·등분산성 가정 위반 → Robust Standard Errors 또는 비모수 검정 검토 필요",
-    f"Logistic 이진화 임계값 (M<{D['thr_male']}, F<{D['thr_female']} cm²) — 문헌 기반, 기관별 참조값 확인 필요",
-    f"단일 기관({D['site']}) 데이터 → 외부 검증({other_site} 데이터) 필요",
-    "AEC Feature 선택은 통계적 상관분석 기반 — 임상적 의미 추가 검토 권장",
+    f"Logistic 이진화 임계값 (M<{D['thr_male']}, F<{D['thr_female']} cm²) — 데이터 내 P25 기반; 문헌(Prado 2008, Martin 2013) 기준값과 비교 필요",
+    f"단일 기관({D['site']}) 데이터 → 외부 검증({other_site} 데이터 활용) 필요",
+    "AEC Feature는 통계적 요약값 기반 — raw AEC 시계열의 잠재 패턴이 미반영",
 ]
 future = [
     f"{other_site} 데이터를 이용한 외부 검증 (External Validation)",
+    "Raw AEC 시계열(~200포인트)을 1D CNN / LSTM 직접 입력 — feature engineering 불필요",
     "Robust Regression / Weighted Least Squares 적용",
-    "머신러닝 기반 앙상블 모델 비교 (Random Forest, XGBoost)",
+    "머신러닝 앙상블 모델 비교 (Random Forest, XGBoost)",
     "다기관 데이터 수집을 통한 모델 일반화",
-    "AEC Feature의 임상적 의미 방사선사·임상의 검토",
 ]
 
 add_rect(slide, 0.35, 1.2, 6.0, 3.3, fill_rgb=WHITE, line_rgb=ORANGE, line_w=Pt(1.5))
@@ -1152,7 +1435,7 @@ add_rect(slide, 0.35, 4.65, 12.6, 1.85, fill_rgb=NAVY)
 add_text(slide, "핵심 메시지",
          0.55, 4.72, 3.0, 0.38, size=12, bold=True, color=ORANGE)
 add_text(slide,
-         "CT 스캐너의 AEC 곡선에서 추출한 통계 특징(p25, CV, skewness, mean)은 인구통계학적 변수와 독립적으로\n"
+         f"CT 스캐너의 AEC 곡선에서 추출한 통계 특징({_aec_feat_str})은 인구통계학적 변수와 독립적으로\n"
          "TAMA 예측에 유의미하게 기여한다. 향후 외부 검증 및 다기관 연구를 통해 임상 적용 가능성을 확인해야 한다.",
          0.55, 5.12, 12.1, 1.3, size=13, color=WHITE)
 
@@ -1160,6 +1443,6 @@ add_text(slide,
 # ════════════════════════════════════════════════════════════
 # 저장
 # ════════════════════════════════════════════════════════════
-output_path = f"results/{config.SITE}_TAMA_연구보고서.pptx"
+output_path = os.path.join(_ROOT, "results", f"{config.SITE}_TAMA_연구보고서.pptx")
 prs.save(output_path)
 print(f"PPT 저장 완료: {output_path}")

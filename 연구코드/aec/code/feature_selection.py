@@ -102,6 +102,16 @@ def compute_vif(df: pd.DataFrame, features: list) -> pd.DataFrame:
     return pd.DataFrame(records).sort_values('VIF', ascending=False)
 
 
+def compute_correlation_matrix(df: pd.DataFrame, features: list) -> pd.DataFrame:
+    """
+    선택 feature들 간 Pearson 상관행렬 계산.
+    |r| > 0.8 이면 다중공선성 위험 신호.
+    """
+    available = [f for f in features if f in df.columns]
+    subset = df[available].dropna()
+    return subset.corr(method='pearson').round(4)
+
+
 def scanner_distribution(df: pd.DataFrame) -> pd.DataFrame:
     """CT 스캐너 모델별 환자 수 및 비율 집계."""
     counts = df['ManufacturerModelName'].value_counts()
@@ -208,23 +218,49 @@ def main():
 
     vif_partial_df = pd.concat(vif_partial_rows, ignore_index=True) if vif_partial_rows else pd.DataFrame()
 
-    # 3. 성별 TAMA 분포 (임계값 설정 참고)
-    print("\n[3] 성별 TAMA 분포 (임계값 설정 참고):")
+    # 3. 선택 feature 간 Correlation Matrix (다중공선성 확인)
+    print(f"\n[3] 선택 feature 간 Correlation Matrix (|r| > 0.8 주의):")
+    all_model_feats = base_demo + [f for f in available if f in df_enc.columns]
+    corr_matrix = compute_correlation_matrix(df_enc, all_model_feats)
+    print(corr_matrix.to_string())
+    # 쌍별 고상관 feature 출력
+    high_corr_pairs = []
+    cols_cm = corr_matrix.columns.tolist()
+    for i in range(len(cols_cm)):
+        for j in range(i + 1, len(cols_cm)):
+            r = corr_matrix.iloc[i, j]
+            if abs(r) > 0.8:
+                high_corr_pairs.append({
+                    'Feature_A': cols_cm[i],
+                    'Feature_B': cols_cm[j],
+                    'Pearson_r': round(r, 4),
+                })
+    high_corr_df = (pd.DataFrame(high_corr_pairs)
+                    .sort_values('Pearson_r', key=abs, ascending=False)
+                    if high_corr_pairs else pd.DataFrame(columns=['Feature_A', 'Feature_B', 'Pearson_r']))
+    if not high_corr_df.empty:
+        print("\n  [!] |r| > 0.8 쌍 (다중공선성 주의):")
+        print(high_corr_df.to_string(index=False))
+    else:
+        print("  -> |r| > 0.8 쌍 없음")
+
+    # 4. 성별 TAMA 분포 (임계값 설정 참고)
+    print("\n[4] 성별 TAMA 분포 (임계값 설정 참고):")
     tama_dist = tama_distribution_summary(df)
     print(tama_dist.to_string(index=False))
     print(f"\n  현재 설정된 임계값: M < {config.TAMA_THRESHOLD_MALE} cm², "
           f"F < {config.TAMA_THRESHOLD_FEMALE} cm²")
     df_bin = data_loader.add_tama_binary(df_enc.copy())
 
-    # 4. CT 스캐너 분포
-    print("\n[4] CT 스캐너 분포:")
+    # 5. CT 스캐너 분포
+    print("\n[5] CT 스캐너 분포:")
     scanner_df = scanner_distribution(df)
     print(scanner_df.head(10).to_string(index=False))
     print(f"  총 {len(scanner_df)}종 스캐너, 상위 스캐너: {scanner_df.iloc[0]['Model']} "
           f"({scanner_df.iloc[0]['N']}명, {scanner_df.iloc[0]['Pct']}%)")
 
-    # 5. kVp 분포
-    print("\n[5] kVp 분포:")
+    # 6. kVp 분포
+    print("\n[6] kVp 분포:")
     kvp_df = kvp_distribution(df)
     if not kvp_df.empty:
         print(kvp_df.to_string(index=False))
@@ -233,7 +269,7 @@ def main():
     else:
         print("  kVp 컬럼 없음 (KVP / kvp)")
 
-    # 6. Excel 저장
+    # 7. Excel 저장
     out_path = os.path.join(config.RESULTS_DIR, 'feature_selection_report.xlsx')
     with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
         corr_df.to_excel(writer, sheet_name='상관계수_전체', index=False)
@@ -242,6 +278,9 @@ def main():
             vif_df.to_excel(writer, sheet_name='VIF_선택feature', index=False)
         if not vif_partial_df.empty:
             vif_partial_df.to_excel(writer, sheet_name='VIF_부분제거_비교', index=False)
+        corr_matrix.to_excel(writer, sheet_name='Correlation_Matrix')
+        if not high_corr_df.empty:
+            high_corr_df.to_excel(writer, sheet_name='고상관쌍_r0.8이상', index=False)
         tama_dist.to_excel(writer, sheet_name='TAMA_분포_성별', index=False)
         scanner_df.to_excel(writer, sheet_name='CT_스캐너_분포', index=False)
         if not kvp_df.empty:

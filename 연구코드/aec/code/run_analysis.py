@@ -101,6 +101,16 @@ def main():
     ok = run_step("Step 6 - Markdown 연구 보고서 생성", generate_report.generate_report)
     results['report'] = ok
 
+    # Step 7: Generate PPT
+    def _run_ppt():
+        import subprocess
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'generate_ppt.py')
+        subprocess.run([sys.executable, script], check=True,
+                       cwd=os.path.dirname(os.path.abspath(__file__)))
+
+    ok = run_step("Step 7 - PPT 보고서 생성", _run_ppt)
+    results['ppt'] = ok
+
     # 최종 요약
     print(f"\n{'=' * 60}")
     print("  실행 결과 요약")
@@ -112,6 +122,7 @@ def main():
         'multivariable':     'Step 4  Multivariable Analysis',
         'plots':             'Step 5  시각화 생성',
         'report':            'Step 6  Markdown 보고서',
+        'ppt':               'Step 7  PPT 보고서',
     }
     all_ok = True
     for key, label in labels.items():
@@ -130,7 +141,8 @@ def main():
     print(f"  ├── logistic_results.xlsx")
     print(f"  ├── multivariable_results.xlsx")
     print(f"  ├── figures/  (15개 PNG)")
-    print(f"  └── research_report.md")
+    print(f"  ├── research_report.md")
+    print(f"  └── {config.SITE}_TAMA_연구보고서.pptx")
 
     if not all_ok:
         print("\n  일부 단계에서 오류가 발생했습니다. 위 오류 메시지를 확인하세요.")

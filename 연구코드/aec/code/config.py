@@ -10,7 +10,7 @@ import pandas as pd
 # ── 데이터 경로 ───────────────────────────────────────────────────────────────
 _ROOT = Path(__file__).parent.parent   # aec/ 루트
 
-SITE = "신촌"
+SITE = "강남"
 EXCEL_PATH  = str(_ROOT / "data" / f"{SITE}_merged_features.xlsx")
 
 RESULTS_DIR = str(_ROOT / "results" / SITE)
@@ -25,15 +25,17 @@ def _compute_tama_thresholds():
 
 TAMA_THRESHOLD_MALE, TAMA_THRESHOLD_FEMALE = _compute_tama_thresholds()
 
-# ── Case 2·3에서 사용할 AEC 특징 변수 ─────────────────────────────────────────
-# feature_selection.py 실행 후 상관계수 상위 변수로 업데이트 권장
-# 기본값: 상관계수 상위 & 다중공선성 낮은 조합 (feature_selection.py 결과 기반)
-#   p25           : Pearson r=0.37 (강양성, 하위 사분위 AEC 값)
-#   CV            : Pearson r=-0.35 (상대 변동성, mean과 다른 정보 제공)
-#   skewness      : Pearson r=-0.34 (AEC 곡선 비대칭성)
-#   slope_abs_mean: 곡선 동역학 feature (다른 그룹)
+# ── Case 2·3에서 사용할 AEC 특징 변수 (SITE별 독립 관리) ──────────────────────
+# feature_selection.py 실행 후 상관계수 상위 변수로 사이트별 업데이트 권장
 # ※ mean과 AUC_normalized는 VIF>50000 → 동시 사용 시 다중공선성 심각 주의
-SELECTED_AEC_FEATURES = ['p25', 'CV', 'skewness', 'slope_abs_mean', 'mean']
+_SELECTED_AEC_FEATURES_BY_SITE = {
+    # amplitude 그룹(mean≈AUC_normalized≈p25≈peak_max_height) 중 mean 하나만 선택
+    # 강남: mean(r=0.297) 포함, VIF max=1.58
+    "강남": ['mean', 'CV', 'skewness', 'slope_abs_mean'],
+    # 신촌: mean 포함, peak_max_height(r=0.943 with mean)은 중복 제거, VIF max=1.27
+    "신촌": ['mean', 'CV', 'skewness', 'slope_abs_mean'],
+}
+SELECTED_AEC_FEATURES = _SELECTED_AEC_FEATURES_BY_SITE.get(SITE, ['mean', 'CV', 'skewness', 'slope_abs_mean'])
 
 # ── 통계 분석 파라미터 ─────────────────────────────────────────────────────────
 RANDOM_STATE = 42
