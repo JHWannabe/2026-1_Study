@@ -340,22 +340,27 @@ def parse_report(site):
     r2_23  = flt(D['lin_c3_r2'])    - flt(D['lin_c2_r2'])
     ar2_12 = flt(D['lin_c2_adjr2']) - flt(D['lin_c1_adjr2'])
     ar2_23 = flt(D['lin_c3_adjr2']) - flt(D['lin_c2_adjr2'])
-    rm_12  = flt(D['lin_c2_rmse'])  - flt(D['lin_c1_rmse'])
-    rm_23  = flt(D['lin_c3_rmse'])  - flt(D['lin_c2_rmse'])
-    ai_12  = flt(D['lin_c2_aic'])   - flt(D['lin_c1_aic'])
-    ai_23  = flt(D['lin_c3_aic'])   - flt(D['lin_c2_aic'])
+    rm_12  = flt(D['lin_c1_rmse'])  - flt(D['lin_c2_rmse'])  # 감소 = positive
+    rm_23  = flt(D['lin_c2_rmse'])  - flt(D['lin_c3_rmse'])
+    ai_12  = flt(D['lin_c1_aic'])   - flt(D['lin_c2_aic'])   # 감소 = positive
+    ai_23  = flt(D['lin_c2_aic'])   - flt(D['lin_c3_aic'])
 
+    # 표 값은 절대적 차이
     D['lin_delta12_r2']    = f"+{r2_12:.4f}"
     D['lin_delta23_r2']    = f"+{r2_23:.4f}"
     D['lin_delta12_adjr2'] = f"+{ar2_12:.4f}"
     D['lin_delta23_adjr2'] = f"+{ar2_23:.4f}"
-    D['lin_delta12_rmse']  = f"{rm_12:.2f}"
-    D['lin_delta23_rmse']  = f"{rm_23:.2f}"
-    D['lin_delta12_aic']   = f"{ai_12:.0f}"
-    D['lin_delta23_aic']   = f"{ai_23:.0f}"
+    D['lin_delta12_rmse']  = f"-{rm_12:.2f}"  # 감소이므로 음수표시
+    D['lin_delta23_rmse']  = f"-{rm_23:.2f}"
+    D['lin_delta12_aic']   = f"-{ai_12:.0f}"  # 감소이므로 음수표시
+    D['lin_delta23_aic']   = f"-{ai_23:.0f}"
+
+    # 요약 텍스트는 상대적 변화 (%)
+    r2_12_pct = r2_12 / flt(D['lin_c1_r2']) * 100
+    r2_23_pct = r2_23 / flt(D['lin_c2_r2']) * 100
     D['lin_summary'] = (
-        f"AEC 특징 추가(Case1→2)로 R² +{r2_12 * 100:.1f}%p 향상  |  "
-        f"CT 모델명/kVp 추가(Case2→3)로 추가 +{r2_23 * 100:.1f}%p"
+        f"AEC 특징 추가(Case1→2)로 R² +{r2_12_pct:.1f}% 향상  |  "
+        f"CT 모델명/kVp 추가(Case2→3)로 추가 +{r2_23_pct:.1f}% 향상"
     )
 
     # ── 4.3.2 로지스틱 Case 비교 ─────────────────────────────
@@ -379,18 +384,23 @@ def parse_report(site):
     au_23 = flt(D['log_c3_auc']) - flt(D['log_c2_auc'])
     na_12 = flt(D['log_c2_nag']) - flt(D['log_c1_nag'])
     na_23 = flt(D['log_c3_nag']) - flt(D['log_c2_nag'])
-    la_12 = flt(D['log_c2_aic']) - flt(D['log_c1_aic'])
-    la_23 = flt(D['log_c3_aic']) - flt(D['log_c2_aic'])
+    la_12 = flt(D['log_c1_aic']) - flt(D['log_c2_aic'])  # 감소 = positive
+    la_23 = flt(D['log_c2_aic']) - flt(D['log_c3_aic'])
 
+    # 표 값은 절대적 차이
     D['log_delta12_auc'] = f"+{au_12:.3f}"
     D['log_delta23_auc'] = f"+{au_23:.3f}"
     D['log_delta12_nag'] = f"+{na_12:.3f}"
     D['log_delta23_nag'] = f"+{na_23:.3f}"
-    D['log_delta12_aic'] = f"{la_12:.0f}"
-    D['log_delta23_aic'] = f"{la_23:.0f}"
+    D['log_delta12_aic'] = f"-{la_12:.0f}"  # 감소이므로 음수표시
+    D['log_delta23_aic'] = f"-{la_23:.0f}"
+
+    # 요약 텍스트는 상대적 변화 (%)
+    au_12_pct = au_12 / flt(D['log_c1_auc']) * 100
+    au_23_pct = au_23 / flt(D['log_c2_auc']) * 100
     D['log_summary'] = (
-        f"AEC 추가(Case1→2)로 AUC +{au_12 * 100:.1f}%p 향상  |  "
-        f"CT 모델명/kVp 추가(Case2→3)로 +{au_23 * 100:.1f}%p 추가 개선"
+        f"AEC 추가(Case1→2)로 AUC +{au_12_pct:.1f}% 향상  |  "
+        f"CT 모델명/kVp 추가(Case2→3)로 +{au_23_pct:.1f}% 추가 개선"
     )
 
     return D
