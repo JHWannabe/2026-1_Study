@@ -1,12 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python run_analysis.py)",
-      "Bash(python -c ':*)",
-      "Bash(python generate_report.py)",
-      "Bash(python generate_plots.py)",
-      "Bash(python -c \"import pptx; print\\('python-pptx', pptx.__version__\\)\")",
-      "Bash(pip install *)"
+      "Read(//c/Users/jhjun/OneDrive/Desktop/2026-1_Study/�����ڵ�/aec/**)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\jhjun\\OneDrive\\Desktop\\2026-1_Study\\�����ڵ�\\aec\\data"
     ]
   }
 }
