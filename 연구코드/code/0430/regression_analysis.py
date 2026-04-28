@@ -1339,6 +1339,212 @@ if len(all_clean_data) == 2:
     ext_df.to_excel(COMPARE_DIR / "external_validation_results.xlsx", index=False)
     print(f"  Saved: external_validation_results.xlsx")
 
+# ────────────────────────────────────────────────
+# 5. BMI 기여도 분석 (Case 1, 2, 4 × BMI 유무 비교)
+# ────────────────────────────────────────────────
+# [0424 vs 0430 핵심 차이 정량화]
+# 0424에는 BMI가 없었으므로, BMI 포함/미포함 모델을 나란히 비교하여
+# BMI 보정이 AEC 피처의 독립 기여도 추정에 미치는 영향을 수치화한다.
+# Case 1/2/4만 선택: AEC_prev 기반으로 한정하여 해석을 단순화.
+# (Case 3/5는 AEC 선택 효과가 혼재되므로 별도 비교에서 다룸)
+if all_clean_data:
+    print(f"\n{'='*60}")
+    print("BMI CONTRIBUTION ANALYSIS (Case 1 / 2 / 4 × BMI 유무)")
+    print(f"{'='*60}")
+
+    BMI_COMPARE_DIR = SCRIPT_DIR.parent / "results" / "regression"
+    BMI_COMPARE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # BMI 비교 케이스 정의
+    # noBMI: 0424 방식 (Age + Sex만)
+    # BMI  : 0430 방식 (Age + Sex + BMI)
+    BMI_CASE_DEFS = {
+        "C1_noBMI": (["PatientAge", "PatientSex_enc"],                   "Case 1\n(no BMI)"),
+        "C1_BMI":   (["PatientAge", "PatientSex_enc", "BMI"],            "Case 1\n(+BMI)"),
+        "C2_noBMI": (["PatientAge", "PatientSex_enc"] + AEC_PREV,        "Case 2\n(no BMI)"),
+        "C2_BMI":   (["PatientAge", "PatientSex_enc", "BMI"] + AEC_PREV, "Case 2\n(+BMI)"),
+        "C4_noBMI": None,   # SCANNER는 병원마다 다르므로 루프 안에서 설정
+        "C4_BMI":   None,
+    }
+
+    bmi_all_rows = []
+
+    for hosp_key, (X_full, y_cont, y_bin, CASES_main, tama_thr) in all_clean_data.items():
+        hosp_label = "강남" if hosp_key == "gangnam" else "신촌"
+        print(f"\n  [{hosp_label}] n={len(y_cont)}")
+
+        # SCANNER 컬럼 복원: X_full에 model_ 또는 kVp 컬럼을 찾아 사용
+        scanner_cols = [c for c in X_full.columns
+                        if c.startswith("model_") or c == "kVp"]
+
+        cases_bmi = {
+            "C1_noBMI": [f for f in ["PatientAge", "PatientSex_enc"]
+                         if f in X_full.columns],
+            "C1_BMI":   [f for f in ["PatientAge", "PatientSex_enc", "BMI"]
+                         if f in X_full.columns],
+            "C2_noBMI": [f for f in ["PatientAge", "PatientSex_enc"] + AEC_PREV
+                         if f in X_full.columns],
+            "C2_BMI":   [f for f in ["PatientAge", "PatientSex_enc", "BMI"] + AEC_PREV
+                         if f in X_full.columns],
+            "C4_noBMI": [f for f in ["PatientAge", "PatientSex_enc"] + AEC_PREV + scanner_cols
+                         if f in X_full.columns],
+            "C4_BMI":   [f for f in ["PatientAge", "PatientSex_enc", "BMI"] + AEC_PREV + scanner_cols
+                         if f in X_full.columns],
+        }
+
+        LABELS_BMI = {
+            "C1_noBMI": "Case 1\n(no BMI)",  "C1_BMI": "Case 1\n(+BMI)",
+            "C2_noBMI": "Case 2\n(no BMI)",  "C2_BMI": "Case 2\n(+BMI)",
+            "C4_noBMI": "Case 4\n(no BMI)",  "C4_BMI": "Case 4\n(+BMI)",
+        }
+        COLORS_BMI = {
+            "C1_noBMI": "#aaaaaa", "C1_BMI": "#2ecc71",
+            "C2_noBMI": "#85c1e9", "C2_BMI": "#3498db",
+            "C4_noBMI": "#f0a898", "C4_BMI": "#e74c3c",
+        }
+
+        lin_bmi, log_bmi = {}, {}
+        for cname, feats in cases_bmi.items():
+            if not feats:
+                continue
+            lr = linear_cv(X_full[feats], y_cont)
+            lo = logistic_cv(X_full[feats], y_bin)
+            lin_bmi[cname] = lr
+            log_bmi[cname] = lo
+            print(f"    {cname:12s}: Lin R²={lr['R2']:.4f}±{lr['R2_std']:.4f}"
+                  f"  AUC={lo['AUC']:.4f}±{lo['AUC_std']:.4f}")
+
+            bmi_all_rows.append({
+                "Hospital": hosp_label,
+                "Case": cname,
+                "Label": LABELS_BMI[cname].replace("\n", " "),
+                "Has_BMI": "BMI" in cname,
+                "N_features": len(feats),
+                "Lin_R2":    round(lr["R2"], 4),   "Lin_R2_std":  round(lr["R2_std"], 4),
+                "Lin_MAE":   round(lr["MAE"], 2),   "Lin_RMSE":    round(lr["RMSE"], 2),
+                "Log_AUC":   round(lo["AUC"], 4),   "Log_AUC_std": round(lo["AUC_std"], 4),
+                "Log_Acc":   round(lo["Accuracy"], 4),
+                "Log_Sens":  round(lo["Sensitivity"], 4),
+                "Log_Spec":  round(lo["Specificity"], 4),
+                "TAMA_threshold": tama_thr,
+            })
+
+        if len(lin_bmi) < 6:
+            print(f"    일부 케이스 누락 — BMI 비교 플롯 생략")
+            continue
+
+        case_pairs  = [("C1_noBMI","C1_BMI"), ("C2_noBMI","C2_BMI"), ("C4_noBMI","C4_BMI")]
+        pair_labels = ["Case 1\n(임상 기준선)", "Case 2\n(+AEC_prev)", "Case 4\n(+AEC_prev\n+Scanner)"]
+        x_pos = np.arange(len(case_pairs))
+        w_bar = 0.35
+
+        # ── Fig A: R² & AUC 나란히 ──
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        for ax, res_d, metric, std_key, ylabel, ylim in [
+            (axes[0], lin_bmi, "R2",  "R2_std",  "5-Fold CV R²",  None),
+            (axes[1], log_bmi, "AUC", "AUC_std", "5-Fold CV AUC", (0, 1)),
+        ]:
+            for i, (no_k, bmi_k) in enumerate(case_pairs):
+                v_no  = res_d[no_k][metric];  e_no  = res_d[no_k][std_key]
+                v_bmi = res_d[bmi_k][metric]; e_bmi = res_d[bmi_k][std_key]
+                b1 = ax.bar(x_pos[i] - w_bar/2, v_no,  w_bar,
+                            color="#aaaaaa", edgecolor="white",
+                            yerr=e_no,  capsize=4, label="no BMI" if i == 0 else "")
+                b2 = ax.bar(x_pos[i] + w_bar/2, v_bmi, w_bar,
+                            color="#2ecc71", edgecolor="white",
+                            yerr=e_bmi, capsize=4, label="+BMI"    if i == 0 else "")
+                for bar, v in [(b1, v_no), (b2, v_bmi)]:
+                    ax.text(bar[0].get_x()+bar[0].get_width()/2,
+                            bar[0].get_height()+max(e_no,e_bmi)+0.003,
+                            f"{v:.4f}", ha="center", va="bottom", fontsize=8)
+                # Delta annotation
+                delta = v_bmi - v_no
+                mid_x = x_pos[i]
+                mid_y = max(v_no + e_no, v_bmi + e_bmi) + 0.025
+                ax.annotate(f"Δ={delta:+.4f}",
+                            xy=(mid_x, mid_y), ha="center", fontsize=9,
+                            fontweight="bold",
+                            color="#27ae60" if delta > 0 else "#e74c3c")
+            ax.set_xticks(x_pos); ax.set_xticklabels(pair_labels, fontsize=9)
+            ax.set_ylabel(ylabel)
+            if ylim: ax.set_ylim(*ylim)
+            ax.yaxis.grid(True, linestyle="--", alpha=0.4); ax.set_axisbelow(True)
+            ax.legend(fontsize=10)
+
+        plt.suptitle(f"[{hosp_label}] BMI 유무 비교 — Case 1 / 2 / 4\n"
+                     f"(회색 = no BMI / 초록 = +BMI  |  Δ = BMI 추가 효과)",
+                     fontsize=13, fontweight="bold")
+        plt.tight_layout()
+        out_a = BMI_COMPARE_DIR / hosp_key / "bmi_comparison_r2_auc.png"
+        out_a.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_a, dpi=150); plt.close()
+        print(f"    Saved: {out_a.name}")
+
+        # ── Fig B: BMI 추가로 인한 Delta 막대 ──
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+        deltas_r2  = [lin_bmi[bk]["R2"]  - lin_bmi[nk]["R2"]  for nk, bk in case_pairs]
+        deltas_auc = [log_bmi[bk]["AUC"] - log_bmi[nk]["AUC"] for nk, bk in case_pairs]
+
+        for ax, deltas, ylabel, title_d in [
+            (axes[0], deltas_r2,  "ΔR² (BMI 추가 효과)", "선형 R² 변화량"),
+            (axes[1], deltas_auc, "ΔAUC (BMI 추가 효과)", "로지스틱 AUC 변화량"),
+        ]:
+            colors_d = ["#27ae60" if d >= 0 else "#e74c3c" for d in deltas]
+            bars_d = ax.bar(pair_labels, deltas, color=colors_d, edgecolor="white", width=0.5)
+            ax.axhline(0, color="black", lw=1.2)
+            for bar, d in zip(bars_d, deltas):
+                y_pos = d + 0.0005 if d >= 0 else d - 0.0015
+                ax.text(bar.get_x()+bar.get_width()/2, y_pos,
+                        f"{d:+.4f}", ha="center", va="bottom" if d >= 0 else "top",
+                        fontsize=10, fontweight="bold",
+                        color="#27ae60" if d >= 0 else "#e74c3c")
+            ax.set_ylabel(ylabel); ax.set_title(title_d)
+            ax.yaxis.grid(True, linestyle="--", alpha=0.4); ax.set_axisbelow(True)
+
+        plt.suptitle(f"[{hosp_label}] BMI 추가 효과 (Δ = +BMI − no BMI)\n"
+                     f"양수=BMI 포함 시 향상 / 음수=BMI 포함 시 저하",
+                     fontsize=12, fontweight="bold")
+        plt.tight_layout()
+        out_b = BMI_COMPARE_DIR / hosp_key / "bmi_delta_effect.png"
+        fig.savefig(out_b, dpi=150); plt.close()
+        print(f"    Saved: {out_b.name}")
+
+    # ── Excel 저장 ──
+    if bmi_all_rows:
+        bmi_df = pd.DataFrame(bmi_all_rows)
+        bmi_out = BMI_COMPARE_DIR / "bmi_comparison_summary.xlsx"
+
+        # Delta 계산: noBMI → BMI 변화량 컬럼 추가
+        delta_rows = []
+        for hosp in bmi_df["Hospital"].unique():
+            sub = bmi_df[bmi_df["Hospital"] == hosp]
+            for base in ["C1", "C2", "C4"]:
+                row_no  = sub[sub["Case"] == f"{base}_noBMI"]
+                row_bmi = sub[sub["Case"] == f"{base}_BMI"]
+                if row_no.empty or row_bmi.empty:
+                    continue
+                delta_rows.append({
+                    "Hospital":      hosp,
+                    "Case_base":     base,
+                    "Delta_Lin_R2":  round(float(row_bmi["Lin_R2"].values[0])  - float(row_no["Lin_R2"].values[0]),  4),
+                    "Delta_Lin_RMSE":round(float(row_bmi["Lin_RMSE"].values[0]) - float(row_no["Lin_RMSE"].values[0]),2),
+                    "Delta_Log_AUC": round(float(row_bmi["Log_AUC"].values[0]) - float(row_no["Log_AUC"].values[0]), 4),
+                    "Delta_Log_Acc": round(float(row_bmi["Log_Acc"].values[0]) - float(row_no["Log_Acc"].values[0]), 4),
+                    "noBMI_Lin_R2":  float(row_no["Lin_R2"].values[0]),
+                    "BMI_Lin_R2":    float(row_bmi["Lin_R2"].values[0]),
+                    "noBMI_Log_AUC": float(row_no["Log_AUC"].values[0]),
+                    "BMI_Log_AUC":   float(row_bmi["Log_AUC"].values[0]),
+                })
+
+        delta_df = pd.DataFrame(delta_rows)
+        print(f"\n  BMI Delta 요약:")
+        print(delta_df[["Hospital","Case_base","Delta_Lin_R2","Delta_Log_AUC"]].to_string(index=False))
+
+        with pd.ExcelWriter(str(bmi_out)) as writer:
+            bmi_df.to_excel(writer,   sheet_name="all_results", index=False)
+            delta_df.to_excel(writer, sheet_name="delta_bmi",   index=False)
+        print(f"\n  Saved: {bmi_out}")
+
 print(f"\n{'='*60}")
 print("ALL DONE")
 print(f"{'='*60}")
