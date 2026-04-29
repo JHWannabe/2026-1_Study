@@ -135,20 +135,24 @@ def run_one_analysis(
     plt.suptitle(f"{prefix} Logistic Regression – CV Metrics", fontsize=12, fontweight="bold")
     plt.tight_layout(); fig.savefig(RESULT_DIR / "05_logistic_metrics_comparison.png", dpi=150); plt.close()
 
-    # ── Fig 06: Logistic confusion matrices ──
+    # ── Fig 06: Logistic confusion matrices (OOF + Youden threshold) ──
     fig, axes = plt.subplots(1, len(CASES), figsize=(len(CASES)*4, 4))
     if len(CASES) == 1: axes = [axes]
     for ax, (name, feats), lbl in zip(axes, CASES.items(), labels):
-        fa   = avail(feats)
-        pipe = Pipeline([("sc", StandardScaler()),
-                         ("m", LogisticRegression(max_iter=2000, random_state=CV_RANDOM))])
-        pipe.fit(X_full[fa], y_bin)
-        cm = confusion_matrix(y_bin, pipe.predict(X_full[fa]))
+        oof_prob = np.array(log_res[name]["oof_prob"])
+        oof_true = np.array(log_res[name]["oof_true"])
+        thr      = log_res[name]["youden_threshold"]
+        oof_pred = (oof_prob >= thr).astype(int)
+        cm = confusion_matrix(oof_true, oof_pred)
+        tn_v, fp_v, fn_v, tp_v = cm.ravel()
+        sens_v = tp_v / (tp_v + fn_v) if tp_v + fn_v else 0
+        spec_v = tn_v / (tn_v + fp_v) if tn_v + fp_v else 0
         sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax,
                     xticklabels=["High","Low"], yticklabels=["High","Low"], cbar=False)
-        ax.set_title(lbl.replace(chr(10), " "), fontsize=9)
+        ax.set_title(f"{lbl.replace(chr(10), ' ')}\n"
+                     f"Thr={thr:.2f}  Sens={sens_v:.3f}  Spec={spec_v:.3f}", fontsize=8)
         ax.set_xlabel("Predicted"); ax.set_ylabel("Actual")
-    plt.suptitle(f"{prefix} Confusion Matrix (full fit, 하위 25%={tama_threshold:.1f})",
+    plt.suptitle(f"{prefix} Confusion Matrix (5-fold OOF, Youden threshold, 하위 25%={tama_threshold:.1f})",
                  fontsize=11, fontweight="bold")
     plt.tight_layout(); fig.savefig(RESULT_DIR / "06_logistic_confusion.png", dpi=150); plt.close()
 

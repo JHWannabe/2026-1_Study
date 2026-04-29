@@ -52,8 +52,10 @@ def run_fullfit_analysis(
         Xs = (df[good] - df[good].mean()) / df[good].std()
         return Xs.replace([np.inf, -np.inf], np.nan).fillna(0)
 
+    # Case4/5는 수십 개의 CT 더미 변수로 인해 완전 다중공선성 발생 가능 → Case2 우선 사용
     diag_key   = next(
-        (k for k in ["Case4_Clinical+AEC_prev+Scanner", "Case2_Clinical+AEC_prev"]
+        (k for k in ["Case2_Clinical+AEC_prev", "Case3_Clinical+AEC_new",
+                     "Case4_Clinical+AEC_prev+Scanner"]
          if k in CASES),
         list(CASES.keys())[-1],
     )
@@ -241,7 +243,7 @@ def run_fullfit_analysis(
     plt.tight_layout(); fig.savefig(OUT_DIR / "09_logistic_calibration.png", dpi=150); plt.close()
 
     # ── Fig 10: Confusion matrix (Youden optimal threshold) ──
-    youden_j = tpr_base - (1 - fpr_base)
+    youden_j = tpr_base - fpr_base
     opt_idx  = int(np.argmax(youden_j))
     opt_thr  = float(thr_roc[opt_idx])
     pred_opt = (prob_full >= opt_thr).astype(int)

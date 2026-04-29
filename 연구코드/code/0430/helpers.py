@@ -61,9 +61,13 @@ def linear_cv(X: pd.DataFrame, y: pd.Series) -> dict:
 
 
 def logistic_cv(X: pd.DataFrame, y: pd.Series) -> dict:
-    """5-Fold StratifiedKFold 로지스틱 회귀. 클래스 불균형 보존."""
+    """5-Fold StratifiedKFold 로지스틱 회귀.
+    Sensitivity/Specificity는 각 fold별 Youden Index 최적 threshold로 산출.
+    (default 0.5 threshold는 25%/75% 클래스 불균형 시 Sensitivity를 심각하게 과소평가)
+    """
     skf = StratifiedKFold(n_splits=CV_SPLITS, shuffle=True, random_state=CV_RANDOM)
     aucs, accs, sens, specs, fprs_l, tprs_l = [], [], [], [], [], []
+    oof_prob_all, oof_true_all = [], []
     for tr, te in skf.split(X, y):
         pipe = Pipeline([
             ("sc", StandardScaler()),
@@ -71,20 +75,35 @@ def logistic_cv(X: pd.DataFrame, y: pd.Series) -> dict:
         ])
         pipe.fit(X.iloc[tr], y.iloc[tr])
         prob = pipe.predict_proba(X.iloc[te])[:, 1]
-        pred = pipe.predict(X.iloc[te])
+        fpr, tpr, thresholds = roc_curve(y.iloc[te], prob)
+
+        # Youden Index 최적 threshold (Sensitivity + Specificity - 1 최대화)
+        youden   = tpr - fpr
+        best_idx = np.argmax(youden)
+        best_thr = thresholds[best_idx]
+        pred_opt = (prob >= best_thr).astype(int)
+
         aucs.append(roc_auc_score(y.iloc[te], prob))
-        accs.append(accuracy_score(y.iloc[te], pred))
-        tn, fp, fn, tp = confusion_matrix(y.iloc[te], pred).ravel()
+        accs.append(accuracy_score(y.iloc[te], pred_opt))
+        tn, fp, fn, tp = confusion_matrix(y.iloc[te], pred_opt).ravel()
         sens.append(tp / (tp + fn) if tp + fn else 0)
         specs.append(tn / (tn + fp) if tn + fp else 0)
-        fpr, tpr, _ = roc_curve(y.iloc[te], prob)
         fprs_l.append(fpr); tprs_l.append(tpr)
+        oof_prob_all.extend(prob.tolist())
+        oof_true_all.extend(y.iloc[te].tolist())
+
+    # 전체 OOF 기준 최종 Youden threshold (confusion matrix 시각화용)
+    fpr_all, tpr_all, thr_all = roc_curve(oof_true_all, oof_prob_all)
+    best_global = thr_all[np.argmax(tpr_all - fpr_all)]
+
     return dict(
         AUC=np.mean(aucs),      AUC_std=np.std(aucs),
         Accuracy=np.mean(accs), Accuracy_std=np.std(accs),
         Sensitivity=np.mean(sens), Sensitivity_std=np.std(sens),
         Specificity=np.mean(specs), Specificity_std=np.std(specs),
         fold_auc=aucs, fprs=fprs_l, tprs=tprs_l,
+        oof_prob=oof_prob_all, oof_true=oof_true_all,
+        youden_threshold=float(best_global),
     )
 
 

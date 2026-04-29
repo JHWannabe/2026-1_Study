@@ -44,7 +44,7 @@ def run_tama_stats(df_clean: pd.DataFrame, BASE_DIR: Path, hosp_label: str) -> p
         })
 
     tama_stats_df = pd.DataFrame(tama_stats_rows)
-    print(f"\n  [TAMA 기술통계 — {hosp_label}]")
+    print(f"\n  [TAMA 기술통계 - {hosp_label}]")
     print(tama_stats_df.to_string(index=False))
     tama_stats_df.to_excel(BASE_DIR / "tama_sex_stats.xlsx", index=False)
     print(f"  Saved: tama_sex_stats.xlsx")

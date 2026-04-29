@@ -91,7 +91,7 @@ def run_hospital(hosp_key: str, data_path: Path) -> tuple[dict, dict]:
     print(f"  Rows after dropna: {total_patients}"
           f"  (F={(df_clean['PatientSex_enc']==0).sum()}"
           f"  M={(df_clean['PatientSex_enc']==1).sum()})"
-          f"  — 제외: {n_dropped}행")
+          f"  - 제외: {n_dropped}행")
 
     # ── EDA ──
     run_tama_stats(df_clean, BASE_DIR, hosp_label)
@@ -362,7 +362,7 @@ def run_bmi_analysis(all_clean_data: dict, BMI_COMPARE_DIR: Path) -> None:
             })
 
         if len(lin_bmi) < 6:
-            print(f"    일부 케이스 누락 — BMI 비교 플롯 생략"); continue
+            print(f"    일부 케이스 누락 - BMI 비교 플롯 생략"); continue
 
         case_pairs  = [("C1_noBMI","C1_BMI"), ("C2_noBMI","C2_BMI"), ("C4_noBMI","C4_BMI")]
         pair_labels = ["Case 1\n(임상 기준선)", "Case 2\n(+AEC_prev)", "Case 4\n(+AEC_prev\n+Scanner)"]
