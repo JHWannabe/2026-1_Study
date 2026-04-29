@@ -197,8 +197,7 @@ def slide_title(prs):
         "① 피처 선택: 수동  →  자동 파이프라인 (4단계)",
         "② 임상 기준선: Age+Sex  →  Age+Sex+BMI",
         "③ Case 구조: 3단계  →  5단계 (AEC_prev vs AEC_new)",
-        "④ 성별 층화 분석 신설 (전체 / 여성 / 남성)",
-        "⑤ 다병원 자동 순회 + 교차 병원 비교",
+        "④ 다병원 자동 순회 + 교차 병원 비교",
     ]
     for i, b in enumerate(bullets):
         add_text(sl, b, 2.1, 4.35 + i * 0.32, 9.0, 0.3,
@@ -216,7 +215,7 @@ def slide_overview(prs):
     sl = blank_slide(prs)
     fill_bg(sl, WHITE)
     slide_header(sl, "변경사항 한눈에 보기",
-                 "0424 → 0430  |  총 5가지 설계 변경")
+                 "0424 → 0430  |  총 4가지 설계 변경")
 
     headers = ["#", "항목", "0424 이전", "0430 이후", "핵심 목적"]
     rows = [
@@ -232,17 +231,13 @@ def slide_overview(prs):
          "Case 1(임상) / 2(+AEC) / 3(+AEC+스캐너)\n단일 AEC 세트",
          "Case 1~5\nAEC_prev vs AEC_new 교차 비교",
          "'어떤 AEC 피처 세트가 더 유용한가'\n직접 정량 비교"],
-        ["④", "성별 층화",
-         "성별 = 공변량(더미)만 사용\n층화 분석 없음",
-         "전체 / 여성 / 남성 독립 모델 적합",
-         "성별 이질성(근감소 위험 패턴)\n탐색"],
-        ["⑤", "다병원 분석",
+        ["④", "다병원 분석",
          "강남 단독\n(config.SITE 수동 변경)",
          "강남·신촌 자동 순회 +\n교차 병원 비교(외부 검증)",
          "재현성(generalizability) 확인"],
     ]
 
-    fills = [LGRAY, WHITE, LGRAY, WHITE, LGRAY]
+    fills = [LGRAY, WHITE, LGRAY, WHITE]
     add_table(sl, headers, rows,
               l=0.15, t=1.15, w=13.0, h=6.15,
               header_fill=NAVY, header_font_size=13, font_size=11,
@@ -578,72 +573,13 @@ def slide_case_results(prs):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Slide 8. ④ 성별 층화 분석
-# ─────────────────────────────────────────────────────────────────────────────
-
-def slide_sex_stratification(prs):
-    sl = blank_slide(prs)
-    fill_bg(sl, WHITE)
-    slide_header(sl, "④ 성별 층화 분석 신설",
-                 "0424: 성별을 공변량으로만  →  0430: 전체 / 여성 / 남성 독립 모델")
-
-    # 좌: 0424
-    add_rect(sl, 0.2, 1.2, 5.9, 3.2, RGBColor(0xFF, 0xF0, 0xF0))
-    badge(sl, "0424 접근법", 0.35, 1.28, RED)
-    old_lines = [
-        "• 성별(PatientSex)을 0/1 더미 변수로 포함",
-        "• 전체 데이터에 단일 모델 적합",
-        "• 성별 간 이질성(heterogeneity) 미탐색",
-        "",
-        "▲ 한계: 근감소증 위험도 및 AEC 신호",
-        "   특성이 성별에 따라 다를 수 있음",
-        "   → 교호작용 없이는 이질성 포착 불가",
-    ]
-    for i, ln in enumerate(old_lines):
-        add_text(sl, ln, 0.4, 1.7 + i * 0.35, 5.6, 0.35,
-                 font_size=12, color=RED if "▲" in ln else DARK)
-
-    # 우: 0430
-    add_rect(sl, 6.5, 1.2, 6.65, 3.2, RGBColor(0xF0, 0xFF, 0xF0))
-    badge(sl, "0430 층화 전략", 6.65, 1.28, GREEN)
-    new_lines = [
-        "• 전체(All) / 여성(F) / 남성(M) 3개 서브그룹",
-        "  → 각 그룹에 Case 1~5 독립 모델 적합",
-        "• 층화 그룹에서는 PatientSex 제거",
-        "  (내재적 보정 — 별도 더미 불필요)",
-        "",
-        "★ 분석 설계: 교호작용 항 추가 대신",
-        "   층화 전략으로 이질성 탐색",
-        "   → 그룹별 계수·AUC 직접 비교 가능",
-    ]
-    for i, ln in enumerate(new_lines):
-        add_text(sl, ln, 6.65, 1.7 + i * 0.35, 6.3, 0.35,
-                 font_size=12, color=GREEN if "★" in ln else DARK)
-
-    # 하단: 이진화 임계값 변경도 함께 설명
-    add_rect(sl, 0.2, 4.55, 12.9, 2.7, RGBColor(0xEE, 0xEE, 0xFF))
-    badge(sl, "연관 변경: 이진화 임계값 단순화", 0.35, 4.62, BLUE)
-    th_rows = [
-        ["0424", "성별 특이적 P25\n남성 P25, 여성 P25 별도 산출",
-         "전체 데이터에 단일 임계값 불가 — 성별 병합 분석과 불일치"],
-        ["0430", "분석 그룹 내 하위 25% 동적 산출\n전체/여성/남성 각 그룹에서 독립 P25",
-         "층화 분석과 완전 일관성 유지\n그룹 크기·분포 변화에도 자동 대응"],
-    ]
-    th_headers = ["버전", "방법", "효과"]
-    add_table(sl, th_headers, th_rows,
-              l=0.2, t=5.05, w=12.9, h=1.85,
-              header_fill=BLUE, font_size=11, header_font_size=11,
-              row_fills=[RGBColor(0xFF, 0xEB, 0xEB), RGBColor(0xEB, 0xFF, 0xEB)])
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Slide 9. ⑤ 다병원 순회 + 교차 비교
+# Slide 8. ④ 다병원 순회 + 교차 비교
 # ─────────────────────────────────────────────────────────────────────────────
 
 def slide_multi_hospital(prs):
     sl = blank_slide(prs)
     fill_bg(sl, WHITE)
-    slide_header(sl, "⑤ 다병원 자동 순회 + 교차 병원 비교",
+    slide_header(sl, "④ 다병원 자동 순회 + 교차 병원 비교",
                  "0424: 강남 단독  →  0430: 강남·신촌 자동 순회 + 외부 검증")
 
     # 좌: 설명 블록
@@ -867,7 +803,7 @@ def slide_key_metrics(prs):
         "• 강남 선형 회귀: Case 2(+AEC_prev)가 최고 R²=0.6780 — AEC_prev의 기여 (Δ+0.0160)",
         "• 강남 로지스틱 AUC: Case 3(+AEC_new)=0.8352, Case 2(+AEC_prev)=0.8346 — 두 세트 동등",
         "• 피처 선택: 강남 9개, 신촌 13개, 병합 11개 — 'mean', 'spectral_energy' 3개 데이터셋 공통",
-        "• 전체 보고서(회귀+피처+교차병원+성별층화)는 research_report_0430.md에서 확인",
+        "• 전체 보고서(회귀+피처+교차병원+BMI기여도)는 research_report_0430.md에서 확인",
     ]
     for i, n in enumerate(notes):
         add_text(sl, n, 0.35, 5.4 + i * 0.35, 12.5, 0.35, font_size=11, color=DARK)
@@ -895,28 +831,25 @@ def slide_conclusion(prs):
         ("③", "AEC_prev vs AEC_new 직접 비교",
          "5-Case 구조로 수동 vs 자동 피처 세트의\n회귀 성능을 정량적으로 비교",
          BLUE),
-        ("④", "성별 이질성 탐색",
-         "층화 분석으로 근감소 위험 패턴의\n성별 차이를 독립 모델로 정량화",
-         RGBColor(0xAA, 0x44, 0xCC)),
-        ("⑤", "재현성 & 외부 검증",
+        ("④", "재현성 & 외부 검증",
          "강남·신촌 교차 검증으로\n피처 선택과 모델의 일반화 가능성 확인",
          RGBColor(0x00, 0xB0, 0xD0)),
     ]
 
     for i, (num, title, desc, clr) in enumerate(conclusions):
-        col = i % 3
-        row = i // 3
-        x = 0.4 + col * 4.3
-        y = 1.3 + row * 2.8
-        add_rect(sl, x, y, 4.0, 2.5, RGBColor(0x22, 0x44, 0x70))
-        add_rect(sl, x, y, 4.0, 0.5, clr)
-        add_text(sl, f"{num} {title}", x + 0.1, y + 0.05, 3.8, 0.4,
+        col = i % 2
+        row = i // 2
+        x = 1.5 + col * 5.2
+        y = 1.5 + row * 2.8
+        add_rect(sl, x, y, 4.8, 2.5, RGBColor(0x22, 0x44, 0x70))
+        add_rect(sl, x, y, 4.8, 0.5, clr)
+        add_text(sl, f"{num} {title}", x + 0.1, y + 0.05, 4.6, 0.4,
                  font_size=14, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
-        add_text(sl, desc, x + 0.1, y + 0.6, 3.8, 1.8,
+        add_text(sl, desc, x + 0.1, y + 0.6, 4.6, 1.8,
                  font_size=12, color=WHITE, align=PP_ALIGN.CENTER)
 
     add_text(sl, "0430 설계는 기존 0424 대비 방법론적 엄밀성을 전반적으로 향상,\n"
-                 "BMI 보정·자동 피처 선택·성별 층화·다병원 검증을 통해 연구 결론의 신뢰성을 높임.",
+                 "BMI 보정·자동 피처 선택·다병원 검증을 통해 연구 결론의 신뢰성을 높임.",
              0.4, 7.0, 12.5, 0.45,
              font_size=13, bold=True, color=GOLD, align=PP_ALIGN.CENTER)
 
@@ -953,23 +886,20 @@ def main():
     slide_case_results(prs)
     print("  [8/14] Case 비교 결과")
 
-    slide_sex_stratification(prs)
-    print("  [9/14] 성별 층화")
-
     slide_multi_hospital(prs)
-    print("  [10/14] 다병원 분석")
+    print("  [9/13] 다병원 분석")
 
     slide_linear_results(prs)
-    print("  [11/14] 선형 회귀 결과")
+    print("  [10/13] 선형 회귀 결과")
 
     slide_logistic_results(prs)
-    print("  [12/14] 로지스틱 결과")
+    print("  [11/13] 로지스틱 결과")
 
     slide_key_metrics(prs)
-    print("  [13/14] 핵심 수치 요약")
+    print("  [12/13] 핵심 수치 요약")
 
     slide_conclusion(prs)
-    print("  [14/14] 결론")
+    print("  [13/13] 결론")
 
     prs.save(str(OUTPUT_PPT))
     print(f"\nPPT 저장 완료: {OUTPUT_PPT}")

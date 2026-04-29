@@ -294,7 +294,7 @@ def slide_title(prs: Presentation):
                 font_size=22, color=SKYBLUE, align=PP_ALIGN.CENTER)
     add_textbox(slide,
                 "분석 도구: Python (statsmodels, scikit-learn)\n"
-                "병원: 강남 / 신촌  |  성별 그룹: 전체 / 여성(F) / 남성(M)\n"
+                "병원: 강남 / 신촌  |  분석 그룹: 전체\n"
                 "AEC 세트: AEC_prev(수동 4개) vs AEC_new(파이프라인 자동 선택)",
                 Inches(1), Inches(4.5), Inches(11.3), Inches(1.8),
                 font_size=14, color=SKYBLUE, align=PP_ALIGN.CENTER)
@@ -306,20 +306,19 @@ def slide_design_changes(prs: Presentation):
     slide = new_blank_slide(prs)
     fill_bg(slide)
     add_header_bar(slide, "0424 → 0430 설계 변경사항",
-                   "6가지 핵심 변경으로 다병원·성별 층화·자동 피처 선택 체계 도입")
+                   "5가지 핵심 변경으로 다병원·자동 피처 선택·BMI 기여도 분석 체계 도입")
 
     headers = ['#', '항목', '0424 이전', '0430 이후']
     rows = [
         ['①', '피처 선택', '수동 (상관계수+VIF → 연구자 결정)', '자동 파이프라인 (4단계 필터 + 앙상블 투표 + CV R²)'],
         ['②', '임상 기준선', 'PatientAge + PatientSex', 'PatientAge + PatientSex + BMI (교란변수 통제)'],
         ['③', 'Case 구조', 'Case 1~3 (단일 AEC 세트)', 'Case 1~5 (AEC_prev vs AEC_new 교차 비교)'],
-        ['④', '성별 층화', '성별 = 공변량(더미)만', '전체 / 여성 / 남성 독립 모델 (3개 서브그룹)'],
-        ['⑤', '다병원 분석', '강남 단독 (SITE 수동 변경)', '강남·신촌 자동 순회 + 교차 병원 비교'],
-        ['⑥', '이진화 기준', '성별 특이적 P25 (남/여 별도)', '분석 그룹 내 하위 25% 동적 산출'],
+        ['④', '다병원 분석', '강남 단독 (SITE 수동 변경)', '강남·신촌 자동 순회 + 교차 병원 비교'],
+        ['⑤', '이진화 기준', '성별 특이적 P25 (남/여 별도)', '전체 그룹 내 하위 25% 동적 산출'],
     ]
     col_widths = [Inches(0.5), Inches(1.6), Inches(4.0), Inches(6.3)]
     add_md_table(slide, headers, rows,
-                 Inches(0.35), Inches(1.25), col_widths, row_height=Inches(0.42),
+                 Inches(0.35), Inches(1.25), col_widths, row_height=Inches(0.45),
                  font_size=10)
 
     # Case 구조 추가 설명
@@ -523,19 +522,6 @@ def slide_cross_hospital(prs: Presentation):
     print("  [슬라이드] 교차 병원 비교")
 
 
-def slide_sex_stratification(prs: Presentation):
-    """슬라이드: 성별 층화 분석"""
-    slide = new_blank_slide(prs)
-    fill_bg(slide)
-    add_header_bar(slide, "성별 층화 분석 (전체 / 여성(F) / 남성(M))",
-                   "각 성별 그룹 독립 모델 — 이질성 탐색 | 강남 기준 5-Fold CV")
-
-    _safe_img(slide, FIG_DIR / "05_sex_strat_linear.png",
-              Inches(0.35), Inches(1.2), Inches(12.6), Inches(2.9))
-    _safe_img(slide, FIG_DIR / "06_sex_strat_logistic.png",
-              Inches(0.35), Inches(4.3), Inches(12.6), Inches(2.9))
-    print("  [슬라이드] 성별 층화 분석")
-
 
 def slide_aec_comparison(prs: Presentation):
     """슬라이드: AEC_prev vs AEC_new"""
@@ -562,22 +548,25 @@ def slide_aec_comparison(prs: Presentation):
 
 
 def slide_bmi_analysis(prs: Presentation):
-    """슬라이드: BMI 기여도 분석"""
-    slide = new_blank_slide(prs)
-    fill_bg(slide)
-    add_header_bar(slide, "BMI 기여도 분석 (0430 신설)",
-                   "Case 1/2/4 × no BMI vs +BMI — BMI가 TAMA 예측에 기여하는 독립적 효과 정량화")
+    """슬라이드: BMI 기여도 분석 (강남 / 신촌 각각 R²·AUC + Delta)"""
+    for hosp_key, hosp_label in [("gangnam", "강남"), ("sinchon", "신촌")]:
+        slide = new_blank_slide(prs)
+        fill_bg(slide)
+        add_header_bar(slide, f"[{hosp_label}] BMI 기여도 분석 (0430 신설)",
+                       "Case 1/2/4 × no BMI vs +BMI — BMI가 TAMA 예측에 기여하는 독립적 효과 정량화")
 
-    _safe_img(slide, FIG_DIR / "08_bmi_contribution_gangnam.png",
-              Inches(0.35), Inches(1.2), Inches(12.6), Inches(2.9))
-    _safe_img(slide, FIG_DIR / "09_bmi_contribution_sinchon.png",
-              Inches(0.35), Inches(4.3), Inches(12.6), Inches(2.9))
+        _safe_img(slide,
+                  REG_DIR / hosp_key / "bmi_comparison_r2_auc.png",
+                  Inches(0.35), Inches(1.2), Inches(12.6), Inches(3.0))
+        _safe_img(slide,
+                  REG_DIR / hosp_key / "bmi_delta_effect.png",
+                  Inches(0.35), Inches(4.4), Inches(12.6), Inches(2.8))
 
-    add_textbox(slide,
-                "BMI 추가 효과가 AEC 투입 후 감소(감쇠)하면 → AEC와 BMI가 일부 공통 정보를 공유함을 시사",
-                Inches(0.35), Inches(7.15), Inches(12.6), Inches(0.28),
-                font_size=9, italic=True, color=BLUE)
-    print("  [슬라이드] BMI 기여도")
+        add_textbox(slide,
+                    "BMI 추가 효과가 AEC 투입 후 감소(감쇠)하면 → AEC와 BMI가 일부 공통 정보를 공유함을 시사",
+                    Inches(0.35), Inches(7.15), Inches(12.6), Inches(0.28),
+                    font_size=9, italic=True, color=BLUE)
+        print(f"  [슬라이드] {hosp_label} BMI 기여도")
 
 
 def slide_case_progression(prs: Presentation):
@@ -617,8 +606,8 @@ def slide_n_threshold(prs: Presentation):
     """슬라이드: N수 & 임계값 요약"""
     slide = new_blank_slide(prs)
     fill_bg(slide)
-    add_header_bar(slide, "병원 × 성별 그룹별 분석 대상 N수 & Low-TAMA 임계값",
-                   "이진화 임계값 = 각 그룹 내 하위 25% (그룹-내 P25)")
+    add_header_bar(slide, "병원별 분석 대상 N수 & Low-TAMA 임계값",
+                   "이진화 임계값 = 전체 그룹 내 하위 25% (P25)")
 
     _safe_img(slide, FIG_DIR / "12_sex_n_threshold.png",
               Inches(0.35), Inches(1.2), Inches(12.6), Inches(5.9))
@@ -633,7 +622,7 @@ def slide_aec_prev_vs_new_detail(prs: Presentation):
                    "AIC/BIC 낮을수록 우수 | 계수 크기로 기여 변수 파악")
 
     _safe_img(slide,
-              REG_DIR / "gangnam" / "all" / "14_case_aic_bar.png",
+              REG_DIR / "gangnam" / "14_case_aic_bar.png",
               Inches(0.35), Inches(1.2), Inches(6.2), Inches(2.8))
     _safe_img(slide,
               REG_DIR / "gangnam" / "all" / "08_case_comparison_overview.png",
@@ -653,7 +642,7 @@ def slide_conclusion(prs: Presentation, D: dict):
     achievements = D.get('core_achievements', [
         "1. BMI 보정: Case 1 기준선에서 R² 향상 — BMI가 강력한 TAMA 예측 변수임을 확인",
         "2. 자동 피처 선택: 60개+ AEC 피처에서 과적합·다중공선성 없이 객관적 세트 도출",
-        "3. 성별 층화: 전체/여성/남성 독립 모델로 이질성 탐색 — 그룹별 예측 패턴 확인",
+        "3. AEC 비교: AEC_new(파이프라인 자동 선택)가 AEC_prev(수동 4개) 대비 성능 개선 여부 검증",
         "4. 다병원 검증: 강남·신촌 교차 검증으로 피처 선택과 모델의 재현성 확인",
     ])
 
@@ -670,7 +659,7 @@ def slide_conclusion(prs: Presentation, D: dict):
                 font_size=14, bold=True, color=NAVY)
     limits = [
         "• AEC_new vs AEC_prev 성능 차이가 미미한 경우 — 더 많은 환자 데이터 필요",
-        "• 성별 층화 시 소그룹 표본 크기에 따른 불안정성 주의 (특히 남성/여성 단독)",
+        "• 전체 그룹 단일 분석 — 하위 그룹 이질성 탐색을 위한 층화 분석은 향후 과제",
         "• 단면 연구 설계 — 인과 추론을 위한 전향적 코호트 연구 권장",
         "• Raw AEC 시계열(200포인트)을 1D CNN / LSTM으로 직접 학습 시 추가 성능 향상 가능성",
     ]
