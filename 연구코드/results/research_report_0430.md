@@ -97,7 +97,7 @@
 | 단계 | 제거 수 | 잔여 피처 |
 |------|---------|----------|
 | Step 1 - Near-zero var | 0 | nan |
-| Step 2 - High correlation | 20 | p75, mean_abs_deviation, p95, band4_energy, wavelet_cA_energy, band4_energy_ratio, AUC_normalized, peak_mean_height, band1_energy, median, band2_energy_ratio, band3_energy, p25, band3_energy_ratio, RMSE, p90, spectral_rolloff, fft_mag_std, AUC, wavelet_cA_std |
+| Step 2 - High correlation | 20 | band4_energy, p25, fft_mag_std, band2_energy_ratio, band1_energy, median, p75, wavelet_cA_energy, band4_energy_ratio, p95, wavelet_cA_std, band3_energy_ratio, p90, AUC_normalized, peak_mean_height, AUC, mean_abs_deviation, spectral_rolloff, band3_energy, RMSE |
 | Step 3 - Union pass | 2 | nan |
 | Step 4 - Best search | 0 | CV, IQR, band1_energy_ratio, band2_energy, dominant_freq, min, p10, p5, p90_p10_ratio, signal_energy, signal_length, slope_abs_mean, slope_max, slope_mean, slope_std, spectral_energy, spectral_spread, wavelet_cD1_energy, wavelet_cD1_std, wavelet_cD2_energy, wavelet_cD2_std, wavelet_energy_ratio_D1 |
 | VIF pruning (VIF>10) | 13 | IQR, band2_energy, dominant_freq, mean, slope_max, spectral_energy, wavelet_cD1_energy, wavelet_cD2_energy, wavelet_energy_ratio_D1 |
@@ -362,7 +362,59 @@
 | Case 5 +AEC_new +Scanner | 0.7659 | 0.6598 | 0.8531 |
 
 ---
-## 6. 시각화 자료 목록
+## 6. BMI 기여도 분석 (Case 1 / 2 / 4 × BMI 유무 비교)
+
+> **분석 목적:** 0424(BMI 없음) vs 0430(BMI 포함) 기준선의 성능 차이를 Case 1/2/4에서 직접 정량화
+> Case 1/2/4는 AEC_prev 기반으로 한정 — AEC 선택 효과와 BMI 효과가 혼재되지 않도록 단순화
+
+### 6.1 강남
+
+#### 선형 회귀 R² / 로지스틱 AUC — no BMI vs +BMI
+
+| Case | BMI | N feat | Lin R² (±std) | Lin RMSE | Log AUC (±std) | Log Sens | Log Spec |
+|------|-----|--------|--------------|----------|---------------|---------|---------|
+| Case 1 (no BMI) | no BMI | 2 | 0.5430 ± 0.0401 | 19.91 | 0.7644 ± 0.0239 | 0.0655 | 0.9876 |
+| Case 1 (+BMI) | **+BMI** | 3 | 0.6620 ± 0.0367 | 17.12 | 0.8293 ± 0.0208 | 0.3414 | 0.9243 |
+| Case 2 (no BMI) | no BMI | 6 | 0.6300 ± 0.0407 | 17.91 | 0.8178 ± 0.0208 | 0.2545 | 0.9291 |
+| Case 2 (+BMI) | **+BMI** | 7 | 0.6780 ± 0.0357 | 16.71 | 0.8346 ± 0.0247 | 0.3447 | 0.9204 |
+| Case 4 (no BMI) | no BMI | 45 | 0.6210 ± 0.0339 | 18.13 | 0.8154 ± 0.0179 | 0.3447 | 0.9156 |
+| Case 4 (+BMI) | **+BMI** | 46 | 0.6682 ± 0.0318 | 16.96 | 0.8306 ± 0.0209 | 0.3758 | 0.9156 |
+
+#### BMI 추가 효과 (Δ = +BMI − no BMI)
+
+| Case | ΔR² | ΔRMSE (cm²) | ΔAUC | ΔAccuracy | 해석 |
+|------|-----|------------|------|----------|------|
+| C1 | **+0.1190** | -2.79 | **+0.0649** | +0.0168 | BMI 보정 유효 |
+| C2 | **+0.0480** | -1.20 | **+0.0168** | +0.0146 | BMI 보정 유효 |
+| C4 | **+0.0472** | -1.17 | **+0.0152** | +0.0073 | BMI 보정 유효 |
+
+> **해석:** Case 1에서 BMI 추가로 R² +0.1190 향상. AEC_prev 투입 후(Case 2) BMI 효과가 +0.0480로 감소(60% 감쇠) → AEC와 BMI가 일부 공통 정보를 공유함을 시사.
+
+### 6.2 신촌
+
+#### 선형 회귀 R² / 로지스틱 AUC — no BMI vs +BMI
+
+| Case | BMI | N feat | Lin R² (±std) | Lin RMSE | Log AUC (±std) | Log Sens | Log Spec |
+|------|-----|--------|--------------|----------|---------------|---------|---------|
+| Case 1 (no BMI) | no BMI | 2 | 0.5216 ± 0.0656 | 21.24 | 0.8017 ± 0.0301 | 0.0668 | 0.9707 |
+| Case 1 (+BMI) | **+BMI** | 3 | 0.6398 ± 0.0629 | 18.42 | 0.8577 ± 0.0333 | 0.5256 | 0.8901 |
+| Case 2 (no BMI) | no BMI | 6 | 0.5444 ± 0.0587 | 20.73 | 0.8206 ± 0.0320 | 0.4138 | 0.8984 |
+| Case 2 (+BMI) | **+BMI** | 7 | 0.6415 ± 0.0615 | 18.37 | 0.8587 ± 0.0347 | 0.5351 | 0.8848 |
+| Case 4 (no BMI) | no BMI | 58 | 0.5350 ± 0.0693 | 20.92 | 0.8342 ± 0.0339 | 0.4741 | 0.8796 |
+| Case 4 (+BMI) | **+BMI** | 59 | 0.6340 ± 0.0590 | 18.56 | 0.8579 ± 0.0328 | 0.5382 | 0.8785 |
+
+#### BMI 추가 효과 (Δ = +BMI − no BMI)
+
+| Case | ΔR² | ΔRMSE (cm²) | ΔAUC | ΔAccuracy | 해석 |
+|------|-----|------------|------|----------|------|
+| C1 | **+0.1182** | -2.82 | **+0.0560** | +0.0528 | BMI 보정 유효 |
+| C2 | **+0.0971** | -2.36 | **+0.0381** | +0.0197 | BMI 보정 유효 |
+| C4 | **+0.0990** | -2.36 | **+0.0237** | +0.0149 | BMI 보정 유효 |
+
+> **해석:** Case 1에서 BMI 추가로 R² +0.1182 향상. AEC_prev 투입 후(Case 2) BMI 효과가 +0.0971로 감소(18% 감쇠) → AEC와 BMI가 일부 공통 정보를 공유함을 시사.
+
+---
+## 7. 시각화 자료 목록
 
 ### 피처 선택 (results/feature_selection/)
 
@@ -414,24 +466,37 @@
 | `09_cross_hospital_comparison.png` | 강남 vs 신촌 메트릭 비교 |
 | `10_external_validation.png` | 강남 학습 → 신촌 외부 검증 |
 
----
-## 7. 결론
+### BMI 기여도 분석 (results/regression/{gangnam,sinchon}/)
 
-### 7.1 피처 선택
+| 파일 | 내용 |
+|------|------|
+| `bmi_comparison_r2_auc.png` | Case 1/2/4 × no BMI vs +BMI, R²·AUC 병렬 비교 |
+| `bmi_delta_effect.png` | BMI 추가 효과 Δ 막대 (R² 변화 / AUC 변화) |
+| `bmi_comparison_summary.xlsx` | `all_results` + `delta_bmi` 시트 |
+
+---
+## 8. 결론
+
+### 8.1 피처 선택
 
 - **강남**: 파이프라인 9개 피처 선택 (CV R² 0.1818 vs 이전 0.1768, Δ=+0.0050 → 향상)
 - **신촌**: 파이프라인 13개 피처 선택 (CV R² 0.0775 vs 이전 0.0305, Δ=+0.0469 → 향상)
 - **병합(강남+신촌)**: 파이프라인 11개 피처 선택 (CV R² 0.0881 vs 이전 0.0965, Δ=-0.0084 → 저하)
 
-### 7.2 강남 회귀 분석 요약 (전체 그룹)
+### 8.2 강남 회귀 분석 요약 (전체 그룹)
 
 1. **기준선 (Case 1):** 선형 R² = 0.6620, AUC = 0.8293
 2. **+ AEC_new (Case 3):** 선형 R² = 0.6694, AUC = 0.8352 (ΔR² = +0.0074, ΔAUC = +0.0059)
 3. **+ AEC_new + Scanner (Case 5):** 선형 R² = 0.6620, AUC = 0.8320
 
-### 7.3 0430 핵심 성과
+### 8.2 BMI 기여도 요약
 
-1. **BMI 보정**: 체지방·근육량 교란변수 보정 후 AEC 피처의 순수 기여도 분리 완료
+- **강남** Case 1 기준선: BMI 추가 → R² +0.1190, AUC +0.0649 향상
+- **신촌** Case 1 기준선: BMI 추가 → R² +0.1182, AUC +0.0560 향상
+
+### 8.3 0430 핵심 성과
+
+1. **BMI 보정**: Case 1 기준선에서 R² +0.12 수준 향상 — BMI가 강력한 TAMA 예측 변수임을 확인
 2. **자동 피처 선택**: 60개+ AEC 피처에서 과적합·다중공선성 없이 객관적 세트 도출
 3. **성별 층화**: 전체/여성/남성 독립 모델로 이질성 탐색 — 그룹별 예측 패턴 확인
 4. **다병원 검증**: 강남·신촌 교차 검증으로 피처 선택과 모델의 재현성 확인

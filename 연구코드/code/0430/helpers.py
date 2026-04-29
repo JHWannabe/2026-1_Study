@@ -1,0 +1,106 @@
+# -*- coding: utf-8 -*-
+"""
+Utility functions shared across analysis modules.
+"""
+
+import os
+import subprocess
+import numpy as np
+import pandas as pd
+from pathlib import Path
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.metrics import (
+    r2_score, mean_absolute_error, mean_squared_error,
+    roc_auc_score, roc_curve, confusion_matrix, accuracy_score,
+)
+from sklearn.pipeline import Pipeline
+
+from config import AEC_PREV, AEC_NEW, CV_SPLITS, CV_RANDOM
+
+
+def copy_to_temp(src: Path, temp_name: str) -> Path:
+    """OneDrive 잠금 우회: PowerShell로 임시 폴더에 복사 후 경로 반환."""
+    dst = Path(os.environ["TEMP"]) / temp_name
+    subprocess.run(
+        ["powershell", "-Command",
+         f'Copy-Item -Path "{src}" -Destination "{dst}" -Force'],
+        capture_output=True,
+    )
+    return dst
+
+
+def load_hospital(src: Path, temp_name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Excel(features + metadata-bmi_add 시트)을 읽어 (feat_df, meta_df) 반환."""
+    tmp  = copy_to_temp(src, temp_name)
+    feat = pd.read_excel(str(tmp), sheet_name="features")
+    meta = pd.read_excel(str(tmp), sheet_name="metadata-bmi_add")
+    return feat, meta
+
+
+def linear_cv(X: pd.DataFrame, y: pd.Series) -> dict:
+    """5-Fold CV 선형 회귀. fold별 StandardScaler 재적합으로 data leakage 방지."""
+    kf   = KFold(n_splits=CV_SPLITS, shuffle=True, random_state=CV_RANDOM)
+    pipe = Pipeline([("sc", StandardScaler()), ("m", LinearRegression())])
+    r2s, maes, rmses, all_true, all_pred = [], [], [], [], []
+    for tr, te in kf.split(X):
+        pipe.fit(X.iloc[tr], y.iloc[tr])
+        pred = pipe.predict(X.iloc[te])
+        r2s.append(r2_score(y.iloc[te], pred))
+        maes.append(mean_absolute_error(y.iloc[te], pred))
+        rmses.append(np.sqrt(mean_squared_error(y.iloc[te], pred)))
+        all_true.extend(y.iloc[te].tolist())
+        all_pred.extend(pred.tolist())
+    return dict(
+        R2=np.mean(r2s),   R2_std=np.std(r2s),
+        MAE=np.mean(maes), MAE_std=np.std(maes),
+        RMSE=np.mean(rmses), RMSE_std=np.std(rmses),
+        fold_r2=r2s, oof_true=all_true, oof_pred=all_pred,
+    )
+
+
+def logistic_cv(X: pd.DataFrame, y: pd.Series) -> dict:
+    """5-Fold StratifiedKFold 로지스틱 회귀. 클래스 불균형 보존."""
+    skf = StratifiedKFold(n_splits=CV_SPLITS, shuffle=True, random_state=CV_RANDOM)
+    aucs, accs, sens, specs, fprs_l, tprs_l = [], [], [], [], [], []
+    for tr, te in skf.split(X, y):
+        pipe = Pipeline([
+            ("sc", StandardScaler()),
+            ("m",  LogisticRegression(max_iter=2000, random_state=CV_RANDOM, solver="lbfgs")),
+        ])
+        pipe.fit(X.iloc[tr], y.iloc[tr])
+        prob = pipe.predict_proba(X.iloc[te])[:, 1]
+        pred = pipe.predict(X.iloc[te])
+        aucs.append(roc_auc_score(y.iloc[te], prob))
+        accs.append(accuracy_score(y.iloc[te], pred))
+        tn, fp, fn, tp = confusion_matrix(y.iloc[te], pred).ravel()
+        sens.append(tp / (tp + fn) if tp + fn else 0)
+        specs.append(tn / (tn + fp) if tn + fp else 0)
+        fpr, tpr, _ = roc_curve(y.iloc[te], prob)
+        fprs_l.append(fpr); tprs_l.append(tpr)
+    return dict(
+        AUC=np.mean(aucs),      AUC_std=np.std(aucs),
+        Accuracy=np.mean(accs), Accuracy_std=np.std(accs),
+        Sensitivity=np.mean(sens), Sensitivity_std=np.std(sens),
+        Specificity=np.mean(specs), Specificity_std=np.std(specs),
+        fold_auc=aucs, fprs=fprs_l, tprs=tprs_l,
+    )
+
+
+def make_cases(clinical_feats: list, scanner_feats: list) -> dict:
+    """5단계 케이스 딕셔너리 생성. 층화 분석 시 clinical_feats에서 Sex 제거."""
+    return {
+        "Case1_Clinical":                  clinical_feats,
+        "Case2_Clinical+AEC_prev":         clinical_feats + AEC_PREV,
+        "Case3_Clinical+AEC_new":          clinical_feats + AEC_NEW,
+        "Case4_Clinical+AEC_prev+Scanner": clinical_feats + AEC_PREV + scanner_feats,
+        "Case5_Clinical+AEC_new+Scanner":  clinical_feats + AEC_NEW  + scanner_feats,
+    }
+
+
+def sig_stars(p: float) -> str:
+    if p < 0.001: return "***"
+    if p < 0.01:  return "**"
+    if p < 0.05:  return "*"
+    return "ns"
