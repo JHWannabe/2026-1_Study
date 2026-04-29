@@ -55,10 +55,10 @@ def run_step(num: str, filename: str, description: str) -> bool:
     elapsed = time.time() - t0
 
     if result.returncode == 0:
-        print(f"\n  ✓ STEP {num} 완료 ({elapsed:.1f}s)")
+        print(f"\n  [OK] STEP {num} 완료 ({elapsed:.1f}s)")
         return True
     else:
-        print(f"\n  ✗ STEP {num} 실패 (returncode={result.returncode}, {elapsed:.1f}s)")
+        print(f"\n  [FAIL] STEP {num} 실패 (returncode={result.returncode}, {elapsed:.1f}s)")
         return False
 
 
@@ -117,8 +117,8 @@ def main():
     print(f"{'='*60}")
     for num, fname, desc in STEPS:
         if num in results:
-            status = "✓ 성공" if results[num] else "✗ 실패"
-            print(f"  STEP {num}  {status}  — {desc}")
+            status = "[OK] 성공" if results[num] else "[FAIL] 실패"
+            print(f"  STEP {num}  {status}  - {desc}")
     print()
 
 

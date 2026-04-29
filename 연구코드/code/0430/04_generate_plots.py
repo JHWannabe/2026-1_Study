@@ -533,16 +533,31 @@ def plot_aec_prev_vs_new():
 # ─────────────────────────────────────────────────────────────
 
 def plot_bmi_contribution(hosp_key: str, hosp_label: str, fig_name: str):
-    bmi_path = REG_DIR / hosp_key / "bmi_comparison_summary.xlsx"
+    bmi_path = REG_DIR / "bmi_comparison_summary.xlsx"
     if not bmi_path.exists():
         print(f"  [스킵] {fig_name} — bmi_comparison_summary.xlsx 없음 ({hosp_key})")
         return
 
-    all_df   = _load_excel(bmi_path, sheet_name="all_results")
-    delta_df = _load_excel(bmi_path, sheet_name="delta_bmi")
+    all_df_raw   = _load_excel(bmi_path, sheet_name="all_results")
+    delta_df_raw = _load_excel(bmi_path, sheet_name="delta_bmi")
+
+    if all_df_raw.empty:
+        print(f"  [스킵] {fig_name} — all_results 시트 없음")
+        return
+
+    # 병원별 필터링
+    if "Hospital" in all_df_raw.columns:
+        all_df = all_df_raw[all_df_raw["Hospital"] == hosp_label].reset_index(drop=True)
+    else:
+        all_df = all_df_raw
+
+    if "Hospital" in delta_df_raw.columns:
+        delta_df = delta_df_raw[delta_df_raw["Hospital"] == hosp_label].reset_index(drop=True)
+    else:
+        delta_df = delta_df_raw
 
     if all_df.empty:
-        print(f"  [스킵] {fig_name} — all_results 시트 없음")
+        print(f"  [스킵] {fig_name} — {hosp_label} 데이터 없음")
         return
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))

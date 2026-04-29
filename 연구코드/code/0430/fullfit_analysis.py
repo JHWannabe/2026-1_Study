@@ -450,14 +450,17 @@ def run_fullfit_analysis(
                 ax.annotate(f"ΔAIC={delta14:+.0f}",
                             xy=(x_l14[i], max(aic_14[i], bic_14[i])),
                             xytext=(x_l14[i], top_y14 * 1.03),
-                            fontsize=8, color="#555555", ha="center",
-                            arrowprops=dict(arrowstyle="->", color="#aaaaaa", lw=0.8))
+                            fontsize=8, color="#555555", ha="center")
             ax.set_xticks(x_l14); ax.set_xticklabels(cs14, fontsize=8)
             ax.set_ylabel("AIC / BIC 값"); ax.set_title(title14)
             ax.legend(fontsize=9); ax.yaxis.grid(True, linestyle="--", alpha=0.4); ax.set_axisbelow(True)
         plt.suptitle(f"[{hosp_label}] Multivariable Analysis - AIC/BIC 모델 비교",
                      fontsize=13, fontweight="bold")
-        plt.tight_layout(); fig.savefig(OUT_DIR / "14_case_aic_bar.png", dpi=150); plt.close()
+        try:
+            plt.tight_layout()
+        except StopIteration:
+            pass
+        fig.savefig(OUT_DIR / "14_case_aic_bar.png", dpi=150); plt.close()
 
     # Fig 15: Case progression line plot
     common15 = [c for c in lin_met if c in log_met]
@@ -473,12 +476,18 @@ def run_fullfit_analysis(
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
         for ax, (vals, title15, color) in zip(axes.flat, metrics15):
             ax.plot(x15, vals, "o-", color=color, lw=2, ms=8)
-            y_span = max(vals) - min(vals) if max(vals) != min(vals) else 0.05
+            finite_vals = [v for v in vals if np.isfinite(v)]
+            if not finite_vals:
+                ax.set_title(title15)
+                continue
+            y_span = max(finite_vals) - min(finite_vals) if max(finite_vals) != min(finite_vals) else 0.05
             for i, v in enumerate(vals):
+                if not np.isfinite(v):
+                    continue
                 ax.annotate(f"{v:.3f}", xy=(x15[i], v),
                             xytext=(x15[i], v + y_span * 0.15),
                             ha="center", fontsize=10, fontweight="bold", color=color)
-                if i > 0:
+                if i > 0 and np.isfinite(vals[i - 1]):
                     delta15 = v - vals[i - 1]
                     ax.annotate(f"Δ= {delta15:+.3f}",
                                 xy=((x15[i] + x15[i-1]) / 2, (v + vals[i-1]) / 2),
@@ -486,7 +495,7 @@ def run_fullfit_analysis(
             ax.set_xticks(x15)
             ax.set_xticklabels(c_lbl15, fontsize=8, rotation=15, ha="right")
             ax.set_title(title15); ax.yaxis.grid(True, linestyle="--", alpha=0.4); ax.set_axisbelow(True)
-            ax.set_ylim(min(vals) - y_span * 0.3, max(vals) + y_span * 0.4)
+            ax.set_ylim(min(finite_vals) - y_span * 0.3, max(finite_vals) + y_span * 0.4)
         plt.suptitle(f"[{hosp_label}] Case 1 → 5: 예측 성능 지표 추이\n"
                      f"(AEC와 Scanner 추가에 따른 성능 향상 정량화)",
                      fontsize=13, fontweight="bold")

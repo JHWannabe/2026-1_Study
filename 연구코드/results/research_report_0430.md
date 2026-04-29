@@ -3,7 +3,7 @@
 > **버전:** 0430 (0424 대비 설계 변경 적용)
 > **분석 도구:** Python (statsmodels, scikit-learn, scipy)
 > **병원:** 강남, 신촌
-> **성별 그룹:** 전체 (성별 특이적 P25 임계값 적용 — 남/여 별도 산출)
+> **분석 그룹:** 전체 (이진화: 성별 특이적 P25 — 남/여 별도 산출)
 > **AEC 세트:** AEC_prev (수동 4개) vs AEC_new (파이프라인 자동 선택)
 
 ---
@@ -97,7 +97,7 @@
 | 단계 | 제거 수 | 잔여 피처 |
 |------|---------|----------|
 | Step 1 - Near-zero var | 0 | nan |
-| Step 2 - High correlation | 20 | band3_energy_ratio, peak_mean_height, fft_mag_std, AUC_normalized, wavelet_cA_energy, spectral_rolloff, mean_abs_deviation, p95, p75, RMSE, AUC, band1_energy, band4_energy_ratio, band2_energy_ratio, p90, wavelet_cA_std, median, band4_energy, band3_energy, p25 |
+| Step 2 - High correlation | 20 | peak_mean_height, band4_energy_ratio, band3_energy, median, fft_mag_std, p75, wavelet_cA_std, mean_abs_deviation, band3_energy_ratio, p95, AUC_normalized, p25, band4_energy, spectral_rolloff, RMSE, wavelet_cA_energy, band2_energy_ratio, band1_energy, p90, AUC |
 | Step 3 - Union pass | 2 | nan |
 | Step 4 - Best search | 0 | CV, IQR, band1_energy_ratio, band2_energy, dominant_freq, min, p10, p5, p90_p10_ratio, signal_energy, signal_length, slope_abs_mean, slope_max, slope_mean, slope_std, spectral_energy, spectral_spread, wavelet_cD1_energy, wavelet_cD1_std, wavelet_cD2_energy, wavelet_cD2_std, wavelet_energy_ratio_D1 |
 | VIF pruning (VIF>10) | 13 | IQR, band2_energy, dominant_freq, mean, slope_max, spectral_energy, wavelet_cD1_energy, wavelet_cD2_energy, wavelet_energy_ratio_D1 |
