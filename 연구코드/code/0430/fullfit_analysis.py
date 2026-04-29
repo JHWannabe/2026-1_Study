@@ -38,8 +38,14 @@ def run_fullfit_analysis(
     """Full-fit OLS/Logit 진단 플롯 생성 (Figs 04-15)."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    tama_threshold = y_cont.quantile(0.25)
-    y_bin = (y_cont < tama_threshold).astype(int)
+    female_mask = X_full["PatientSex_enc"] == 0
+    male_mask   = X_full["PatientSex_enc"] == 1
+    tama_female = y_cont[female_mask].quantile(0.25)
+    tama_male   = y_cont[male_mask].quantile(0.25)
+
+    y_bin = pd.Series(0, index=y_cont.index, dtype=int)
+    y_bin[female_mask] = (y_cont[female_mask] < tama_female).astype(int)
+    y_bin[male_mask]   = (y_cont[male_mask]   < tama_male).astype(int)
 
     def avail(feats):
         return [f for f in feats if f in X_full.columns]

@@ -105,7 +105,7 @@ def load_reg(hosp_key, sex_key):
 
 reg_all = {}
 for hk in ["gangnam", "sinchon"]:
-    for sk in ["all", "female", "male"]:
+    for sk in ["all"]:
         df_r = load_reg(hk, sk)
         if not df_r.empty:
             reg_all[(hk, sk)] = df_r
@@ -134,7 +134,7 @@ def section_header():
 > **버전:** 0430 (0424 대비 설계 변경 적용)
 > **분석 도구:** Python (statsmodels, scikit-learn, scipy)
 > **병원:** 강남, 신촌
-> **성별 그룹:** 전체 / 여성(F) / 남성(M)
+> **성별 그룹:** 전체 (성별 특이적 P25 임계값 적용 — 남/여 별도 산출)
 > **AEC 세트:** AEC_prev (수동 4개) vs AEC_new (파이프라인 자동 선택)
 
 ---
@@ -150,9 +150,9 @@ def section_design_changes():
 | ① | 피처 선택 | 수동 (상관계수+VIF → 연구자 결정) | 자동 파이프라인 (4단계 필터링 + 앙상블 투표 + CV R²) |
 | ② | 임상 기준선 | PatientAge + PatientSex | PatientAge + PatientSex + **BMI** |
 | ③ | Case 구조 | Case 1~3 (단일 AEC 세트) | Case 1~5 (AEC_prev vs AEC_new 교차 비교) |
-| ④ | 성별 층화 | 성별 = 공변량(더미)만 | 전체 / 여성 / 남성 독립 모델 |
+| ④ | 성별 층화 | 전체 / 여성 / 남성 독립 모델 | 전체 모델 + 성별 특이적 P25 임계값 |
 | ⑤ | 다병원 분석 | 강남 단독 (SITE 수동 변경) | 강남·신촌 자동 순회 + 교차 병원 비교 |
-| ⑥ | 이진화 기준 | 성별 특이적 P25 (남/여 별도) | 분석 그룹 내 하위 25% 동적 산출 |
+| ⑥ | 이진화 기준 | 분석 그룹 내 하위 25% 동적 산출 | 성별 특이적 P25 (남/여 별도) — 전체 모델에 적용 |
 
 ### 1.1 피처 선택 파이프라인 4단계
 
@@ -246,7 +246,7 @@ def section_feature_selection():
 def section_regression(hosp_key: str, hosp_label: str):
     lines = [f"## 3. 회귀 분석 결과 — {hosp_label}", ""]
 
-    for sex_key, sex_label in [("all", "전체"), ("female", "여성(F)"), ("male", "남성(M)")]:
+    for sex_key, sex_label in [("all", "전체")]:
         df_r = reg_all.get((hosp_key, sex_key), pd.DataFrame())
         if df_r.empty:
             df_r = cross_df[
@@ -267,7 +267,7 @@ def section_regression(hosp_key: str, hosp_label: str):
         # 데이터 크기
         n_rows = df_r["N_rows"].iloc[0] if "N_rows" in df_r.columns else "?"
         thr    = df_r["TAMA_threshold"].iloc[0] if "TAMA_threshold" in df_r.columns else "?"
-        lines.append(f"- N = **{n_rows}** | 이진화 임계값 (그룹 내 P25) = **{f3(thr,1)} cm²**")
+        lines.append(f"- N = **{n_rows}** | 이진화 임계값 (성별 특이적 P25) = **{thr}**")
         lines.append("")
 
         # 선형 회귀
@@ -697,7 +697,6 @@ report = (
     + section_regression("gangnam", "강남")
     + section_regression("sinchon", "신촌")
     + section_cross_hospital()
-    + section_sex_comparison()
     + section_bmi_comparison()
     + section_figures()
     + section_conclusion()

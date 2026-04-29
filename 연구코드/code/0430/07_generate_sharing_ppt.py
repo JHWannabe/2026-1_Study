@@ -207,7 +207,7 @@ def s01_title(prs):
     rect(slide, Inches(0.56), Inches(3.2), Inches(8), Inches(0.04), ORANGE)
 
     # 부제
-    txb(slide, "0430 버전  |  자동 피처 선택 + BMI 보정 + 성별 층화 + 다병원 검증",
+    txb(slide, "0430 버전  |  자동 피처 선택 + BMI 보정 + 성별 특이적 이진화 + 다병원 검증",
         Inches(0.56), Inches(3.4), Inches(12.22), Inches(0.5),
         size=16, color=DARK, font=FONT_NAME)
 
@@ -242,14 +242,14 @@ def s02_last_meeting(prs, n):
          "Case 1~3 (단일 AEC 세트)",
          "Case 1~5 (AEC_prev vs AEC_new 교차 비교 + Scanner)"),
         ("④  성별 층화",
-         "성별 = 공변량(더미)만",
-         "전체 / 여성(F) / 남성(M) 독립 모델 (3개 서브그룹)"),
+         "전체 / 여성(F) / 남성(M) 독립 모델 (3개 서브그룹)",
+         "성별 특이적 P25 임계값 적용 (층화 서브그룹 제거)"),
         ("⑤  다병원 분석",
          "강남 단독",
          "강남·신촌 자동 순회 + 교차 병원 비교"),
         ("⑥  이진화 기준",
-         "성별 특이적 P25 (남/여 별도)",
-         "분석 그룹 내 하위 25% 동적 산출"),
+         "분석 그룹 내 하위 25% 동적 산출",
+         "성별 특이적 P25 — 남/여 별도 산출 후 전체 모델에 적용"),
     ]
 
     row_h = Inches(0.78)
@@ -311,7 +311,7 @@ def s03_research_summary(prs, n):
         size=11, color=DARK, font=FONT_NAME)
 
     note_line(slide,
-              "* 성별 층화 시 Sex 변수 제거 (Female/Male 독립 모델에서 공선성 방지)")
+              "* 이진화 기준: 성별 특이적 P25 (여성 P25 / 남성 P25 각각 산출 → 전체 모델에 적용)")
     print(f"  [S{n:02d}] Research Summary")
 
 
@@ -340,7 +340,7 @@ def s05_data_gangnam(prs, n):
         "  Axial Data: 1,642건 → Fixed Tube Current Value만 유지 → 1,365명",
         "",
         "성별 분포: 여성(F) = 841명  |  남성(M) = 524명",
-        "Low-TAMA 임계값 (그룹 내 P25): 전체 100.0 cm²  |  F: 95.0 cm²  |  M: 132.0 cm²",
+        "Low-TAMA 임계값 (성별 특이적 P25): 여성(F) 95.0 cm²  |  남성(M) 132.0 cm²",
     ]
     txb(slide, "\n".join(lines),
         Inches(0.56), CONTENT_Y, Inches(5.8), Inches(2.8),
@@ -379,7 +379,7 @@ def s07_data_sinchon(prs, n):
         "  Axial Data: 2,254건 → Fixed/No Tube Current Value 제거 → 1,269명",
         "",
         "성별 분포: 여성(F) = 631명  |  남성(M) = 638명",
-        "Low-TAMA 임계값 (그룹 내 P25): 전체 103.0 cm²  |  F: 95.0 cm²  |  M: 131.0 cm²",
+        "Low-TAMA 임계값 (성별 특이적 P25): 여성(F) 95.0 cm²  |  남성(M) 131.0 cm²",
     ]
     txb(slide, "\n".join(lines),
         Inches(0.56), CONTENT_Y, Inches(5.8), Inches(2.8),
@@ -821,50 +821,6 @@ def s23_cross_hospital(prs, n):
     print(f"  [S{n:02d}] 교차 병원 비교")
 
 
-def s24_sex_strat(prs, n):
-    slide = new_slide(prs)
-    fill_bg(slide, NAVY)
-    slide_title_bar(slide, "3.  Detailed Progress  |  성별 층화 분석 (전체 / 여성(F) / 남성(M))", n, bg_dark=True)
-
-    # 성별 층화 R² 표 (강남)
-    txb(slide, "선형 R² — 강남",
-        Inches(0.35), CONTENT_Y, Inches(6.5), Inches(0.35),
-        size=11, bold=True, color=ORANGE, font=FONT_BOLD)
-    s_headers = ["Case", "전체", "여성(F)", "남성(M)"]
-    s_lin_rows = [
-        ["Case 1  Clinical", "0.662", "0.241", "0.324"],
-        ["Case 2  +AEC_prev", "0.678", "0.266", "0.350"],
-        ["Case 3  +AEC_new", "0.669", "0.262", "0.317"],
-        ["Case 4  +AEC_prev +Scanner", "0.668", "0.264", "0.347"],
-        ["Case 5  +AEC_new +Scanner", "0.662", "0.243", "0.314"],
-    ]
-    table(slide, s_headers, s_lin_rows,
-          Inches(0.35), Inches(1.38), [Inches(4.0), Inches(0.9), Inches(1.1), Inches(1.1)],
-          row_h=Inches(0.40), font_size=9, header_bg=ORANGE, alt_bg=DARK)
-
-    txb(slide, "AUC — 강남",
-        Inches(7.5), CONTENT_Y, Inches(5.5), Inches(0.35),
-        size=11, bold=True, color=ORANGE, font=FONT_BOLD)
-    s_log_rows = [
-        ["Case 1  Clinical", "0.829", "0.706", "0.792"],
-        ["Case 2  +AEC_prev", "0.835", "0.716", "0.798"],
-        ["Case 3  +AEC_new", "0.835", "0.710", "0.787"],
-        ["Case 4  +AEC_prev +Scanner", "0.831", "0.729", "0.795"],
-        ["Case 5  +AEC_new +Scanner", "0.832", "0.729", "0.795"],
-    ]
-    table(slide, s_headers, s_log_rows,
-          Inches(7.5), Inches(1.38), [Inches(4.0), Inches(0.9), Inches(1.1), Inches(1.1)],
-          row_h=Inches(0.40), font_size=9, header_bg=ORANGE, alt_bg=DARK)
-
-    img(slide, FIG_DIR / "05_sex_strat_linear.png",
-        Inches(0.35), Inches(3.85), Inches(12.6), Inches(3.4))
-
-    note_line(slide,
-              "* 전체 그룹이 R²·AUC 모두 가장 높음 (N이 가장 크기 때문)  |  "
-              "성별 단독 모델에서 여성 R² < 남성 R²",
-              color=ORANGE)
-    print(f"  [S{n:02d}] 성별 층화")
-
 
 def s25_bmi(prs, n):
     slide = new_slide(prs)
@@ -943,8 +899,8 @@ def s28_achievements(prs, n):
          "Case 1 기준선에서 R² +0.12 향상 — BMI가 TAMA의 강력한 독립 예측 변수임을 두 병원 모두에서 확인"),
         ("2. 자동 피처 선택",
          "60개+ AEC 피처에서 4단계 파이프라인으로 과적합·다중공선성 없는 객관적 세트 도출 (강남 9개, 신촌 13개)"),
-        ("3. 성별 층화",
-         "전체/여성/남성 독립 모델로 이질성 탐색 — 성별 그룹 내 예측력은 전체 모델 대비 낮음 (소표본 영향)"),
+        ("3. 성별 특이적 이진화",
+         "남/여 별도 P25 임계값 적용 — 성별 생리적 차이(근육량 분포 차이)를 반영한 Low TAMA 이진 분류"),
         ("4. 다병원 검증",
          "강남·신촌 교차 검증으로 임상 변수 기반 기준선(R²≈0.64~0.66, AUC≈0.83~0.86) 재현성 확인"),
     ]
@@ -971,7 +927,6 @@ def s29_next_steps(prs, n):
         size=14, bold=True, color=NAVY, font=FONT_BOLD)
     limits = [
         "• AEC_new vs AEC_prev 성능 차이가 미미 — 더 많은 환자 데이터 필요",
-        "• 성별 층화 시 소그룹(여성 단독, 남성 단독) 표본 크기에 따른 불안정성",
         "• 단면 연구 설계 — 인과 추론을 위한 전향적 코호트 연구 권장",
     ]
     txb(slide, "\n".join(limits),
@@ -1063,15 +1018,14 @@ def main():
     s21_logistic_sinchon(prs, 21)              # 21
     s22_diag_sinchon(prs, 22)                  # 22
     s23_cross_hospital(prs, 23)                # 23
-    s24_sex_strat(prs, 24)                     # 24
-    s25_bmi(prs, 25)                           # 25
-    s26_aec_comparison(prs, 26)               # 26
+    s25_bmi(prs, 24)                           # 24
+    s26_aec_comparison(prs, 25)               # 25
 
-    s04_section(prs, 27, "결론 & 핵심 성과", ORANGE)  # 27
+    s04_section(prs, 26, "결론 & 핵심 성과", ORANGE)  # 26
 
-    s28_achievements(prs, 28)                  # 28
-    s29_next_steps(prs, 29)                    # 29
-    s30_end(prs, 30)                           # 30
+    s28_achievements(prs, 27)                  # 27
+    s29_next_steps(prs, 28)                    # 28
+    s30_end(prs, 29)                           # 29
 
     print(f"\n[PPT 저장 중...]")
     OUT_PPT.parent.mkdir(parents=True, exist_ok=True)

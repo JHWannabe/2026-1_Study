@@ -714,8 +714,7 @@ def main():
     slide_diagnostics(prs, 'sinchon', '신촌')             # 8
 
     slide_cross_hospital(prs)                               # 9
-    slide_sex_stratification(prs)                           # 10
-    slide_aec_comparison(prs)                               # 11
+    slide_aec_comparison(prs)                               # 10
     slide_bmi_analysis(prs)                                 # 12
     slide_case_progression(prs)                             # 13
     slide_aec_prev_vs_new_detail(prs)                       # 14

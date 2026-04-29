@@ -38,22 +38,18 @@ from sklearn.metrics import (
 from sklearn.pipeline import Pipeline
 
 
-# 성별 층화 분석 그룹 정의.
-# sex_val=None → 전체(all) 분석 (Sex 공변량 포함)
-# sex_val=0/1  → 해당 성별만 필터링, Sex 공변량 제거 (perfect collinearity 방지)
+# 전체 분석만 실행 — 성별 특이적 P25 임계값을 내부에서 적용
 SEX_GROUPS = [
-    ("all",    None, "전체"),
-    ("female", 0,    "여성(F)"),
-    ("male",   1,    "남성(M)"),
+    ("all", None, "전체"),
 ]
 
 
 def run_hospital(hosp_key: str, data_path: Path) -> tuple[dict, dict]:
     """
-    단일 병원에 대해 데이터 로드 → EDA → 성별 그룹 CV → full-fit 진단 수행.
+    단일 병원에 대해 데이터 로드 → EDA → 전체 그룹 CV → full-fit 진단 수행.
     Returns (group_summaries, clean_tuple_all)
       group_summaries: {sex_key: summary_df}
-      clean_tuple_all: (X_sub, y_cont, y_bin, cases, tama_threshold) for 전체 그룹
+      clean_tuple_all: (X_sub, y_cont, y_bin, cases, tama_threshold_dict) for 전체 그룹
     """
     hosp_label = "강남" if hosp_key == "gangnam" else "신촌"
     print(f"\n{'='*60}")
@@ -127,52 +123,8 @@ def run_hospital(hosp_key: str, data_path: Path) -> tuple[dict, dict]:
             clean_tuple_all = clean_tuple
             run_fullfit_analysis(X_sub, y_sub, cases, BASE_DIR, hosp_label)
 
-    # ── 성별 비교 그래프 ──
-    if len(group_summaries) == 3:
-        _plot_sex_comparison(group_summaries, BASE_DIR, hosp_label)
-
     return group_summaries, clean_tuple_all
 
-
-def _plot_sex_comparison(group_summaries: dict, BASE_DIR: Path, hosp_label: str) -> None:
-    sex_colors = {"all": "#555555", "female": "#e74c3c", "male": "#3498db"}
-    sex_disp   = {"all": "전체", "female": "여성(F)", "male": "남성(M)"}
-    case_short = ["C1\nClinical", "C2\n+AEC\nprev", "C3\n+AEC\nnew",
-                  "C4\n+prev\n+Scan", "C5\n+new\n+Scan"]
-    n_cases = 5
-    x = np.arange(n_cases)
-    w = 0.25
-
-    fig, axes = plt.subplots(1, 2, figsize=(16, 5))
-    for ax, metric, std_key, title, ylim in zip(
-        axes,
-        ["Lin_R2", "Log_AUC"], ["Lin_R2_std", "Log_AUC_std"],
-        ["Linear R²", "Logistic AUC"], [None, (0, 1)],
-    ):
-        for i, skey in enumerate(["all", "female", "male"]):
-            df_g = group_summaries[skey]
-            vals = [df_g.iloc[k][metric]  for k in range(n_cases)]
-            errs = [df_g.iloc[k][std_key] for k in range(n_cases)]
-            offset = (i - 1) * w
-            bars = ax.bar(x + offset, vals, w, yerr=errs, capsize=4,
-                          color=sex_colors[skey], label=sex_disp[skey], edgecolor="white")
-            for bar, v in zip(bars, vals):
-                ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.005,
-                        f"{v:.3f}", ha="center", va="bottom", fontsize=6)
-        ax.set_xticks(x); ax.set_xticklabels(case_short, fontsize=8)
-        ax.set_title(title); ax.set_ylabel(title.split()[-1])
-        if ylim: ax.set_ylim(*ylim)
-        ax.legend(fontsize=9)
-
-    plt.suptitle(f"[{hosp_label}] 성별 비교: 전체 vs 여성 vs 남성",
-                 fontsize=13, fontweight="bold")
-    plt.tight_layout()
-    fig.savefig(BASE_DIR / "sex_comparison.png", dpi=150); plt.close()
-    print(f"\n  Saved: {BASE_DIR / 'sex_comparison.png'}")
-
-    combined_sex = pd.concat(group_summaries.values(), ignore_index=True)
-    combined_sex.to_excel(BASE_DIR / "sex_comparison_summary.xlsx", index=False)
-    print(f"  Saved: sex_comparison_summary.xlsx")
 
 
 def run_cross_hospital(all_summaries: dict, COMPARE_DIR: Path) -> None:
@@ -248,7 +200,11 @@ def run_external_validation(all_clean_data: dict, COMPARE_DIR: Path) -> None:
             lin_mae   = mean_absolute_error(y_te_cont, pred_cont)
             lin_rmse  = np.sqrt(mean_squared_error(y_te_cont, pred_cont))
 
-            y_te_bin_ext = (y_te_cont < tama_te).astype(int)
+            female_mask_te = X_te["PatientSex_enc"] == 0
+            male_mask_te   = X_te["PatientSex_enc"] == 1
+            y_te_bin_ext = pd.Series(0, index=y_te_cont.index, dtype=int)
+            y_te_bin_ext[female_mask_te] = (y_te_cont[female_mask_te] < tama_te["female"]).astype(int)
+            y_te_bin_ext[male_mask_te]   = (y_te_cont[male_mask_te]   < tama_te["male"]).astype(int)
             pipe_log = Pipeline([
                 ("sc", StandardScaler()),
                 ("m",  LogisticRegression(max_iter=2000, random_state=CV_RANDOM, solver="lbfgs")),
@@ -358,7 +314,7 @@ def run_bmi_analysis(all_clean_data: dict, BMI_COMPARE_DIR: Path) -> None:
                 "Log_Acc":   round(lo["Accuracy"], 4),
                 "Log_Sens":  round(lo["Sensitivity"], 4),
                 "Log_Spec":  round(lo["Specificity"], 4),
-                "TAMA_threshold": tama_thr,
+                "TAMA_threshold": f"F:{tama_thr['female']:.1f}/M:{tama_thr['male']:.1f}",
             })
 
         if len(lin_bmi) < 6:

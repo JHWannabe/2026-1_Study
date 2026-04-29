@@ -654,57 +654,68 @@ def plot_case_progression(hosp_key: str, hosp_label: str, fig_name: str):
 def plot_sex_n_threshold():
     rows = []
     for hosp_key, hosp_label in [('gangnam', '강남'), ('sinchon', '신촌')]:
-        for sex_key, sex_label in [('all', '전체'), ('female', '여성(F)'), ('male', '남성(M)')]:
-            df = load_reg(hosp_key, sex_key)
-            if df.empty:
-                continue
-            n_rows = df['N_rows'].iloc[0] if 'N_rows' in df.columns else 0
-            thr    = df['TAMA_threshold'].iloc[0] if 'TAMA_threshold' in df.columns else 0
-            rows.append({'병원': hosp_label, '그룹': sex_label,
-                         'N': n_rows, '임계값': thr})
+        df = load_reg(hosp_key, 'all')
+        if df.empty:
+            continue
+        n_rows = df['N_rows'].iloc[0] if 'N_rows' in df.columns else 0
+        thr_str = str(df['TAMA_threshold'].iloc[0]) if 'TAMA_threshold' in df.columns else "F:0/M:0"
+        try:
+            parts = dict(p.split(':') for p in thr_str.split('/'))
+            thr_f = float(parts.get('F', 0))
+            thr_m = float(parts.get('M', 0))
+        except Exception:
+            thr_f = thr_m = 0.0
+        rows.append({'병원': hosp_label, 'N': n_rows, 'F_thr': thr_f, 'M_thr': thr_m})
 
     if not rows:
         print("  [스킵] 12 — 회귀 결과 없음")
         return
 
     df = pd.DataFrame(rows)
-    labels = [f"{r['병원']}\n{r['그룹']}" for _, r in df.iterrows()]
+    hosp_labels = df['병원'].tolist()
     n_vals = df['N'].tolist()
-    thr_vals = df['임계값'].tolist()
-    x = np.arange(len(labels))
+    x = np.arange(len(hosp_labels))
+    w = 0.35
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # N수
     ax = axes[0]
-    colors_n = [COLORS['gangnam'] if '강남' in l else COLORS['sinchon'] for l in labels]
+    colors_n = [COLORS['gangnam'] if '강남' in l else COLORS['sinchon'] for l in hosp_labels]
     bars = ax.bar(x, n_vals, color=colors_n, edgecolor='white', width=0.5)
     for bar, v in zip(bars, n_vals):
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
                 str(int(v)), ha='center', va='bottom', fontsize=10, fontweight='bold')
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=9)
+    ax.set_xticklabels(hosp_labels, fontsize=11)
     ax.set_ylabel("N (환자 수)", fontsize=11)
-    ax.set_title("병원 × 성별 그룹별 분석 대상 환자 수", fontsize=12)
+    ax.set_title("병원별 분석 대상 환자 수", fontsize=12)
     ax.legend(handles=[mpatches.Patch(color=COLORS['gangnam'], label='강남'),
                        mpatches.Patch(color=COLORS['sinchon'], label='신촌')], fontsize=10)
     ax.yaxis.grid(True, linestyle='--', alpha=0.4)
     ax.set_axisbelow(True)
 
-    # 임계값
+    # 성별 특이적 임계값
     ax = axes[1]
-    bars2 = ax.bar(x, thr_vals, color=colors_n, edgecolor='white', width=0.5)
-    for bar, v in zip(bars2, thr_vals):
+    f_vals = df['F_thr'].tolist()
+    m_vals = df['M_thr'].tolist()
+    bars_f = ax.bar(x - w/2, f_vals, w, color='#e74c3c', edgecolor='white', label='여성(F)')
+    bars_m = ax.bar(x + w/2, m_vals, w, color='#3498db', edgecolor='white', label='남성(M)')
+    for bar, v in zip(bars_f, f_vals):
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
-                f"{v:.1f}", ha='center', va='bottom', fontsize=10, fontweight='bold')
+                f"{v:.1f}", ha='center', va='bottom', fontsize=10, fontweight='bold', color='#e74c3c')
+    for bar, v in zip(bars_m, m_vals):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                f"{v:.1f}", ha='center', va='bottom', fontsize=10, fontweight='bold', color='#3498db')
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=9)
+    ax.set_xticklabels(hosp_labels, fontsize=11)
     ax.set_ylabel("이진화 임계값 (cm²)", fontsize=11)
-    ax.set_title("병원 × 성별 그룹별 Low-TAMA 임계값\n(그룹 내 하위 25%)", fontsize=12)
+    ax.set_title("병원별 성별 특이적 Low-TAMA 임계값\n(성별 내 하위 25%)", fontsize=12)
+    ax.legend(fontsize=10)
     ax.yaxis.grid(True, linestyle='--', alpha=0.4)
     ax.set_axisbelow(True)
 
-    plt.suptitle("병원 × 성별 그룹별 분석 요약 — N수 & 이진화 임계값",
+    plt.suptitle("병원별 분석 요약 — N수 & 성별 특이적 이진화 임계값",
                  fontsize=13, fontweight='bold')
     plt.tight_layout()
     savefig("12_sex_n_threshold.png")
