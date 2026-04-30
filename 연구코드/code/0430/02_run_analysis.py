@@ -13,7 +13,7 @@
   4. BMI 기여도 분석
 
 Usage:
-    python run_analysis.py
+    python 02_run_analysis.py
 """
 
 import numpy as np
@@ -22,12 +22,12 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from config import (
-    SCRIPT_DIR, AEC_PREV, AEC_NEW, HOSPITALS, CASE_LABELS, COLORS, CV_RANDOM,
+    SCRIPT_DIR, AEC_PREV, AEC_CANDIDATES, HOSPITALS, CASE_LABELS, COLORS, CV_RANDOM,
 )
 from helpers import load_hospital, linear_cv, logistic_cv, make_cases
 from fullfit_analysis import run_fullfit_analysis
 from cv_analysis import run_one_analysis
-from eda_plots import run_tama_stats, run_eda_figs
+from eda_plots import run_smi_stats, run_eda_figs
 
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -49,7 +49,7 @@ def run_hospital(hosp_key: str, data_path: Path) -> tuple[dict, dict]:
     단일 병원에 대해 데이터 로드 → EDA → 전체 그룹 CV → full-fit 진단 수행.
     Returns (group_summaries, clean_tuple_all)
       group_summaries: {sex_key: summary_df}
-      clean_tuple_all: (X_sub, y_cont, y_bin, cases, tama_threshold_dict) for 전체 그룹
+      clean_tuple_all: (X_sub, y_cont, y_bin, cases, smi_threshold_dict) for 전체 그룹
     """
     hosp_label = "강남" if hosp_key == "gangnam" else "신촌"
     print(f"\n{'='*60}")
@@ -61,11 +61,11 @@ def run_hospital(hosp_key: str, data_path: Path) -> tuple[dict, dict]:
 
     # ── 데이터 로드 & 정제 ──
     feat_df, meta_df = load_hospital(data_path, f"{hosp_key}_temp.xlsx")
-    meta_df["TAMA"]  = pd.to_numeric(meta_df["TAMA"], errors="coerce")
+    meta_df["SMI"]   = pd.to_numeric(meta_df["SMI"], errors="coerce")
 
     df = feat_df.merge(
         meta_df[["PatientID", "PatientAge", "PatientSex",
-                 "BMI", "ManufacturerModelName", "kVp", "TAMA"]],
+                 "BMI", "ManufacturerModelName", "kVp", "SMI"]],
         on="PatientID", how="inner",
     )
     df["PatientSex_enc"] = df["PatientSex"].map({"F": 0, "M": 1})
@@ -77,7 +77,7 @@ def run_hospital(hosp_key: str, data_path: Path) -> tuple[dict, dict]:
     CLINICAL   = ["PatientAge", "PatientSex_enc", "BMI"]
     CLIN_NOSEX = ["PatientAge", "BMI"]
 
-    ALL_COLS    = list(dict.fromkeys(CLINICAL + AEC_PREV + AEC_NEW + SCANNER + ["TAMA", "PatientSex_enc"]))
+    ALL_COLS    = list(dict.fromkeys(CLINICAL + AEC_PREV + AEC_CANDIDATES + SCANNER + ["SMI", "PatientSex_enc"]))
     _clean_mask = df[ALL_COLS].notna().all(axis=1)
     df_clean    = df.loc[_clean_mask, ALL_COLS].reset_index(drop=True)
     df_eda      = df.loc[_clean_mask].reset_index(drop=True)
@@ -90,7 +90,7 @@ def run_hospital(hosp_key: str, data_path: Path) -> tuple[dict, dict]:
           f"  - 제외: {n_dropped}행")
 
     # ── EDA ──
-    run_tama_stats(df_clean, BASE_DIR, hosp_label)
+    run_smi_stats(df_clean, BASE_DIR, hosp_label)
     run_eda_figs(df_clean, df_eda, MODEL_COLS, BASE_DIR, total_patients, hosp_label)
 
     # ── 성별 그룹 루프 ──
@@ -110,8 +110,8 @@ def run_hospital(hosp_key: str, data_path: Path) -> tuple[dict, dict]:
             print(f"  [{sex_label}] too few rows ({len(df_sub)}), skipped")
             continue
 
-        X_sub = df_sub.drop(columns=["TAMA"]).reset_index(drop=True)
-        y_sub = df_sub["TAMA"].astype(float).reset_index(drop=True)
+        X_sub = df_sub.drop(columns=["SMI"]).reset_index(drop=True)
+        y_sub = df_sub["SMI"].astype(float).reset_index(drop=True)
 
         result_dir = BASE_DIR / sex_key
         summary_df, clean_tuple = run_one_analysis(
@@ -180,7 +180,7 @@ def run_external_validation(all_clean_data: dict, COMPARE_DIR: Path) -> None:
 
     for train_key, test_key in directions:
         X_tr, y_tr_cont, y_tr_bin, CASES_tr, _ = all_clean_data[train_key]
-        X_te, y_te_cont, y_te_bin, CASES_te, tama_te = all_clean_data[test_key]
+        X_te, y_te_cont, y_te_bin, CASES_te, smi_te = all_clean_data[test_key]
         train_lbl = hosp_labels_map[train_key]
         test_lbl  = hosp_labels_map[test_key]
         print(f"\n  Train: {train_lbl} (n={len(X_tr)})  ->  Test: {test_lbl} (n={len(X_te)})")
@@ -203,8 +203,8 @@ def run_external_validation(all_clean_data: dict, COMPARE_DIR: Path) -> None:
             female_mask_te = X_te["PatientSex_enc"] == 0
             male_mask_te   = X_te["PatientSex_enc"] == 1
             y_te_bin_ext = pd.Series(0, index=y_te_cont.index, dtype=int)
-            y_te_bin_ext[female_mask_te] = (y_te_cont[female_mask_te] < tama_te["female"]).astype(int)
-            y_te_bin_ext[male_mask_te]   = (y_te_cont[male_mask_te]   < tama_te["male"]).astype(int)
+            y_te_bin_ext[female_mask_te] = (y_te_cont[female_mask_te] < smi_te["female"]).astype(int)
+            y_te_bin_ext[male_mask_te]   = (y_te_cont[male_mask_te]   < smi_te["male"]).astype(int)
             pipe_log = Pipeline([
                 ("sc", StandardScaler()),
                 ("m",  LogisticRegression(max_iter=2000, random_state=CV_RANDOM, solver="lbfgs")),
@@ -226,7 +226,7 @@ def run_external_validation(all_clean_data: dict, COMPARE_DIR: Path) -> None:
                 "Case": case_name, "N_train": len(X_tr), "N_test": len(X_te),
                 "N_features_used": len(feats_common),
                 "Lin_R2": round(lin_r2, 4), "Lin_MAE": round(lin_mae, 2),
-                "Lin_RMSE": round(lin_rmse, 2), "TAMA_threshold": tama_te,
+                "Lin_RMSE": round(lin_rmse, 2), "SMI_threshold": smi_te,
                 "Log_AUC": round(log_auc, 4), "Log_Acc": round(log_acc, 4),
                 "Log_Sens": round(log_sens, 4), "Log_Spec": round(log_spec, 4),
             })
@@ -276,7 +276,7 @@ def run_bmi_analysis(all_clean_data: dict, BMI_COMPARE_DIR: Path) -> None:
     BMI_COMPARE_DIR.mkdir(parents=True, exist_ok=True)
     bmi_all_rows = []
 
-    for hosp_key, (X_full, y_cont, y_bin, CASES_main, tama_thr) in all_clean_data.items():
+    for hosp_key, (X_full, y_cont, y_bin, CASES_main, smi_thr) in all_clean_data.items():
         hosp_label  = "강남" if hosp_key == "gangnam" else "신촌"
         print(f"\n  [{hosp_label}] n={len(y_cont)}")
 
@@ -314,7 +314,7 @@ def run_bmi_analysis(all_clean_data: dict, BMI_COMPARE_DIR: Path) -> None:
                 "Log_Acc":   round(lo["Accuracy"], 4),
                 "Log_Sens":  round(lo["Sensitivity"], 4),
                 "Log_Spec":  round(lo["Specificity"], 4),
-                "TAMA_threshold": f"F:{tama_thr['female']:.1f}/M:{tama_thr['male']:.1f}",
+                "SMI_threshold": f"F:{smi_thr['female']:.2f}/M:{smi_thr['male']:.2f}",
             })
 
         if len(lin_bmi) < 6:

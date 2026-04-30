@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python logistic_regression.py)",
-      "Bash(python linear_regression.py)"
-    ]
-  }
-}

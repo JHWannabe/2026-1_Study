@@ -11,13 +11,14 @@ from pathlib import Path
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.feature_selection import SelectKBest, f_regression
 from sklearn.metrics import (
     r2_score, mean_absolute_error, mean_squared_error,
     roc_auc_score, roc_curve, confusion_matrix, accuracy_score,
 )
 from sklearn.pipeline import Pipeline
 
-from config import AEC_PREV, AEC_NEW, CV_SPLITS, CV_RANDOM
+from config import AEC_PREV, AEC_CANDIDATES, AEC_SELECT_K, CV_SPLITS, CV_RANDOM
 
 
 def copy_to_temp(src: Path, temp_name: str) -> Path:
@@ -39,19 +40,54 @@ def load_hospital(src: Path, temp_name: str) -> tuple[pd.DataFrame, pd.DataFrame
     return feat, meta
 
 
-def linear_cv(X: pd.DataFrame, y: pd.Series) -> dict:
-    """5-Fold CV 선형 회귀. fold별 StandardScaler 재적합으로 data leakage 방지."""
-    kf   = KFold(n_splits=CV_SPLITS, shuffle=True, random_state=CV_RANDOM)
-    pipe = Pipeline([("sc", StandardScaler()), ("m", LinearRegression())])
+def _select_aec_features(X_aec_train: pd.DataFrame,
+                          y_train: pd.Series,
+                          k: int) -> list[str]:
+    """
+    Train fold 데이터만 사용해 SelectKBest(f_regression)로 AEC 피처 선택.
+    data leakage 방지: test fold 정보를 일절 사용하지 않음.
+    """
+    k_actual = min(k, X_aec_train.shape[1])
+    selector = SelectKBest(score_func=f_regression, k=k_actual)
+    selector.fit(X_aec_train, y_train)
+    indices = selector.get_support(indices=True)
+    return [X_aec_train.columns[i] for i in indices]
+
+
+def linear_cv(X: pd.DataFrame, y: pd.Series,
+              aec_candidate_cols: list = None) -> dict:
+    """
+    5-Fold CV 선형 회귀. fold별 StandardScaler 재적합으로 data leakage 방지.
+
+    aec_candidate_cols가 제공될 경우: 각 fold의 train set에서
+    SelectKBest(f_regression)로 AEC 피처를 선택하고 해당 피처만 사용.
+    None이면 X 전체 컬럼을 그대로 사용.
+    """
+    kf = KFold(n_splits=CV_SPLITS, shuffle=True, random_state=CV_RANDOM)
     r2s, maes, rmses, all_true, all_pred = [], [], [], [], []
+
+    fixed_cols = ([c for c in X.columns if c not in aec_candidate_cols]
+                  if aec_candidate_cols else list(X.columns))
+
     for tr, te in kf.split(X):
-        pipe.fit(X.iloc[tr], y.iloc[tr])
-        pred = pipe.predict(X.iloc[te])
+        if aec_candidate_cols:
+            sel_aec = _select_aec_features(
+                X[aec_candidate_cols].iloc[tr], y.iloc[tr], AEC_SELECT_K
+            )
+            fold_cols = fixed_cols + sel_aec
+        else:
+            fold_cols = fixed_cols
+
+        pipe = Pipeline([("sc", StandardScaler()), ("m", LinearRegression())])
+        pipe.fit(X[fold_cols].iloc[tr], y.iloc[tr])
+        pred = pipe.predict(X[fold_cols].iloc[te])
+
         r2s.append(r2_score(y.iloc[te], pred))
         maes.append(mean_absolute_error(y.iloc[te], pred))
         rmses.append(np.sqrt(mean_squared_error(y.iloc[te], pred)))
         all_true.extend(y.iloc[te].tolist())
         all_pred.extend(pred.tolist())
+
     return dict(
         R2=np.mean(r2s),   R2_std=np.std(r2s),
         MAE=np.mean(maes), MAE_std=np.std(maes),
@@ -60,21 +96,37 @@ def linear_cv(X: pd.DataFrame, y: pd.Series) -> dict:
     )
 
 
-def logistic_cv(X: pd.DataFrame, y: pd.Series) -> dict:
-    """5-Fold StratifiedKFold 로지스틱 회귀.
+def logistic_cv(X: pd.DataFrame, y: pd.Series,
+                aec_candidate_cols: list = None) -> dict:
+    """
+    5-Fold StratifiedKFold 로지스틱 회귀.
     Sensitivity/Specificity는 각 fold별 Youden Index 최적 threshold로 산출.
-    (default 0.5 threshold는 25%/75% 클래스 불균형 시 Sensitivity를 심각하게 과소평가)
+
+    aec_candidate_cols가 제공될 경우: 각 fold의 train set에서
+    SelectKBest(f_regression)로 AEC 피처를 선택.
     """
     skf = StratifiedKFold(n_splits=CV_SPLITS, shuffle=True, random_state=CV_RANDOM)
     aucs, accs, sens, specs, fprs_l, tprs_l = [], [], [], [], [], []
     oof_prob_all, oof_true_all = [], []
+
+    fixed_cols = ([c for c in X.columns if c not in aec_candidate_cols]
+                  if aec_candidate_cols else list(X.columns))
+
     for tr, te in skf.split(X, y):
+        if aec_candidate_cols:
+            sel_aec = _select_aec_features(
+                X[aec_candidate_cols].iloc[tr], y.iloc[tr], AEC_SELECT_K
+            )
+            fold_cols = fixed_cols + sel_aec
+        else:
+            fold_cols = fixed_cols
+
         pipe = Pipeline([
             ("sc", StandardScaler()),
             ("m",  LogisticRegression(max_iter=2000, random_state=CV_RANDOM, solver="lbfgs")),
         ])
-        pipe.fit(X.iloc[tr], y.iloc[tr])
-        prob = pipe.predict_proba(X.iloc[te])[:, 1]
+        pipe.fit(X[fold_cols].iloc[tr], y.iloc[tr])
+        prob = pipe.predict_proba(X[fold_cols].iloc[te])[:, 1]
         fpr, tpr, thresholds = roc_curve(y.iloc[te], prob)
 
         # Youden Index 최적 threshold (Sensitivity + Specificity - 1 최대화)
@@ -108,13 +160,14 @@ def logistic_cv(X: pd.DataFrame, y: pd.Series) -> dict:
 
 
 def make_cases(clinical_feats: list, scanner_feats: list) -> dict:
-    """5단계 케이스 딕셔너리 생성. 층화 분석 시 clinical_feats에서 Sex 제거."""
+    """5단계 케이스 딕셔너리 생성. 층화 분석 시 clinical_feats에서 Sex 제거.
+    Case3/5는 AEC_CANDIDATES 전체를 포함 — CV fold 내 SelectKBest로 최종 선택."""
     return {
         "Case1_Clinical":                  clinical_feats,
         "Case2_Clinical+AEC_prev":         clinical_feats + AEC_PREV,
-        "Case3_Clinical+AEC_new":          clinical_feats + AEC_NEW,
+        "Case3_Clinical+AEC_new":          clinical_feats + AEC_CANDIDATES,
         "Case4_Clinical+AEC_prev+Scanner": clinical_feats + AEC_PREV + scanner_feats,
-        "Case5_Clinical+AEC_new+Scanner":  clinical_feats + AEC_NEW  + scanner_feats,
+        "Case5_Clinical+AEC_new+Scanner":  clinical_feats + AEC_CANDIDATES + scanner_feats,
     }
 
 

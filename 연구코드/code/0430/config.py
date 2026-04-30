@@ -52,20 +52,26 @@ CV_RANDOM = 42
 # AEC_PREV: 0424부터 사용해 온 4개의 고정 피처 세트.
 AEC_PREV = ["mean", "CV", "skewness", "slope_abs_mean"]
 
-# AEC_NEW: feature_selection 파이프라인이 자동 선택한 피처 세트.
+# AEC_CANDIDATES: feature_selection 파이프라인이 분산+상관 필터링으로 도출한 후보 세트.
+# 최종 선택은 CV fold 내 SelectKBest로 수행 (data leakage 방지).
 fs_xlsx = FS_RESULT / "feature_selection_summary.xlsx"
 if fs_xlsx.exists():
-    AEC_NEW = pd.read_excel(str(fs_xlsx), sheet_name="final_features")["final_features"].tolist()
-    print(f"[AEC-new] Loaded {len(AEC_NEW)} features from pipeline: {AEC_NEW}")
+    AEC_CANDIDATES = pd.read_excel(
+        str(fs_xlsx), sheet_name="candidate_features"
+    )["candidate_features"].tolist()
+    print(f"[AEC-candidates] Loaded {len(AEC_CANDIDATES)} features from pipeline: {AEC_CANDIDATES}")
 else:
-    AEC_NEW = [
+    AEC_CANDIDATES = [
         "IQR", "band2_energy", "dominant_freq", "mean", "slope_max",
         "spectral_energy", "wavelet_cD1_energy", "wavelet_cD2_energy",
         "wavelet_energy_ratio_D1",
     ]
-    print(f"[AEC-new] Fallback hardcoded {len(AEC_NEW)} features")
+    print(f"[AEC-candidates] Fallback hardcoded {len(AEC_CANDIDATES)} features")
 
 print(f"[AEC-prev] {len(AEC_PREV)} features: {AEC_PREV}")
+
+# AEC_SELECT_K: SelectKBest가 각 CV fold 내에서 AEC_CANDIDATES 중 선택할 개수.
+AEC_SELECT_K = 10
 
 # ────────────────────────────────────────────────
 # Hospital discovery

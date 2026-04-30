@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python -c \"import ast; ast.parse\\(open\\(r'c:\\\\Users\\\\jhjun\\\\OneDrive\\\\Desktop\\\\2026-1_Study\\\\연구코드\\\\code\\\\0430\\\\regression_analysis.py', encoding='utf-8'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\(r'c:\\\\Users\\\\jhjun\\\\OneDrive\\\\Desktop\\\\2026-1_Study\\\\연구코드\\\\code\\\\0430\\\\feature_selection_pipeline.py', encoding='utf-8'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")"
-    ]
-  }
-}
