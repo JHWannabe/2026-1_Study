@@ -4,7 +4,7 @@ from pathlib import Path
 from scipy import interpolate
 
 # 데이터 파일 경로
-data_path = r'연구코드\data\강남_merged_features.xlsx'
+data_path = r'연구코드\data\신촌_merged_features.xlsx'
 
 # 시트 로드
 metadata_bmi = pd.read_excel(data_path, sheet_name='metadata-bmi_add')

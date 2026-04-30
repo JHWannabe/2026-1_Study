@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from scipy import interpolate
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, r2_score
@@ -23,40 +22,12 @@ np.random.seed(SEED)
 
 
 # ── 데이터 로드 & 전처리 ──────────────────────────────────────────────────────
-
-def interpolate_aec(aec_df, n_target):
-    """각 PatientID의 AEC 값을 n_target 포인트로 선형 보간"""
-    aec_cols = [c for c in aec_df.columns if c != 'PatientID']
-    rows = []
-    for _, row in aec_df.iterrows():
-        values = row[aec_cols].dropna().values.astype(float)
-        if len(values) < 2:
-            continue
-        x_orig = np.linspace(0, 1, len(values))
-        x_new  = np.linspace(0, 1, n_target)
-        resampled = np.round(interpolate.interp1d(x_orig, values, kind='linear')(x_new), 2)
-        rows.append([row['PatientID']] + resampled.tolist())
-    cols = ['PatientID'] + [f'aec_{i}' for i in range(n_target)]
-    return pd.DataFrame(rows, columns=cols)
-
-
 def load_data(data_path: str, seq_len: int):
-    metadata_bmi = pd.read_excel(data_path, sheet_name='metadata-bmi_add')
-    metadata_bmi = metadata_bmi[['PatientID', 'SMI', 'n_slices', 'z_range_mm']].dropna()
-
-    aec_raw    = pd.read_excel(data_path, sheet_name='aec-raw')
-    aec_interp = interpolate_aec(aec_raw, n_target=seq_len)
-
-    merged_df = pd.merge(metadata_bmi, aec_interp, on='PatientID', how='inner')
-
-    # ── DEBUG: head 5 ─────────────────────────────────────────────────────────
-    # print("\n[DEBUG] merged_df head(5):")
-    # print(merged_df.head())
-    # ─────────────────────────────────────────────────────────────────────────
+    df = pd.read_excel(data_path, sheet_name='merged')
 
     aec_cols = [f'aec_{i}' for i in range(seq_len)]
-    X = np.array(merged_df[aec_cols].values, dtype=float)   # (N, seq_len) — NaN 없음
-    y = np.array(merged_df['SMI'].values, dtype=float)       # (N,)
+    X = np.array(df[aec_cols].values, dtype=float)   # (N, seq_len) — NaN 없음
+    y = np.array(df['SMI'].values, dtype=float)       # (N,)
 
     # 변동성 없는 샘플 제외 (모든 AEC 값이 동일한 경우)
     valid = X.std(axis=1) > 0
