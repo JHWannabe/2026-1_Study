@@ -1,19 +1,24 @@
+import argparse
+import pickle
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.metrics import mean_absolute_error, r2_score, roc_curve, auc, confusion_matrix
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+from scipy import stats
 
-# ── 설정 ─────────────────────────────────────────────────────────────────────
+# ── 설정 ──────────────────────────────────────────────────────────────────────
 DATA_PATH  = r'연구코드\data\강남_merged_features.xlsx'
-SEQ_LEN    = 256    # 모든 시퀀스를 이 길이로 통일 (padding/truncate)
+SEQ_LEN    = 256
 BATCH_SIZE = 32
 EPOCHS     = 1000
-LR         = 5e-4
+LR         = 1e-3
 SEED       = 42
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -21,184 +26,355 @@ torch.manual_seed(SEED)
 np.random.seed(SEED)
 
 
-# ── 데이터 로드 & 전처리 ──────────────────────────────────────────────────────
-def load_data(data_path: str, seq_len: int):
+# ── 데이터 ────────────────────────────────────────────────────────────────────
+
+def load_data(data_path: str):
     df = pd.read_excel(data_path, sheet_name='merged')
+    aec_cols = [f'aec_{i}' for i in range(SEQ_LEN)]
+    X = df[aec_cols].values.astype(float)
+    y = df['SMI'].values.astype(float)
 
-    aec_cols = [f'aec_{i}' for i in range(seq_len)]
-    X = np.array(df[aec_cols].values, dtype=float)   # (N, seq_len) — NaN 없음
-    y = np.array(df['SMI'].values, dtype=float)       # (N,)
-
-    # 변동성 없는 샘플 제외 (모든 AEC 값이 동일한 경우)
-    valid = X.std(axis=1) > 0
-    n_removed = (~valid).sum()
-    if n_removed > 0:
-        print(f"변동성 없는 샘플 {n_removed}개 제외 → 남은 샘플: {valid.sum()}")
+    valid = X.std(axis=1) > 0          # 모든 값이 동일한 flat 샘플 제거
+    if (~valid).sum():
+        print(f"flat 샘플 {(~valid).sum()}개 제거")
     X, y = X[valid], y[valid]
 
-    # 채널 축 추가: (N, 1, seq_len)
-    X = X[:, np.newaxis, :]
+    X = X[:, np.newaxis, :]            # (N, 1, seq_len) — Conv1d 입력 형식
     return X, y
 
 
 class AECDataset(Dataset):
     def __init__(self, X, y):
-        self.X = torch.tensor(X, dtype=torch.float32)  # (N, 1, seq_len)
-        self.y = torch.tensor(y, dtype=torch.float32).unsqueeze(1)       # (N, 1)
+        self.X = torch.tensor(X, dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.float32).unsqueeze(1)
 
-    def __len__(self):
-        return len(self.y)
+    def __len__(self): return len(self.y)
+    def __getitem__(self, idx): return self.X[idx], self.y[idx]
 
-    def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
+
+def _loader(X, y, shuffle): return DataLoader(AECDataset(X, y), batch_size=BATCH_SIZE, shuffle=shuffle)
 
 
 # ── 모델 ──────────────────────────────────────────────────────────────────────
 
-class CNN1D(nn.Module):
-    def __init__(self):
+class ResBlock1D(nn.Module):
+    """
+    잔차 블록 (He et al., 2016)
+    - skip connection: out + identity → 깊은 네트워크에서 gradient 소실 방지
+    - BN → ReLU → Conv 순서: 각 레이어 출력을 정규화해 학습 안정화
+    - stride > 1 또는 채널 수 변경 시 identity를 1×1 Conv으로 projection
+    """
+    def __init__(self, in_ch, out_ch, stride=1):
         super().__init__()
-        self.encoder = nn.Sequential(
-            # Block 1
-            nn.Conv1d(1, 32, kernel_size=7, padding=3),
-            nn.BatchNorm1d(32),
-            nn.ReLU(),
-            nn.MaxPool1d(2),                # seq_len // 2
-
-            # Block 2
-            nn.Conv1d(32, 64, kernel_size=5, padding=2),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.MaxPool1d(2),                # seq_len // 4
-
-            # Block 3
-            nn.Conv1d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool1d(8),        # → (batch, 128, 8)
-        )
-        self.regressor = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(128 * 8, 256),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1),
+        self.conv1 = nn.Conv1d(in_ch, out_ch, 3, stride=stride, padding=1, bias=False)
+        self.bn1   = nn.BatchNorm1d(out_ch)
+        self.conv2 = nn.Conv1d(out_ch, out_ch, 3, padding=1, bias=False)
+        self.bn2   = nn.BatchNorm1d(out_ch)
+        self.relu  = nn.ReLU(inplace=True)
+        self.downsample = (
+            nn.Sequential(nn.Conv1d(in_ch, out_ch, 1, stride=stride, bias=False),
+                          nn.BatchNorm1d(out_ch))
+            if stride != 1 or in_ch != out_ch else None
         )
 
     def forward(self, x):
-        return self.regressor(self.encoder(x))
+        identity = self.downsample(x) if self.downsample else x
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        return self.relu(out + identity)   # skip connection
+
+
+class ResNet1D(nn.Module):
+    """
+    1-D ResNet (ResNet-18 구조를 1D 시계열에 적용)
+    stem → 4 stage (채널 64→128→256→512) → GlobalAvgPool → FC 회귀 헤드
+    AdaptiveAvgPool1d(1): 입력 길이에 무관하게 고정 크기 특징 추출
+    """
+    def __init__(self, in_ch=1, base=64):
+        super().__init__()
+        self.stem = nn.Sequential(
+            nn.Conv1d(in_ch, base, 7, stride=2, padding=3, bias=False),
+            nn.BatchNorm1d(base), nn.ReLU(inplace=True),
+            nn.MaxPool1d(3, stride=2, padding=1),
+        )
+        self.layers = nn.Sequential(
+            self._stage(base,    base,    2, stride=1),
+            self._stage(base,    base*2,  2, stride=2),
+            self._stage(base*2,  base*4,  2, stride=2),
+            self._stage(base*4,  base*8,  2, stride=2),
+        )
+        self.head = nn.Sequential(
+            nn.AdaptiveAvgPool1d(1), nn.Flatten(),
+            nn.Linear(base*8, 256), nn.ReLU(inplace=True),
+            nn.Dropout(0.3), nn.Linear(256, 1),
+        )
+
+    @staticmethod
+    def _stage(in_ch, out_ch, n, stride):
+        return nn.Sequential(ResBlock1D(in_ch, out_ch, stride),
+                             *[ResBlock1D(out_ch, out_ch) for _ in range(n-1)])
+
+    def forward(self, x):
+        return self.head(self.layers(self.stem(x)))
 
 
 # ── 학습 루프 ─────────────────────────────────────────────────────────────────
 
 def train_epoch(model, loader, optimizer, criterion, device):
     model.train()
-    total_loss = 0.0
-    for X_batch, y_batch in loader:
-        X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+    total = 0.0
+    for X_b, y_b in loader:
+        X_b, y_b = X_b.to(device), y_b.to(device)
         optimizer.zero_grad()
-        pred = model(X_batch)
-        loss = criterion(pred, y_batch)
+        loss = criterion(model(X_b), y_b)
         loss.backward()
         optimizer.step()
-        total_loss += loss.item() * len(y_batch)
-    return total_loss / len(loader.dataset)
+        total += loss.item() * len(y_b)
+    return total / len(loader.dataset)
 
 
 @torch.no_grad()
 def eval_epoch(model, loader, criterion, device):
     model.eval()
-    total_loss, preds, trues = 0.0, [], []
-    for X_batch, y_batch in loader:
-        X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-        pred = model(X_batch)
-        total_loss += criterion(pred, y_batch).item() * len(y_batch)
-        preds.append(pred.cpu().numpy())
-        trues.append(y_batch.cpu().numpy())
-    preds = np.concatenate(preds).ravel()
-    trues = np.concatenate(trues).ravel()
-    return total_loss / len(loader.dataset), preds, trues
+    total, preds, trues = 0.0, [], []
+    for X_b, y_b in loader:
+        X_b, y_b = X_b.to(device), y_b.to(device)
+        p = model(X_b)
+        total += criterion(p, y_b).item() * len(y_b)
+        preds.append(p.cpu().numpy()); trues.append(y_b.cpu().numpy())
+    return total / len(loader.dataset), np.concatenate(preds).ravel(), np.concatenate(trues).ravel()
 
 
-# ── 메인 ─────────────────────────────────────────────────────────────────────
+def _fit(train_loader, val_loader, model, device, log_interval=100):
+    """
+    학습 루프 공통 헬퍼
+    - MSELoss: L = mean((ŷ - y)²), 큰 오차를 제곱 패널티로 강하게 억제
+    - AdamW: Adam + 분리된 weight decay (Loshchilov & Hutter, 2019)
+             Adam은 weight decay가 gradient update에 혼입되지만 AdamW는 파라미터에 직접 적용
+    - CosineAnnealingLR: LR(t) = η_min + 0.5(LR_max−η_min)(1+cos(πt/T_max))
+             학습 초반 큰 LR로 빠른 탐색, 후반 작은 LR로 수렴 안정화
+    """
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-2)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=EPOCHS, eta_min=1e-6)
+
+    best_loss, best_state = float('inf'), None
+    for epoch in range(1, EPOCHS + 1):
+        tr = train_epoch(model, train_loader, optimizer, criterion, device)
+        vl, _, _ = eval_epoch(model, val_loader, criterion, device)
+        scheduler.step()
+        if vl < best_loss:
+            best_loss  = vl
+            best_state = {k: v.clone() for k, v in model.state_dict().items()}
+        if epoch % log_interval == 0:
+            print(f"  {epoch:5d} | train {tr:.4f} | val {vl:.4f}")
+    return best_state, criterion
+
+
+def _evaluate(model, loader, criterion, y_scaler, device):
+    """역변환 후 MAE / R² 반환"""
+    _, ps, ts = eval_epoch(model, loader, criterion, device)
+    preds = y_scaler.inverse_transform(ps.reshape(-1, 1)).ravel()
+    trues = y_scaler.inverse_transform(ts.reshape(-1, 1)).ravel()
+    return trues, preds
+
+
+# ── 시각화 ────────────────────────────────────────────────────────────────────
+
+def plot_results(trues, preds, save_dir, title='ResNet1D'):
+    resid = preds - trues
+
+    # 통계 검정
+    r,  p_r  = stats.pearsonr(trues, preds)       # Pearson r: 선형 상관 유의성
+    _,  p_sw = stats.shapiro(resid)               # Shapiro-Wilk: 잔차 정규성 (H0: 정규분포)
+    _,  p_bt = stats.ttest_1samp(resid, 0)        # t-test: 잔차 평균 ≠ 0 (편향 유무)
+
+    # 회귀 결과를 이진 분류로 변환 (SMI 하위 25% = 저근육량 위험군)
+    thr        = np.percentile(trues, 25)
+    y_bin      = (trues >= thr).astype(int)
+    score_norm = (preds - preds.min()) / (np.ptp(preds) + 1e-8)
+    fpr, tpr, _ = roc_curve(y_bin, score_norm)   # ROC-AUC: 이진 분류 성능 (0.5=랜덤, 1.0=완벽)
+    roc_auc    = auc(fpr, tpr)
+    cm         = confusion_matrix(y_bin, (preds >= thr).astype(int))
+
+    fig = plt.figure(figsize=(18, 11))
+    gs  = gridspec.GridSpec(2, 3, hspace=0.45, wspace=0.38)
+    ax  = [fig.add_subplot(gs[r, c]) for r in range(2) for c in range(3)]
+
+    # ① Scatter
+    lo, hi = min(trues.min(), preds.min()), max(trues.max(), preds.max())
+    ax[0].scatter(trues, preds, alpha=0.6, edgecolors='k', linewidths=0.4)
+    ax[0].plot([lo, hi], [lo, hi], 'r--', lw=1.5, label='y = x')
+    ax[0].set(xlabel='True SMI', ylabel='Predicted SMI',
+              title=f'Predicted vs True\nr={r:.3f}  p={p_r:.2e}  R²={r2_score(trues, preds):.3f}')
+    ax[0].legend()
+
+    # ② 잔차 분포
+    ax[1].hist(resid, bins=20, color='steelblue', edgecolor='white', alpha=0.85)
+    ax[1].axvline(0, color='r', linestyle='--', lw=1.5)
+    ax[1].set(xlabel='Residual (Pred−True)', ylabel='Count',
+              title=f'Residual Distribution\nShapiro-Wilk p={p_sw:.3f}  |  Bias t-test p={p_bt:.3f}')
+
+    # ③ Bland-Altman: 두 측정값의 일치도 분석 (Bland & Altman, 1986)
+    mean_v = (trues + preds) / 2
+    diff_v = preds - trues
+    md, sd = diff_v.mean(), diff_v.std()
+    ax[2].scatter(mean_v, diff_v, alpha=0.6, edgecolors='k', linewidths=0.4)
+    ax[2].axhline(md,           color='r',    lw=1.5, label=f'Mean {md:+.3f}')
+    ax[2].axhline(md + 1.96*sd, color='gray', lw=1.2, ls='--', label=f'+1.96SD {md+1.96*sd:+.3f}')
+    ax[2].axhline(md - 1.96*sd, color='gray', lw=1.2, ls='--', label=f'−1.96SD {md-1.96*sd:+.3f}')
+    ax[2].set(xlabel='Mean(True, Pred)', ylabel='Pred−True', title='Bland-Altman Plot')
+    ax[2].legend(fontsize=8)
+
+    # ④ ROC curve
+    ax[3].plot(fpr, tpr, color='darkorange', lw=2, label=f'AUC={roc_auc:.3f}')
+    ax[3].plot([0, 1], [0, 1], 'k--', lw=1)
+    ax[3].set(xlabel='FPR', ylabel='TPR',
+              title=f'ROC Curve (threshold=25th pct {thr:.2f})')
+    ax[3].legend()
+
+    # ⑤ Confusion Matrix
+    im = ax[4].imshow(cm, cmap='Blues')
+    fig.colorbar(im, ax=ax[4])
+    cls = [f'<{thr:.1f}', f'≥{thr:.1f}']
+    ax[4].set_xticks([0, 1]); ax[4].set_xticklabels(cls, fontsize=9)
+    ax[4].set_yticks([0, 1]); ax[4].set_yticklabels(cls, fontsize=9)
+    ax[4].set(xlabel='Predicted', ylabel='True', title='Confusion Matrix')
+    for i in range(2):
+        for j in range(2):
+            ax[4].text(j, i, str(cm[i, j]), ha='center', va='center', color='black', fontsize=12)
+
+    # ⑥ Q-Q plot: 잔차가 이론적 정규분포와 얼마나 일치하는지 시각적 확인
+    (osm, osr), (slope, intercept, _) = stats.probplot(resid)
+    ax[5].scatter(osm, osr, alpha=0.6, edgecolors='k', linewidths=0.4)
+    qq = np.array([osm[0], osm[-1]])
+    ax[5].plot(qq, slope*qq + intercept, 'r--', lw=1.5)
+    ax[5].set(xlabel='Theoretical Quantiles', ylabel='Sample Quantiles',
+              title=f'Q-Q Plot (Shapiro-Wilk p={p_sw:.3f})')
+
+    fig.suptitle(f'{title} — Test Set Evaluation', fontsize=14, fontweight='bold', y=1.01)
+    out = save_dir / f'{title.lower().replace(" ", "_")}_test_results.png'
+    fig.savefig(out, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"시각화 저장: {out}")
+    print(f"\n[통계]  r={r:.4f} (p={p_r:.3e})  SW-p={p_sw:.4f}  bias-p={p_bt:.4f}  AUC={roc_auc:.4f}")
+
+
+# ── 실행 모드 ─────────────────────────────────────────────────────────────────
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
 
-    # 데이터
-    X, y = load_data(DATA_PATH, SEQ_LEN)
-    print(f"X shape: {X.shape}, y shape: {y.shape}")
-    print(f"SMI 통계 — mean: {y.mean():.3f}, std: {y.std():.3f}, "
-          f"min: {y.min():.3f}, max: {y.max():.3f}")
+    X, y = load_data(DATA_PATH)
+    print(f"X: {X.shape}  SMI mean={y.mean():.3f} std={y.std():.3f}")
 
-    # SMI 정규화 (입력 AEC 커브는 환자 내부에서 이미 상대적 스케일 유지)
+    # StandardScaler: (x - μ) / σ → 평균 0, 분산 1로 정규화 (gradient 안정화)
     y_scaler = StandardScaler()
-    y_scaled = y_scaler.fit_transform(y.reshape(-1, 1)).ravel()
+    y_sc = y_scaler.fit_transform(y.reshape(-1, 1)).ravel()
 
-    # Train / Val / Test split (7:1.5:1.5)
-    X_tv, X_test, y_tv, y_test = train_test_split(
-        X, y_scaled, test_size=0.15, random_state=SEED)
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_tv, y_tv, test_size=0.15 / 0.85, random_state=SEED)
+    X_tv, X_te, y_tv, y_te = train_test_split(X, y_sc, test_size=0.15, random_state=SEED)
+    X_tr, X_vl, y_tr, y_vl = train_test_split(X_tv, y_tv, test_size=0.15/0.85, random_state=SEED)
+    print(f"Train {len(X_tr)} / Val {len(X_vl)} / Test {len(X_te)}")
 
-    print(f"Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
+    model = ResNet1D().to(device)
+    print(f"파라미터 수: {sum(p.numel() for p in model.parameters()):,}")
 
-    train_loader = DataLoader(AECDataset(X_train, y_train),
-                              batch_size=BATCH_SIZE, shuffle=True)
-    val_loader   = DataLoader(AECDataset(X_val,   y_val),
-                              batch_size=BATCH_SIZE, shuffle=False)
-    test_loader  = DataLoader(AECDataset(X_test,  y_test),
-                              batch_size=BATCH_SIZE, shuffle=False)
+    print("\nEpoch | Train  | Val")
+    best_state, criterion = _fit(_loader(X_tr, y_tr, True), _loader(X_vl, y_vl, False),
+                                 model, device, log_interval=10)
 
-    # 모델
-    model = CNN1D().to(device)
-    print(f"\n모델 파라미터 수: {sum(p.numel() for p in model.parameters()):,}")
-
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, patience=10, factor=0.5)
-
-    best_val_loss = float('inf')
-    best_state    = None
-
-    print("\nEpoch | Train Loss | Val Loss")
-    print("-" * 35)
-    for epoch in range(1, EPOCHS + 1):
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
-        val_loss, _, _ = eval_epoch(model, val_loader, criterion, device)
-        scheduler.step(val_loss)
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_state    = {k: v.clone() for k, v in model.state_dict().items()}
-
-        if epoch % 10 == 0:
-            print(f"{epoch:5d} | {train_loss:.4f}     | {val_loss:.4f}")
-
-    # 테스트 평가 (best checkpoint)
-    assert best_state is not None
     model.load_state_dict(best_state)
-    _, test_preds_scaled, test_trues_scaled = eval_epoch(
-        model, test_loader, criterion, device)
+    trues, preds = _evaluate(model, _loader(X_te, y_te, False), criterion, y_scaler, device)
+    print(f"\n[Test] MAE={mean_absolute_error(trues, preds):.4f}  R²={r2_score(trues, preds):.4f}")
+    plot_results(trues, preds, Path(__file__).parent, title='ResNet1D')
 
-    # 역변환
-    test_preds = y_scaler.inverse_transform(test_preds_scaled.reshape(-1, 1)).ravel()
-    test_trues = y_scaler.inverse_transform(test_trues_scaled.reshape(-1, 1)).ravel()
+    save_dir = Path(__file__).parent
+    torch.save({'model_state': best_state, 'seq_len': SEQ_LEN}, save_dir / 'resnet1d_best.pt')
+    with open(save_dir / 'resnet1d_scaler.pkl', 'wb') as f: pickle.dump(y_scaler, f)
+    print(f"저장: {save_dir / 'resnet1d_best.pt'}")
 
-    mae = mean_absolute_error(test_trues, test_preds)
-    r2  = r2_score(test_trues, test_preds)
-    print(f"\n[Test] MAE: {mae:.4f}  R²: {r2:.4f}")
 
-    # 모델 저장
-    save_path = Path(__file__).parent / 'cnn1d_best.pt'
-    torch.save({'model_state': best_state, 'y_scaler': y_scaler,
-                'seq_len': SEQ_LEN}, save_path)
-    print(f"모델 저장: {save_path}")
+def run_cv(n_splits=5):
+    """
+    K-Fold Cross Validation (k=5)
+    - 데이터를 k개로 분할, 각 fold를 한 번씩 validation으로 사용
+    - 전체 데이터를 고르게 활용해 성능 추정의 분산을 줄임
+    - hold-out test set은 CV와 완전히 분리해 최종 평가에만 사용
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Device: {device}")
+
+    X, y = load_data(DATA_PATH)
+    y_scaler = StandardScaler()
+    y_sc = y_scaler.fit_transform(y.reshape(-1, 1)).ravel()
+
+    X_tv, X_te, y_tv, y_te = train_test_split(X, y_sc, test_size=0.15, random_state=SEED)
+
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=SEED)
+    fold_maes, fold_r2s = [], []
+    best_mae_cv, best_state_cv = float('inf'), None
+
+    for fold, (tr_idx, vl_idx) in enumerate(kf.split(X_tv), 1):
+        print(f"\n── Fold {fold}/{n_splits} (train {len(tr_idx)}, val {len(vl_idx)}) ──")
+        model = ResNet1D().to(device)
+        best_state, criterion = _fit(
+            _loader(X_tv[tr_idx], y_tv[tr_idx], True),
+            _loader(X_tv[vl_idx], y_tv[vl_idx], False),
+            model, device, log_interval=200)
+
+        model.load_state_dict(best_state)
+        trues, preds = _evaluate(model, _loader(X_tv[vl_idx], y_tv[vl_idx], False),
+                                 criterion, y_scaler, device)
+        mae, r2 = mean_absolute_error(trues, preds), r2_score(trues, preds)
+        fold_maes.append(mae); fold_r2s.append(r2)
+        print(f"  → Fold {fold}  MAE={mae:.4f}  R²={r2:.4f}")
+
+        if mae < best_mae_cv:
+            best_mae_cv, best_state_cv = mae, best_state
+
+    print(f"\n{'='*45}\n {n_splits}-Fold CV (ResNet1D)")
+    for i, (m, r) in enumerate(zip(fold_maes, fold_r2s), 1):
+        print(f"  Fold {i}: MAE {m:.4f}  R² {r:.4f}")
+    print(f"  Mean : MAE {np.mean(fold_maes):.4f}±{np.std(fold_maes):.4f}"
+          f"  R² {np.mean(fold_r2s):.4f}±{np.std(fold_r2s):.4f}")
+
+    # 최적 fold 모델로 hold-out test 평가
+    model_final = ResNet1D().to(device)
+    model_final.load_state_dict(best_state_cv)
+    criterion = nn.MSELoss()
+    trues, preds = _evaluate(model_final, _loader(X_te, y_te, False), criterion, y_scaler, device)
+    print(f"\n[Best fold → Test] MAE={mean_absolute_error(trues, preds):.4f}"
+          f"  R²={r2_score(trues, preds):.4f}")
+    plot_results(trues, preds, Path(__file__).parent, title='ResNet1D')
+
+
+def test_only(ckpt_path: str):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
+    scaler_path = Path(ckpt_path).with_suffix('').with_name(
+        Path(ckpt_path).stem.replace('best', 'scaler') + '.pkl')
+    with open(scaler_path, 'rb') as f: y_scaler = pickle.load(f)
+
+    X, y = load_data(DATA_PATH)
+    y_sc = y_scaler.transform(y.reshape(-1, 1)).ravel()
+    _, X_te, _, y_te = train_test_split(X, y_sc, test_size=0.15, random_state=SEED)
+
+    model = ResNet1D().to(device)
+    model.load_state_dict(ckpt['model_state'])
+    criterion = nn.MSELoss()
+    trues, preds = _evaluate(model, _loader(X_te, y_te, False), criterion, y_scaler, device)
+    print(f"[Test] MAE={mean_absolute_error(trues, preds):.4f}  R²={r2_score(trues, preds):.4f}")
+    plot_results(trues, preds, Path(ckpt_path).parent, title='ResNet1D')
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--test-only', metavar='CKPT', default=None)
+    parser.add_argument('--cv', action='store_true')
+    args = parser.parse_args()
+
+    if args.test_only:   test_only(args.test_only)
+    elif args.cv:        run_cv()
+    else:                main()
