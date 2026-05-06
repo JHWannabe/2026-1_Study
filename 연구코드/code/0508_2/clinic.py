@@ -1,15 +1,7 @@
 """
 clinic.py — PatientAge / PatientSex / BMI → SMI
-Models : Linear Regression  (연속 예측 → AUC)
-         Logistic Regression (이진 분류  → AUC)
-
-데이터 분할
-  Train 70% → 5-Fold CV (fold 내 out-of-fold이 validation 역할)
-  Valid 15% → CV 후 중간 점검
-  Test  15% → 맨 마지막에만 사용 (train+valid로 재학습 후 평가)
-
-Threshold : fold별 train SMI 하위 25th percentile (데이터 누출 방지)
-향후 AEC feature 추가 시 BASELINE_COLS 확장으로 비교 가능
+  Train 70% → 5-Fold CV  |  Valid 15%  |  Test 15%
+  Threshold : fold train SMI 하위 25th percentile
 """
 import sys
 import warnings
@@ -25,85 +17,55 @@ from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+
 mpl.rcParams["font.family"] = "Malgun Gothic"
 mpl.rcParams["axes.unicode_minus"] = False
-
 warnings.filterwarnings("ignore")
 
-# ── 설정 ──────────────────────────────────────────────────────────────────────
-DATA_PATH  = Path(__file__).parents[2] / "data" / "강남_merged_features.xlsx"
-SHEET_META = "metadata-bmi_add"
-
-BASELINE_COLS = ["PatientAge", "PatientSex", "BMI"]   # AEC 추가 시 여기에 append
-
-SEED     = 42
-N_SPLITS = 5
+DATA_PATH     = Path(__file__).parents[2] / "data" / "강남_merged_features.xlsx"
+SHEET_META    = "metadata-bmi_add"
+BASELINE_COLS = ["PatientAge", "PatientSex", "BMI"]
+SEED          = 42
+N_SPLITS      = 5
 
 np.random.seed(SEED)
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 1. 데이터 로드
-# ════════════════════════════════════════════════════════════════════════════
-
 def load_data() -> pd.DataFrame:
     df = pd.read_excel(DATA_PATH, sheet_name=SHEET_META)
-    print(f"[데이터] rows={len(df)}  columns={list(df.columns)}")
-
     if df["PatientSex"].dtype == object:
         gmap = {v: i for i, v in enumerate(sorted(df["PatientSex"].unique()))}
         print(f"  성별 인코딩: {gmap}")
         df["PatientSex"] = df["PatientSex"].map(gmap)
-
-    needed = BASELINE_COLS + ["SMI"]
-    df = df[needed].dropna()
-    print(f"  결측 제거 후 rows={len(df)}")
-    print(f"  SMI  mean={df['SMI'].mean():.3f}  std={df['SMI'].std():.3f}")
+    df = df[BASELINE_COLS + ["SMI"]].dropna()
+    print(f"[데이터] rows={len(df)}  SMI mean={df['SMI'].mean():.3f}  std={df['SMI'].std():.3f}")
     return df.reset_index(drop=True)
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 2. 평가 헬퍼
-# ════════════════════════════════════════════════════════════════════════════
-
 def compute_auc(y_true_bin: np.ndarray, scores: np.ndarray) -> float:
-    """scores가 모두 같으면 AUC=0.5 반환 (예외 방지)"""
     if len(np.unique(y_true_bin)) < 2:
         return float("nan")
     return roc_auc_score(y_true_bin, scores)
 
 
 def binarize(y: np.ndarray, threshold: float) -> np.ndarray:
-    """SMI < threshold → 1 (저근육 위험군), 그 외 → 0"""
+    """SMI < threshold → 1 (저근육 위험군)"""
     return (y < threshold).astype(int)
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 3. 데이터 분할
-# ════════════════════════════════════════════════════════════════════════════
-
 def split_data(n: int):
-    """Train 70% / Valid 15% / Test 15% 고정 분할"""
-    all_idx = np.arange(n)
-    tr_vl_idx, te_idx = train_test_split(all_idx, test_size=0.15, random_state=SEED)
+    tr_vl_idx, te_idx = train_test_split(np.arange(n), test_size=0.15, random_state=SEED)
     tr_idx, vl_idx    = train_test_split(tr_vl_idx, test_size=0.15 / 0.85, random_state=SEED)
     return tr_idx, vl_idx, te_idx
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 4. 5-Fold CV  (train 내에서만)
-# ════════════════════════════════════════════════════════════════════════════
-
 def run_cv(X: np.ndarray, y: np.ndarray, tr_idx: np.ndarray):
-    """KFold를 tr_idx 내부에서만 수행. fold 내 out-of-fold이 validation 역할."""
     kf = KFold(n_splits=N_SPLITS, shuffle=True, random_state=SEED)
-
     lr_aucs, log_aucs = [], []
     lr_rocs, log_rocs = [], []
 
     print(f"\n{'='*60}")
-    print(f" {N_SPLITS}-Fold CV (train 내부)  |  features: {BASELINE_COLS}")
-    print(f" train n={len(tr_idx)}")
+    print(f" {N_SPLITS}-Fold CV  |  features: {BASELINE_COLS}  |  train n={len(tr_idx)}")
     print(f"{'='*60}")
 
     for fold, (tr_rel, vl_rel) in enumerate(kf.split(tr_idx), 1):
@@ -113,34 +75,28 @@ def run_cv(X: np.ndarray, y: np.ndarray, tr_idx: np.ndarray):
         X_tr, y_tr = X[tr_i], y[tr_i]
         X_vl, y_vl = X[vl_i], y[vl_i]
 
-        # threshold: fold train 하위 25th percentile
-        thr = np.percentile(y_tr, 25)
+        thr      = np.percentile(y_tr, 25)
         y_tr_bin = binarize(y_tr, thr)
         y_vl_bin = binarize(y_vl, thr)
 
-        # imputer + scaler: fold train에서만 fit
         imputer = SimpleImputer(strategy="mean")
         scaler  = StandardScaler()
         X_tr_sc = scaler.fit_transform(imputer.fit_transform(X_tr))
         X_vl_sc = scaler.transform(imputer.transform(X_vl))
 
-        # ── Linear Regression ──────────────────────────────────────
-        lin = LinearRegression()
+        lin      = LinearRegression()
         lin.fit(X_tr_sc, y_tr)
         lr_score = lin.predict(X_vl_sc)
         lr_auc   = compute_auc(y_vl_bin, -lr_score)
         fpr, tpr, _ = roc_curve(y_vl_bin, -lr_score)
-        lr_aucs.append(lr_auc)
-        lr_rocs.append((fpr, tpr))
+        lr_aucs.append(lr_auc); lr_rocs.append((fpr, tpr))
 
-        # ── Logistic Regression ────────────────────────────────────
-        log = LogisticRegression(max_iter=1000, random_state=SEED)
+        log       = LogisticRegression(max_iter=1000, random_state=SEED)
         log.fit(X_tr_sc, y_tr_bin)
         log_score = log.predict_proba(X_vl_sc)[:, 1]
         log_auc   = compute_auc(y_vl_bin, log_score)
         fpr2, tpr2, _ = roc_curve(y_vl_bin, log_score)
-        log_aucs.append(log_auc)
-        log_rocs.append((fpr2, tpr2))
+        log_aucs.append(log_auc); log_rocs.append((fpr2, tpr2))
 
         print(f"  Fold {fold}  thr={thr:.3f}  "
               f"LinearReg AUC={lr_auc:.4f}  "
@@ -154,17 +110,12 @@ def run_cv(X: np.ndarray, y: np.ndarray, tr_idx: np.ndarray):
     return lr_aucs, log_aucs, lr_rocs, log_rocs
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 5. Valid / Test 평가 공통 함수
-# ════════════════════════════════════════════════════════════════════════════
-
 def _fit_and_eval(X: np.ndarray, y: np.ndarray,
                   tr_i: np.ndarray, ev_i: np.ndarray, label: str):
-    """tr_i로 학습, ev_i로 평가. threshold는 tr_i train SMI 기준."""
     X_tr, y_tr = X[tr_i], y[tr_i]
     X_ev, y_ev = X[ev_i], y[ev_i]
 
-    thr = np.percentile(y_tr, 25)
+    thr      = np.percentile(y_tr, 25)
     y_tr_bin = binarize(y_tr, thr)
     y_ev_bin = binarize(y_ev, thr)
 
@@ -173,23 +124,20 @@ def _fit_and_eval(X: np.ndarray, y: np.ndarray,
     X_tr_sc = scaler.fit_transform(imputer.fit_transform(X_tr))
     X_ev_sc = scaler.transform(imputer.transform(X_ev))
 
-    # Linear Regression
-    lin = LinearRegression()
+    lin      = LinearRegression()
     lin.fit(X_tr_sc, y_tr)
     lr_score = lin.predict(X_ev_sc)
     lr_auc   = compute_auc(y_ev_bin, -lr_score)
     lr_fpr, lr_tpr, _ = roc_curve(y_ev_bin, -lr_score)
 
-    # Logistic Regression
-    log = LogisticRegression(max_iter=1000, random_state=SEED)
+    log       = LogisticRegression(max_iter=1000, random_state=SEED)
     log.fit(X_tr_sc, y_tr_bin)
     log_score = log.predict_proba(X_ev_sc)[:, 1]
     log_auc   = compute_auc(y_ev_bin, log_score)
     log_fpr, log_tpr, _ = roc_curve(y_ev_bin, log_score)
 
     print(f"\n{'='*60}")
-    print(f" [{label}]  n={len(ev_i)}  threshold={thr:.3f}  "
-          f"위험군 비율={y_ev_bin.mean():.2%}")
+    print(f" [{label}]  n={len(ev_i)}  threshold={thr:.3f}  위험군 비율={y_ev_bin.mean():.2%}")
     print(f"  LinearReg   AUC = {lr_auc:.4f}")
     print(f"  LogisticReg AUC = {log_auc:.4f}")
 
@@ -205,10 +153,6 @@ def _fit_and_eval(X: np.ndarray, y: np.ndarray,
 
     return (lr_fpr, lr_tpr, lr_auc), (log_fpr, log_tpr, log_auc), thr
 
-
-# ════════════════════════════════════════════════════════════════════════════
-# 6. 시각화
-# ════════════════════════════════════════════════════════════════════════════
 
 def plot_results(cv_lr_rocs, cv_log_rocs, lr_aucs, log_aucs,
                  valid_lr, valid_log, test_lr, test_log,
@@ -255,27 +199,19 @@ def plot_results(cv_lr_rocs, cv_log_rocs, lr_aucs, log_aucs,
     print(f"\n시각화 저장: {out}")
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 7. 메인
-# ════════════════════════════════════════════════════════════════════════════
-
 if __name__ == "__main__":
     df = load_data()
     X  = df[BASELINE_COLS].values.astype(float)
     y  = df["SMI"].values.astype(float)
 
-    # 3-way split: Train 70% / Valid 15% / Test 15%
     tr_idx, vl_idx, te_idx = split_data(len(df))
     print(f"\n[데이터 분할]  Train={len(tr_idx)}  Valid={len(vl_idx)}  Test={len(te_idx)}")
 
-    # 5-Fold CV (train 내부)
     lr_aucs, log_aucs, lr_rocs, log_rocs = run_cv(X, y, tr_idx)
 
-    # Valid 평가: train으로 학습 → valid로 검증
     print("\n── Valid 평가 (train → valid) ──")
     valid_lr, valid_log, thr_valid = _fit_and_eval(X, y, tr_idx, vl_idx, "Valid")
 
-    # Test 평가: train+valid로 재학습 → test로 최종 검증
     print("\n── Test 평가 (train+valid → test) ──")
     tr_vl_idx = np.concatenate([tr_idx, vl_idx])
     test_lr, test_log, thr_test = _fit_and_eval(X, y, tr_vl_idx, te_idx, "Test")

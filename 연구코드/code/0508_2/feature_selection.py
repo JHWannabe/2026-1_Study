@@ -1,9 +1,8 @@
 """
-clinic.py  —  Age / Sex / BMI + selected AEC features → SMI regression
-Feature selection pipeline:
+feature_selection.py  —  Age / Sex / BMI + selected AEC features → SMI regression
   Step 1. AEC 내부 중복 제거 (고상관 feature 제거)
-  Step 2. Age/Sex/BMI 고정 후 partial correlation으로 AEC feature 선택
-  Step 3. VIF 경고 출력 (제거 기준 아님 — external validation이 최종 판정)
+  Step 2. Age/Sex/BMI 통제 후 partial correlation으로 AEC feature 선택
+  Step 3. VIF 경고 출력 (제거 기준 아님)
 """
 import argparse
 import pickle
@@ -26,16 +25,14 @@ import matplotlib.gridspec as gridspec
 
 warnings.filterwarnings("ignore")
 
-# ── 설정 ──────────────────────────────────────────────────────────────────────
-DATA_PATH  = Path(__file__).parents[2] / "data" / "강남_merged_features.xlsx"
-SHEET_META = "metadata-bmi_add"
-SHEET_AEC  = "aec_feature"
+DATA_PATH     = Path(__file__).parents[2] / "data" / "강남_merged_features.xlsx"
+SHEET_META    = "metadata-bmi_add"
+SHEET_AEC     = "aec_feature_filtered"
+BASELINE_COLS = ["PatientAge", "PatientSex", "BMI"]
 
-BASELINE_COLS = ["PatientAge", "PatientSex", "BMI"]   # 항상 고정
-
-CORR_THR     = 0.90    # Step 1: AEC 내부 중복 기준
-PARTIAL_PVAL = 0.10    # Step 2: partial corr FDR-보정 p-value 유의 임계값
-VIF_WARN     = 10.0    # Step 3: VIF 경고 임계값
+CORR_THR     = 0.90
+PARTIAL_PVAL = 0.10
+VIF_WARN     = 10.0
 
 BATCH_SIZE = 32
 EPOCHS     = 5000
@@ -46,18 +43,16 @@ torch.manual_seed(SEED)
 np.random.seed(SEED)
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 1. 데이터 로드 & 전처리
-# ════════════════════════════════════════════════════════════════════════════
-
-def load_and_merge(data_path: str) -> pd.DataFrame:
+def load_and_merge(data_path: Path | str) -> pd.DataFrame:
     meta = pd.read_excel(data_path, sheet_name=SHEET_META)
     aec  = pd.read_excel(data_path, sheet_name=SHEET_AEC)
+
+    overlap = [c for c in aec.columns if c in meta.columns and c != "PatientID"]
+    aec = aec.drop(columns=overlap)
 
     df = meta.merge(aec, on="PatientID", how="inner")
     print(f"[데이터] meta={len(meta)}, aec={len(aec)}, merged={len(df)}")
 
-    # 성별 인코딩
     if df["PatientSex"].dtype == object:
         gmap = {v: i for i, v in enumerate(sorted(df["PatientSex"].unique()))}
         print(f"  성별 인코딩: {gmap}")
@@ -68,39 +63,29 @@ def load_and_merge(data_path: str) -> pd.DataFrame:
 
 def get_aec_cols(df: pd.DataFrame) -> list[str]:
     meta_cols = set(pd.read_excel(DATA_PATH, sheet_name=SHEET_META, nrows=0).columns)
-    return [c for c in df.columns
-            if c not in meta_cols and c != "PatientID"]
+    return [c for c in df.columns if c not in meta_cols and c != "PatientID"]
 
-
-# ════════════════════════════════════════════════════════════════════════════
-# 2. Feature Selection
-# ════════════════════════════════════════════════════════════════════════════
 
 def _fdr_bh(pvals: np.ndarray) -> np.ndarray:
     """Benjamini-Hochberg FDR 보정 → adjusted p-value 반환"""
-    n  = len(pvals)
+    n     = len(pvals)
     order = np.argsort(pvals)
     ranks = np.empty(n, int)
     ranks[order] = np.arange(1, n + 1)
     adj = pvals * n / ranks
-    # monotonicity 보장
-    for i in range(n - 2, -1, -1):
+    for i in range(n - 2, -1, -1):  # monotonicity 보장
         adj[order[i]] = min(adj[order[i]], adj[order[i + 1]])
     return np.minimum(adj, 1.0)
 
 
 def step1_remove_redundant(df: pd.DataFrame, aec_cols: list[str]) -> list[str]:
-    """
-    AEC feature 간 상관 > CORR_THR 이면 분산이 더 작은 쪽 제거.
-    남은 feature 목록 반환.
-    """
     data = df[aec_cols].copy()
     data = data.dropna(axis=1, how="all")
     data = data.loc[:, data.std() > 0]
 
-    cols = list(data.columns)
+    cols      = list(data.columns)
     variances = data.var()
-    cols.sort(key=lambda c: -variances[c])   # 분산 큰 순 정렬
+    cols.sort(key=lambda c: -variances[c])
 
     corr = data[cols].corr(method="pearson").abs()
     kept = []
@@ -119,42 +104,32 @@ def step1_remove_redundant(df: pd.DataFrame, aec_cols: list[str]) -> list[str]:
 def step2_partial_corr_selection(df: pd.DataFrame,
                                   aec_cols: list[str],
                                   outcome: str = "SMI") -> list[str]:
-    """
-    Age/Sex/BMI를 통제(잔차화)한 뒤 partial correlation으로 AEC feature 선택.
-    FDR-보정 p < PARTIAL_PVAL 인 feature만 통과.
-    """
     sub = df[BASELINE_COLS + aec_cols + [outcome]].dropna()
+    B   = sub[BASELINE_COLS].values.astype(float)
+    y   = sub[outcome].values.astype(float)
 
-    B  = sub[BASELINE_COLS].values.astype(float)
-    y  = sub[outcome].values.astype(float)
-
-    lr = LinearRegression()
+    lr      = LinearRegression()
     y_resid = y - lr.fit(B, y).predict(B)
 
     partial_rs, pvals = [], []
     for c in aec_cols:
         x = sub[c].values.astype(float)
         if np.std(x) == 0:
-            partial_rs.append(0.0)
-            pvals.append(1.0)
+            partial_rs.append(0.0); pvals.append(1.0)
             continue
         x_resid = x - lr.fit(B, x).predict(B)
-        r, p = stats.pearsonr(x_resid, y_resid)
-        partial_rs.append(r)
-        pvals.append(p)
+        r, p    = stats.pearsonr(x_resid, y_resid)
+        partial_rs.append(r); pvals.append(p)
 
-    pvals_arr = np.array(pvals)
-    adj_pvals = _fdr_bh(pvals_arr)
-
+    adj_pvals = _fdr_bh(np.array(pvals))
     result_df = pd.DataFrame({
         "feature":   aec_cols,
         "partial_r": partial_rs,
-        "p_raw":     pvals_arr,
+        "p_raw":     pvals,
         "p_adj_BH":  adj_pvals,
     }).sort_values("p_adj_BH")
 
-    print(f"\n[Step 2] partial correlation (controlling Age/Sex/BMI)  "
-          f"FDR threshold={PARTIAL_PVAL}")
+    print(f"\n[Step 2] partial correlation (controlling Age/Sex/BMI)  FDR threshold={PARTIAL_PVAL}")
     print(result_df.to_string(index=False, float_format="{:.4f}".format))
 
     selected = result_df.loc[result_df["p_adj_BH"] < PARTIAL_PVAL, "feature"].tolist()
@@ -163,20 +138,14 @@ def step2_partial_corr_selection(df: pd.DataFrame,
 
 
 def step3_vif_report(df: pd.DataFrame, final_cols: list[str], outcome: str = "SMI"):
-    """
-    최종 feature set(baseline + selected AEC)의 VIF를 계산하고 경고 출력.
-    VIF > VIF_WARN 이면 경고 — 제거 기준 아님.
-    """
     cols = BASELINE_COLS + final_cols
     sub  = df[cols + [outcome]].dropna()
     X    = sub[cols].values.astype(float)
-
-    # 상수항 포함
     X_c  = np.column_stack([np.ones(len(X)), X])
     vif_vals = [variance_inflation_factor(X_c, i + 1) for i in range(X.shape[1])]
 
     vif_df = pd.DataFrame({"feature": cols, "VIF": vif_vals}).sort_values("VIF", ascending=False)
-    print(f"\n[Step 3] VIF (경고등: VIF > {VIF_WARN}은 BMI 등과 공선 가능성)")
+    print(f"\n[Step 3] VIF (경고등: VIF > {VIF_WARN})")
     print(vif_df.to_string(index=False, float_format="{:.2f}".format))
 
     warn = vif_df[vif_df["VIF"] > VIF_WARN]["feature"].tolist()
@@ -187,10 +156,6 @@ def step3_vif_report(df: pd.DataFrame, final_cols: list[str], outcome: str = "SM
 
 
 def run_feature_selection(df: pd.DataFrame, aec_cols: list[str] | None = None) -> list[str]:
-    """3-step feature selection 실행 → 최종 feature list 반환 (baseline 제외)
-    aec_cols를 넘기지 않으면 df에서 자동 추출 (전체 데이터 모드).
-    fold 내부에서 호출 시 fold train df와 미리 구한 aec_cols를 함께 넘긴다.
-    """
     if aec_cols is None:
         aec_cols = get_aec_cols(df)
         print(f"\n전체 AEC feature 수: {len(aec_cols)}")
@@ -205,10 +170,6 @@ def run_feature_selection(df: pd.DataFrame, aec_cols: list[str] | None = None) -
 
     return step2_cols
 
-
-# ════════════════════════════════════════════════════════════════════════════
-# 3. Dataset / Model / 학습
-# ════════════════════════════════════════════════════════════════════════════
 
 class TabularDataset(Dataset):
     def __init__(self, X, y):
@@ -287,10 +248,6 @@ def _evaluate(model, loader, criterion, y_scaler, device):
     return trues, preds
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 4. 시각화
-# ════════════════════════════════════════════════════════════════════════════
-
 def plot_results(trues, preds, save_dir: Path, title="Clinic+AEC"):
     resid = preds - trues
     r,  p_r  = stats.pearsonr(trues, preds)
@@ -360,14 +317,9 @@ def plot_results(trues, preds, save_dir: Path, title="Clinic+AEC"):
     print(f"[통계] r={r:.4f} (p={p_r:.3e})  SW-p={p_sw:.4f}  bias-p={p_bt:.4f}  AUC={roc_auc:.4f}")
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 5. 데이터 준비 헬퍼
-# ════════════════════════════════════════════════════════════════════════════
-
 def prepare_XY(df: pd.DataFrame, selected_aec: list[str]):
     all_feat_cols = BASELINE_COLS + selected_aec
     sub = df[all_feat_cols + ["SMI"]].dropna()
-
     X = sub[all_feat_cols].values.astype(float)
     y = sub["SMI"].values.astype(float)
     print(f"학습 데이터: {X.shape}  (baseline {len(BASELINE_COLS)}개 + AEC {len(selected_aec)}개)")
@@ -375,64 +327,52 @@ def prepare_XY(df: pd.DataFrame, selected_aec: list[str]):
     return X, y
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 6. 실행 모드
-# ════════════════════════════════════════════════════════════════════════════
-
 def run_cv(n_splits=5):
-    """5-Fold CV — feature selection을 각 fold의 train 데이터에서 독립적으로 수행"""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
-    df = load_and_merge(DATA_PATH)
+    df      = load_and_merge(DATA_PATH)
     aec_all = get_aec_cols(df)
     print(f"전체 AEC feature 수: {len(aec_all)}")
 
-    # NaN 제거는 가능한 최대 컬럼 기준으로 1회만 수행
     needed = BASELINE_COLS + aec_all + ["SMI"]
-    sub = df[needed].dropna(subset=BASELINE_COLS + ["SMI"]).reset_index(drop=True)
-    y_all = sub["SMI"].values.astype(float)
+    sub    = df[needed].dropna(subset=BASELINE_COLS + ["SMI"]).reset_index(drop=True)
+    y_all  = sub["SMI"].values.astype(float)
 
-    # hold-out test split (인덱스 기준)
-    all_idx = np.arange(len(sub))
-    tv_idx, te_idx = train_test_split(all_idx, test_size=0.15, random_state=SEED)
+    tv_idx, te_idx = train_test_split(np.arange(len(sub)), test_size=0.15, random_state=SEED)
 
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=SEED)
     fold_maes, fold_r2s, fold_features = [], [], []
-    best_mae_cv  = float("inf")
+    best_mae_cv = float("inf")
     best_state_cv, best_x_scaler, best_y_scaler, best_imputer, best_selected_aec = None, None, None, None, None
 
     for fold, (tr_rel, vl_rel) in enumerate(kf.split(tv_idx), 1):
-        tr_idx = tv_idx[tr_rel]
-        vl_idx = tv_idx[vl_rel]
-
+        tr_idx   = tv_idx[tr_rel]
+        vl_idx   = tv_idx[vl_rel]
         df_train = sub.iloc[tr_idx].copy()
 
         print(f"\n{'─'*55}")
         print(f" Fold {fold}/{n_splits}  (train {len(tr_idx)}, val {len(vl_idx)})")
         print(f"{'─'*55}")
 
-        # feature selection: fold train 데이터만 사용
         selected_aec = run_feature_selection(df_train, aec_all)
         fold_features.append(selected_aec)
         feat_cols = BASELINE_COLS + selected_aec
 
-        # fold train/val 행렬 구성 (선택된 feature만)
         X_tr = sub.iloc[tr_idx][feat_cols].values.astype(float)
         y_tr = y_all[tr_idx]
         X_vl = sub.iloc[vl_idx][feat_cols].values.astype(float)
         y_vl = y_all[vl_idx]
 
-        # imputer + scaler: fold train에서만 fit
         imputer  = SimpleImputer(strategy="mean")
         x_scaler = StandardScaler()
         y_scaler = StandardScaler()
-        X_tr = imputer.fit_transform(X_tr)
-        X_vl = imputer.transform(X_vl)
-        X_tr_sc = x_scaler.fit_transform(X_tr)
-        y_tr_sc = y_scaler.fit_transform(y_tr.reshape(-1, 1)).ravel()
-        X_vl_sc = x_scaler.transform(X_vl)
-        y_vl_sc = y_scaler.transform(y_vl.reshape(-1, 1)).ravel()
+        X_tr     = imputer.fit_transform(X_tr)
+        X_vl     = imputer.transform(X_vl)
+        X_tr_sc  = x_scaler.fit_transform(X_tr)
+        y_tr_sc  = y_scaler.fit_transform(y_tr.reshape(-1, 1)).ravel()
+        X_vl_sc  = x_scaler.transform(X_vl)
+        y_vl_sc  = y_scaler.transform(y_vl.reshape(-1, 1)).ravel()
 
         model = ClinicalMLP(in_features=len(feat_cols)).to(device)
         best_state, criterion = _fit(
@@ -462,11 +402,11 @@ def run_cv(n_splits=5):
     print(f"  Mean : MAE {np.mean(fold_maes):.4f}±{np.std(fold_maes):.4f}"
           f"  R² {np.mean(fold_r2s):.4f}±{np.std(fold_r2s):.4f}")
 
-    # 테스트 평가: best fold의 feature set & scaler 사용
+    assert best_imputer is not None
     best_feat_cols = BASELINE_COLS + best_selected_aec
-    X_te = sub.iloc[te_idx][best_feat_cols].values.astype(float)
-    y_te = y_all[te_idx]
-    X_te = best_imputer.transform(X_te)
+    X_te    = sub.iloc[te_idx][best_feat_cols].values.astype(float)
+    y_te    = y_all[te_idx]
+    X_te    = best_imputer.transform(X_te)
     X_te_sc = best_x_scaler.transform(X_te)
     y_te_sc = best_y_scaler.transform(y_te.reshape(-1, 1)).ravel()
 
@@ -491,8 +431,8 @@ def run_cv(n_splits=5):
 
 
 def test_only(ckpt_path: str):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    device   = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    ckpt     = torch.load(ckpt_path, map_location=device, weights_only=False)
     ckpt_dir = Path(ckpt_path).parent
 
     with open(ckpt_dir / "clinic_aec_x_scaler.pkl", "rb") as f: x_scaler = pickle.load(f)
