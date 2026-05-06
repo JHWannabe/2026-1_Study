@@ -1,6 +1,7 @@
 """
 공통 분석 모듈 — Linear/Logistic Regression + 시각화
-TARGET 인자만 바꿔서 TAMA, SMI 등 어떤 연속형 변수에도 재사용 가능.
+Input: aec1~aec256 (256개 AEC 피처)
+Output: TAMA, SMI
 """
 import os
 import numpy as np
@@ -9,6 +10,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     mean_squared_error, r2_score,
     roc_auc_score, roc_curve,
@@ -18,9 +20,10 @@ from sklearn.metrics import (
 # ── 경로 설정 ──────────────────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FILE_PATH = os.path.normpath(os.path.join(_SCRIPT_DIR, '..', '..', 'data', '강남_최종_정리본.xlsx'))
-SHEET_NAME = 'aec_feature_filtered'
-RESULTS_DIR = os.path.normpath(os.path.join(_SCRIPT_DIR, '..', '..', 'results', '0508'))
-FEATURES = ['PatientSex', 'PatientAge', 'BMI']
+SHEET_NAME = 'aec_interpolation_final'
+RESULTS_DIR = os.path.normpath(os.path.join(_SCRIPT_DIR, '..', '..', 'results', '0508_3'))
+FEATURES = [f'aec{i}' for i in range(1, 257)]
+TOP_N_COEF = 20  # 계수 시각화 시 상위 N개만 표시
 
 
 # ── 데이터 / 저장 유틸 ────────────────────────────────────
@@ -64,15 +67,18 @@ def run_linear_regression(target: str) -> None:
     overall_r2 = r2_score(all_y_true, all_y_pred)
     residuals = all_y_true - all_y_pred
 
-    print(f'  5-Fold CV — MSE={np.mean(fold_mse):.4f}±{np.std(fold_mse):.4f}'
-          f'  RMSE={np.mean(fold_rmse):.4f}±{np.std(fold_rmse):.4f}'
-          f'  R²={np.mean(fold_r2):.4f}±{np.std(fold_r2):.4f}')
+    print(f'  5-Fold CV  MSE={np.mean(fold_mse):.4f}+/-{np.std(fold_mse):.4f}'
+          f'  RMSE={np.mean(fold_rmse):.4f}+/-{np.std(fold_rmse):.4f}'
+          f'  R2={np.mean(fold_r2):.4f}+/-{np.std(fold_r2):.4f}')
 
     full_model = LinearRegression()
     full_model.fit(x, y)
-    print('  Coefficients (full data):')
-    for feat, coef in zip(FEATURES, full_model.coef_):
-        print(f'    {feat}: {coef:.4f}')
+
+    coef_s = pd.Series(full_model.coef_, index=FEATURES)
+    top_coef = coef_s.abs().nlargest(TOP_N_COEF)
+    print(f'  상위 {TOP_N_COEF} 계수 (전체 데이터):')
+    for feat in top_coef.index:
+        print(f'    {feat}: {coef_s[feat]:.6f}')
     print(f'  Intercept: {full_model.intercept_:.4f}')
 
     _plot_actual_vs_predicted(pd.Series(all_y_true), all_y_pred, overall_r2, target)
@@ -99,7 +105,7 @@ def _plot_actual_vs_predicted(y_test, y_pred, r2, target):
     ax.set_ylabel(f'Predicted {target}')
     ax.set_title(f'Actual vs Predicted {target}  (R²={r2:.3f})')
     ax.legend()
-    save_fig(target, f'Linear_Actual_vs_Predicted.png')
+    save_fig(target, 'Linear_Actual_vs_Predicted.png')
 
 
 def _plot_residuals(y_pred, residuals, target):
@@ -109,18 +115,20 @@ def _plot_residuals(y_pred, residuals, target):
     ax.set_xlabel(f'Predicted {target}')
     ax.set_ylabel('Residuals')
     ax.set_title(f'Residual Plot — {target} Linear Regression')
-    save_fig(target, f'Linear_Residuals.png')
+    save_fig(target, 'Linear_Residuals.png')
 
 
 def _plot_linear_coefficients(coef_array, target):
-    coef_s = pd.Series(coef_array, index=FEATURES).sort_values()
-    colors = ['#d73027' if c > 0 else '#4575b4' for c in coef_s]
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.barh(coef_s.index, coef_s.values, color=colors)
+    coef_s = pd.Series(coef_array, index=FEATURES)
+    top = coef_s.abs().nlargest(TOP_N_COEF)
+    top_coef = coef_s[top.index].sort_values()
+    colors = ['#d73027' if c > 0 else '#4575b4' for c in top_coef]
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.barh(top_coef.index, top_coef.values, color=colors)
     ax.axvline(0, color='black', linewidth=0.8)
     ax.set_xlabel('Coefficient')
-    ax.set_title(f'Feature Coefficients — {target} Linear Regression')
-    save_fig(target, f'Linear_Coefficients.png')
+    ax.set_title(f'Top {TOP_N_COEF} Feature Coefficients — {target} Linear Regression')
+    save_fig(target, 'Linear_Coefficients.png')
 
 
 def _plot_distribution_by_sex(df, target):
@@ -130,7 +138,7 @@ def _plot_distribution_by_sex(df, target):
     ax.set_xlabel(target)
     ax.set_title(f'{target} Distribution by Sex')
     ax.legend()
-    save_fig(target, f'Distribution_by_Sex.png')
+    save_fig(target, 'Distribution_by_Sex.png')
 
 
 def _plot_scatter_by_sex(df, x_col, target):
@@ -157,24 +165,27 @@ def run_logistic_regression(target: str) -> None:
         threshold = df[df['PatientSex'] == sex_code][target].quantile(0.25)
         print(f'    {label}: {threshold:.4f}')
 
-    x = df[FEATURES]
-    y = df[f'{target}_Binary']
+    x = df[FEATURES].values
+    y = df[f'{target}_Binary'].values
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     fold_acc, fold_auc = [], []
     all_y_true, all_y_pred, all_y_prob = [], [], []
 
     for train_idx, test_idx in skf.split(x, y):
-        x_train, x_test = x.iloc[train_idx], x.iloc[test_idx]
-        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-        model = LogisticRegression(max_iter=1000)
-        model.fit(x_train, y_train)
-        y_pred = model.predict(x_test)
-        y_prob = model.predict_proba(x_test)[:, 1]
-        all_y_true.extend(y_test.values)
+        x_train, x_test = x[train_idx], x[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+        scaler = StandardScaler()
+        x_train_s = scaler.fit_transform(x_train)
+        x_test_s = scaler.transform(x_test)
+        model = LogisticRegression(max_iter=2000, C=0.1)
+        model.fit(x_train_s, y_train)
+        y_pred = model.predict(x_test_s)
+        y_prob = model.predict_proba(x_test_s)[:, 1]
+        all_y_true.extend(y_test)
         all_y_pred.extend(y_pred)
         all_y_prob.extend(y_prob)
-        fold_acc.append((y_pred == y_test.values).mean())
+        fold_acc.append((y_pred == y_test).mean())
         fold_auc.append(roc_auc_score(y_test, y_prob))
 
     all_y_true = np.array(all_y_true)
@@ -184,12 +195,14 @@ def run_logistic_regression(target: str) -> None:
     auc = roc_auc_score(all_y_true, all_y_prob)
     conf_matrix = confusion_matrix(all_y_true, all_y_pred)
 
-    print(f'  5-Fold CV — Accuracy={np.mean(fold_acc):.4f}±{np.std(fold_acc):.4f}'
-          f'  AUC-ROC={np.mean(fold_auc):.4f}±{np.std(fold_auc):.4f}')
+    print(f'  5-Fold CV  Accuracy={np.mean(fold_acc):.4f}+/-{np.std(fold_acc):.4f}'
+          f'  AUC-ROC={np.mean(fold_auc):.4f}+/-{np.std(fold_auc):.4f}')
     print(classification_report(all_y_true, all_y_pred, target_names=['Normal', f'Low {target}']))
 
-    full_model = LogisticRegression(max_iter=1000)
-    full_model.fit(x, y)
+    full_scaler = StandardScaler()
+    x_scaled = full_scaler.fit_transform(x)
+    full_model = LogisticRegression(max_iter=2000, C=0.1)
+    full_model.fit(x_scaled, y)
 
     _plot_confusion_matrix(conf_matrix, target)
     _plot_roc_curve(pd.Series(all_y_true), all_y_prob, auc, target)
@@ -200,6 +213,7 @@ def run_logistic_regression(target: str) -> None:
         label: df[df['PatientSex'] == code][target].quantile(0.25)
         for code, label in [(0, 'Male'), (1, 'Female')]
     }
+    df['Sex_Label'] = df['PatientSex'].map({0: 'Male', 1: 'Female'})
     _save_logistic_md(target, fold_acc, fold_auc, auc, conf_matrix,
                       all_y_true, all_y_pred, thresholds, full_model.coef_[0], df)
 
@@ -212,7 +226,7 @@ def _plot_confusion_matrix(conf_matrix, target):
     ax.set_title(f'Confusion Matrix — {target} Logistic Regression')
     ax.set_xlabel('Predicted')
     ax.set_ylabel('Actual')
-    save_fig(target, f'Logistic_Confusion_Matrix.png')
+    save_fig(target, 'Logistic_Confusion_Matrix.png')
 
 
 def _plot_roc_curve(y_test, y_prob, auc, target):
@@ -224,7 +238,7 @@ def _plot_roc_curve(y_test, y_prob, auc, target):
     ax.set_ylabel('True Positive Rate')
     ax.set_title(f'ROC Curve — {target} Logistic Regression')
     ax.legend(loc='lower right')
-    save_fig(target, f'Logistic_ROC_Curve.png')
+    save_fig(target, 'Logistic_ROC_Curve.png')
 
 
 def _plot_prob_distribution(y_test, y_prob, target):
@@ -236,18 +250,20 @@ def _plot_prob_distribution(y_test, y_prob, target):
     ax.set_xlabel(f'Predicted Probability (Low {target})')
     ax.set_title(f'Predicted Probability Distribution — {target}')
     ax.legend()
-    save_fig(target, f'Logistic_Prob_Distribution.png')
+    save_fig(target, 'Logistic_Prob_Distribution.png')
 
 
 def _plot_logistic_coefficients(coef_array, target):
-    coef_s = pd.Series(coef_array, index=FEATURES).sort_values()
-    colors = ['#d73027' if c > 0 else '#4575b4' for c in coef_s]
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.barh(coef_s.index, coef_s.values, color=colors)
+    coef_s = pd.Series(coef_array, index=FEATURES)
+    top = coef_s.abs().nlargest(TOP_N_COEF)
+    top_coef = coef_s[top.index].sort_values()
+    colors = ['#d73027' if c > 0 else '#4575b4' for c in top_coef]
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.barh(top_coef.index, top_coef.values, color=colors)
     ax.axvline(0, color='black', linewidth=0.8)
     ax.set_xlabel('Coefficient (log-odds)')
-    ax.set_title(f'Feature Coefficients — {target} Logistic Regression')
-    save_fig(target, f'Logistic_Coefficients.png')
+    ax.set_title(f'Top {TOP_N_COEF} Feature Coefficients — {target} Logistic Regression')
+    save_fig(target, 'Logistic_Coefficients.png')
 
 
 # ── MD 보고서 ──────────────────────────────────────────────
@@ -264,9 +280,20 @@ def _sex_dist_table(df: pd.DataFrame, col: str) -> str:
     return '\n'.join(rows)
 
 
+def _top_coef_table(coef_array, n=TOP_N_COEF) -> str:
+    coef_s = pd.Series(coef_array, index=FEATURES)
+    top = coef_s.abs().nlargest(n)
+    rows = [f'| Feature | Coefficient |', '|---|---|']
+    for feat in top.index:
+        rows.append(f'| {feat} | {coef_s[feat]:.6f} |')
+    return '\n'.join(rows)
+
+
 def _save_linear_md(target, fold_mse, fold_rmse, fold_r2, overall_r2, coef, intercept, df):
     lines = [
         f'# Linear Regression Report — {target}',
+        f'',
+        f'**Input features:** aec1 ~ aec256 ({len(FEATURES)}개)',
         '',
         '## 성별 데이터 분포',
         '',
@@ -295,14 +322,11 @@ def _save_linear_md(target, fold_mse, fold_rmse, fold_r2, overall_r2, coef, inte
         '',
         f'OOF 전체 R² = **{overall_r2:.4f}**',
         '',
-        '## 계수 (전체 데이터 학습)',
+        f'## 상위 {TOP_N_COEF} 계수 (전체 데이터 학습)',
         '',
-        '| Feature | Coefficient |',
-        '|---|---|',
+        _top_coef_table(coef),
+        f'| Intercept | {intercept:.4f} |',
     ]
-    for feat, c in zip(FEATURES, coef):
-        lines.append(f'| {feat} | {c:.4f} |')
-    lines.append(f'| Intercept | {intercept:.4f} |')
 
     os.makedirs(os.path.join(RESULTS_DIR, target), exist_ok=True)
     path = os.path.join(RESULTS_DIR, target, 'Linear_Report.md')
@@ -314,12 +338,13 @@ def _save_linear_md(target, fold_mse, fold_rmse, fold_r2, overall_r2, coef, inte
 def _save_logistic_md(target, fold_acc, fold_auc, auc, conf_matrix,
                       all_y_true, all_y_pred, thresholds, coef, df):
     df = df.copy()
-    df['Sex_Label'] = df['PatientSex'].map({0: 'Male', 1: 'Female'})
     tn, fp, fn, tp = conf_matrix.ravel()
     cr_text = classification_report(all_y_true, all_y_pred, target_names=['Normal', f'Low {target}'])
 
     lines = [
         f'# Logistic Regression Report — {target}',
+        '',
+        f'**Input features:** aec1 ~ aec256 ({len(FEATURES)}개)',
         '',
         '## 성별 데이터 분포',
         '',
@@ -368,13 +393,10 @@ def _save_logistic_md(target, fold_acc, fold_auc, auc, conf_matrix,
         cr_text.strip(),
         '```',
         '',
-        '## 계수 (전체 데이터 학습)',
+        f'## 상위 {TOP_N_COEF} 계수 (전체 데이터 학습)',
         '',
-        '| Feature | Coefficient (log-odds) |',
-        '|---|---|',
+        _top_coef_table(coef),
     ]
-    for feat, c in zip(FEATURES, coef):
-        lines.append(f'| {feat} | {c:.4f} |')
 
     os.makedirs(os.path.join(RESULTS_DIR, target), exist_ok=True)
     path = os.path.join(RESULTS_DIR, target, 'Logistic_Report.md')

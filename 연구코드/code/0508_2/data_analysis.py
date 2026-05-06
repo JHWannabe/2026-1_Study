@@ -17,15 +17,15 @@ try:
         ['mean', 'std', lambda x: x.quantile(0.5), lambda x: x.quantile(0.25)]
     ).rename(columns={'<lambda_0>': 'median', '<lambda_1>': 'p25'})
     
-    # 3. 하위 25% 여부 판단 및 O/X 표시 추가
+    # 3. 하위 25% 여부 판단 및 1/0 표시 추가
     # 성별마다 기준치가 다르므로 성별 group별로 계산하여 병합
     def mark_bottom_25(group):
         smi_q25 = group['SMI'].quantile(0.25)
         tama_q25 = group['TAMA'].quantile(0.25)
         
-        group['SMI_Bottom_25'] = group['SMI'].apply(lambda x: 'O' if x <= smi_q25 else 'X')
-        group['TAMA_Bottom_25'] = group['TAMA'].apply(lambda x: 'O' if x <= tama_q25 else 'X')
-        group['Both_Bottom_25'] = ((group['SMI'] <= smi_q25) & (group['TAMA'] <= tama_q25)).map({True: 'O', False: 'X'})
+        group['SMI_Bottom_25'] = group['SMI'].apply(lambda x: '1' if x <= smi_q25 else '0')
+        group['TAMA_Bottom_25'] = group['TAMA'].apply(lambda x: '1' if x <= tama_q25 else '0')
+        group['Both_Bottom_25'] = ((group['SMI'] <= smi_q25) & (group['TAMA'] <= tama_q25)).map({True: '1', False: '0'})
         return group
 
     df_analyzed = df.groupby('PatientSex', group_keys=False).apply(mark_bottom_25)
@@ -35,7 +35,7 @@ try:
     for sex in df_analyzed['PatientSex'].unique():
         sex_df = df_analyzed[df_analyzed['PatientSex'] == sex]
         total = len(sex_df)
-        both_o = (sex_df['Both_Bottom_25'] == 'O').sum()
+        both_o = (sex_df['Both_Bottom_25'] == '1').sum()
         
         summary_list.append({
             'Sex': sex,
