@@ -20,7 +20,7 @@ try:
     # 3. 하위 25% 여부 판단 및 O/X 표시 추가
     # 성별마다 기준치가 다르므로 성별 group별로 계산하여 병합
     def mark_bottom_25(group):
-        smi_q25 = 50 if group.name == 'M' else 38.5
+        smi_q25 = group['SMI'].quantile(0.25)
         tama_q25 = group['TAMA'].quantile(0.25)
         
         group['SMI_Bottom_25'] = group['SMI'].apply(lambda x: 'O' if x <= smi_q25 else 'X')

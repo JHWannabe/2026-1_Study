@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python clinic_TAMA.py)",
+      "Bash(python clinic_SMI.py)"
+    ]
+  }
+}
