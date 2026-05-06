@@ -12,7 +12,7 @@ RAW_SHEET  = "aec-raw"
 N_INTERP   = 256
 FS         = 1.0
 BAND_EDGES = [0, FS / 8, FS / 4, FS * 3 / 8, FS / 2]
-META_COLS  = ["PatientAge", "PatientSex", "BMI", "SMI"]
+META_COLS  = ["PatientAge", "PatientSex", "BMI", "TAMA", "SMI"]
 
 
 def interpolate_signal(values: np.ndarray, n: int = N_INTERP) -> np.ndarray:
