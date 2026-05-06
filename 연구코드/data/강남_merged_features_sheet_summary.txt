@@ -1,0 +1,6 @@
+aec_interpolation          : 2025행 × 261열
+aec_interpolation_filtered : 1642행 × 261열
+aec_feature                : 1642행 × 70열
+aec_feature_filtered       : 1374행 × 70열
+aec_interpolation_final    : 1374행 × 261열
+feature_dist               : 67행
