@@ -47,17 +47,23 @@ def parse_resnet1d_md(path: Path) -> dict:
     text = path.read_text(encoding='utf-8')
     result = {}
 
+    # MAE | R² | (ACC | AUC)? | (피처 수)?
+    _clf = r'(?:\s*\|\s*\*\*([0-9.]+)\*\*\s*\|\s*\*\*([0-9.]+)\*\*)?'
     m = re.search(
-        r'\|\s*\*\*Mean\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|',
+        r'\|\s*\*\*Mean\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|\s*\*\*([-0-9.]+)\*\*' + _clf,
         text)
     if m:
         result['mae_mean'], result['r2_mean'] = float(m.group(1)), float(m.group(2))
+        if m.group(3) and m.group(4):
+            result['acc_mean'], result['auc_mean'] = float(m.group(3)), float(m.group(4))
 
     m = re.search(
-        r'\|\s*\*\*Std\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|',
+        r'\|\s*\*\*Std\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|\s*\*\*([-0-9.]+)\*\*' + _clf,
         text)
     if m:
         result['mae_std'], result['r2_std'] = float(m.group(1)), float(m.group(2))
+        if m.group(3) and m.group(4):
+            result['acc_std'], result['auc_std'] = float(m.group(3)), float(m.group(4))
 
     m = re.search(r'Test R² = \*\*([-0-9.]+)\*\*', text)
     if m:
@@ -66,6 +72,14 @@ def parse_resnet1d_md(path: Path) -> dict:
     m = re.search(r'Test MAE = \*\*([-0-9.]+)\*\*', text)
     if m:
         result['test_mae'] = float(m.group(1))
+
+    m = re.search(r'\| 이진화 ACC \(성별 기준\) \| ([0-9.]+) \|', text)
+    if m:
+        result['test_acc'] = float(m.group(1))
+
+    m = re.search(r'\| 이진화 AUC \(성별 기준\) \| ([0-9.]+) \|', text)
+    if m:
+        result['test_auc'] = float(m.group(1))
 
     return result
 
@@ -355,36 +369,41 @@ def make_report(data: dict) -> str:
             '',
             '> 이진화: 성별 내 하위 25% = Low (근감소증 위험), 나머지 = Normal',
             '',
-            '| 방법 | 설명 | CV Accuracy (mean±std) | CV AUC-ROC (mean±std) | Test AUC |',
-            '|---|---|---|---|---|',
+            '| 방법 | 설명 | CV Accuracy (mean±std) | CV AUC-ROC (mean±std) | Test ACC | Test AUC |',
+            '|---|---|---|---|---|---|',
         ]
         for method_key, method_label in METHODS:
             d = data[method_key][target]['logistic']
             if not d:
-                lines.append(f'| {method_key} | {method_label} | N/A | N/A | N/A |')
+                lines.append(f'| {method_key} | {method_label} | N/A | N/A | N/A | N/A |')
                 continue
-            acc  = f"{fmt(d.get('acc_mean'))}±{fmt(d.get('acc_std'))}"
-            auc  = f"{fmt(d.get('auc_mean'))}±{fmt(d.get('auc_std'))}"
-            test = fmt(d.get('test_auc'))
-            lines.append(f'| {method_key} | {method_label} | {acc} | {auc} | {test} |')
+            acc       = f"{fmt(d.get('acc_mean'))}±{fmt(d.get('acc_std'))}"
+            auc       = f"{fmt(d.get('auc_mean'))}±{fmt(d.get('auc_std'))}"
+            test_acc  = fmt(d.get('test_acc'))
+            test_auc  = fmt(d.get('test_auc'))
+            lines.append(f'| {method_key} | {method_label} | {acc} | {auc} | {test_acc} | {test_auc} |')
 
         lines += [
             '',
             f'#### ResNet1D (1D CNN) — {target} 예측 (5-Fold CV on Train 80%)',
             '',
-            '| 방법 | CV R² (mean±std) | CV MAE (mean±std) | Test R² | Test MAE |',
-            '|---|---|---|---|---|',
+            '| 방법 | CV MAE (mean±std) | CV R² (mean±std) | CV ACC (mean±std) | CV AUC (mean±std) | Test R² | Test MAE | Test ACC | Test AUC |',
+            '|---|---|---|---|---|---|---|---|---|',
         ]
         for method_key, method_label in METHODS_RESNET1D:
             d = data[method_key][target]['resnet1d']
             if not d:
-                lines.append(f'| {method_key} | N/A | N/A | N/A | N/A |')
+                lines.append(f'| {method_key} | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |')
                 continue
-            r2       = f"{fmt(d.get('r2_mean'))}±{fmt(d.get('r2_std'))}"
             mae      = f"{fmt(d.get('mae_mean'))}±{fmt(d.get('mae_std'))}"
+            r2       = f"{fmt(d.get('r2_mean'))}±{fmt(d.get('r2_std'))}"
+            cv_acc   = f"{fmt(d.get('acc_mean'))}±{fmt(d.get('acc_std'))}" if d.get('acc_mean') is not None else 'N/A'
+            cv_auc   = f"{fmt(d.get('auc_mean'))}±{fmt(d.get('auc_std'))}" if d.get('auc_mean') is not None else 'N/A'
             test_r2  = fmt(d.get('test_r2'))
             test_mae = fmt(d.get('test_mae'))
-            lines.append(f'| {method_key} | {r2} | {mae} | {test_r2} | {test_mae} |')
+            test_acc = fmt(d.get('test_acc'))
+            test_auc = fmt(d.get('test_auc'))
+            lines.append(f'| {method_key} | {mae} | {r2} | {cv_acc} | {cv_auc} | {test_r2} | {test_mae} | {test_acc} | {test_auc} |')
 
         lines += ['', f'#### {target} 성별 하위 25% 임계값', '',
                   '> 로지스틱 회귀에서 "Low" 레이블 기준값 (성별별 Q25)',
@@ -408,14 +427,17 @@ def make_report(data: dict) -> str:
         for method_key, method_label in METHODS:
             lin  = data[method_key][target]['linear']
             logi = data[method_key][target]['logistic']
-            r2_v    = lin.get('test_r2',   lin.get('r2_mean',  None))
-            auc_v   = logi.get('test_auc', logi.get('auc_mean', None))
+            r2_v    = lin.get('test_r2',    lin.get('r2_mean',   None))
+            auc_v   = logi.get('test_auc',  logi.get('auc_mean', None))
+            acc_v   = logi.get('test_acc',  logi.get('acc_mean', None))
             r2_str  = _interp_r2(r2_v)   if r2_v  is not None else 'N/A'
             auc_str = _interp_auc(auc_v) if auc_v is not None else 'N/A'
+            acc_str = f'{acc_v:.4f}' if acc_v is not None else 'N/A'
             lines += [
                 f'**{method_key}** ({method_label})',
-                f'- 선형 Test R²:   {r2_str}',
-                f'- 로지스틱 Test AUC: {auc_str}',
+                f'- 선형 Test R²:        {r2_str}',
+                f'- 로지스틱 Test ACC:   {acc_str}',
+                f'- 로지스틱 Test AUC:   {auc_str}',
                 '',
             ]
 
@@ -427,18 +449,22 @@ def make_report(data: dict) -> str:
     for target in TARGETS:
         best_r2_m, best_r2 = None, -999.0
         best_auc_m, best_auc = None, -999.0
+        best_acc_m, best_acc = None, -999.0
         worst_r2_m, worst_r2 = None, 999.0
         for method_key, _ in METHODS:
             lin  = data[method_key][target]['linear']
             logi = data[method_key][target]['logistic']
-            r2  = lin.get('test_r2',   lin.get('r2_mean',  -999))
+            r2  = lin.get('test_r2',   lin.get('r2_mean',   -999))
             auc = logi.get('test_auc', logi.get('auc_mean', -999))
+            acc = logi.get('test_acc', logi.get('acc_mean', -999))
             if r2 > best_r2:
                 best_r2, best_r2_m = r2, method_key
             if r2 < worst_r2 and r2 > -999:
                 worst_r2, worst_r2_m = r2, method_key
             if auc > best_auc:
                 best_auc, best_auc_m = auc, method_key
+            if acc > best_acc:
+                best_acc, best_acc_m = acc, method_key
 
         # AEC feature selection vs all-feature 비교
         r2_all  = data['aec_feature_only'][target]['linear'].get('test_r2',   data['aec_feature_only'][target]['linear'].get('r2_mean',   None))
@@ -449,6 +475,7 @@ def make_report(data: dict) -> str:
         lines += [f'#### {target}', '']
         lines.append(f'- 🏆 **최고 Linear R²**: `{best_r2_m}` — {_interp_r2(best_r2) if best_r2 > -999 else "N/A"}')
         lines.append(f'- 🏆 **최고 AUC-ROC**: `{best_auc_m}` — {_interp_auc(best_auc) if best_auc > -999 else "N/A"}')
+        lines.append(f'- 🏆 **최고 Accuracy**: `{best_acc_m}` — {fmt(best_acc) if best_acc > -999 else "N/A"}')
         lines.append(f'- 📉 **최저 Linear R²**: `{worst_r2_m}` ({fmt(worst_r2) if worst_r2 < 999 else "N/A"})')
 
         if r2_all is not None and r2_sel is not None:

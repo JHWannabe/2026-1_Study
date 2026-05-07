@@ -142,7 +142,8 @@ def _get_gender_thresholds(trues, sex_arr):
 
 
 def _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, label,
-             sex_arr, fold_feat_counts=None, final_feat_count=None):
+             sex_arr, fold_accs=None, fold_aucs=None,
+             fold_feat_lists=None, final_feat_list=None):
     maes  = np.array(fold_maes)
     r2s   = np.array(fold_r2s)
     trues = np.array(test_trues)
@@ -153,7 +154,9 @@ def _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, l
     # 성별별 임계값 적용
     thr_m, thr_f, sample_thrs = _get_gender_thresholds(trues, sex_arr)
     y_bin = (trues >= sample_thrs).astype(int)
-    
+    y_pred_bin = (preds >= sample_thrs).astype(int)
+    test_acc = (y_pred_bin == y_bin).mean()
+
     # ROC 분석용 스코어 정규화
     score_norm = (preds - preds.min()) / (np.ptp(preds) + 1e-8)
     fpr, tpr, _ = roc_curve(y_bin, score_norm)
@@ -166,9 +169,18 @@ def _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, l
     p_sw_lbl = f'{p_sw:.4f}' if not np.isnan(p_sw) else 'N/A'
     _, p_bt = stats.ttest_1samp(resid, 0)
 
-    has_feat = fold_feat_counts is not None
-    fold_hdr = '| Fold | MAE | R² | 피처 수 |' if has_feat else '| Fold | MAE | R² |'
-    fold_sep = '|---|---|---|---|'              if has_feat else '|---|---|---|'
+    has_feat = fold_feat_lists is not None
+    has_clf  = fold_accs is not None and fold_aucs is not None
+    fold_feat_counts = [len(f) for f in fold_feat_lists] if has_feat else None
+
+    # 헤더/구분선 동적 생성
+    hdr_cols = ['Fold', 'MAE', 'R²']
+    if has_clf:
+        hdr_cols += ['ACC', 'AUC']
+    if has_feat:
+        hdr_cols += ['피처 수']
+    fold_hdr = '| ' + ' | '.join(hdr_cols) + ' |'
+    fold_sep = '|' + '|'.join(['---'] * len(hdr_cols)) + '|'
 
     lines = [
         f'# ResNet1D Report — {target}',
@@ -181,17 +193,28 @@ def _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, l
         fold_sep,
     ]
     for i, (mae, r2) in enumerate(zip(fold_maes, fold_r2s), 1):
+        row = f'| {i} | {mae:.4f} | {r2:.4f}'
+        if has_clf:
+            acc_v = fold_accs[i - 1]
+            auc_v = fold_aucs[i - 1]
+            acc_s = f'{acc_v:.4f}' if not np.isnan(acc_v) else 'N/A'
+            auc_s = f'{auc_v:.4f}' if not np.isnan(auc_v) else 'N/A'
+            row += f' | {acc_s} | {auc_s}'
         if has_feat:
-            lines.append(f'| {i} | {mae:.4f} | {r2:.4f} | {fold_feat_counts[i-1]} |')
-        else:
-            lines.append(f'| {i} | {mae:.4f} | {r2:.4f} |')
+            row += f' | {fold_feat_counts[i - 1]}'
+        lines.append(row + ' |')
 
-    mean_row = f'| **Mean** | **{maes.mean():.4f}** | **{r2s.mean():.4f}** |'
-    std_row  = f'| **Std** | **{maes.std():.4f}** | **{r2s.std():.4f}** |'
+    accs = np.array(fold_accs) if has_clf else None
+    aucs = np.array(fold_aucs) if has_clf else None
+    mean_row = f'| **Mean** | **{maes.mean():.4f}** | **{r2s.mean():.4f}**'
+    std_row  = f'| **Std** | **{maes.std():.4f}** | **{r2s.std():.4f}**'
+    if has_clf:
+        mean_row += f' | **{np.nanmean(accs):.4f}** | **{np.nanmean(aucs):.4f}**'
+        std_row  += f' | **{np.nanstd(accs):.4f}** | **{np.nanstd(aucs):.4f}**'
     if has_feat:
-        mean_row += f' **{np.mean(fold_feat_counts):.1f}** |'
+        mean_row += f' | **{np.mean(fold_feat_counts):.1f}**'
         std_row  += ' |'
-    lines += [mean_row, std_row, '']
+    lines += [mean_row + ' |', std_row + ' |', '']
 
     lines += [
         '## Test Set 성능 (Test 20%)',
@@ -208,8 +231,28 @@ def _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, l
         f'| Pearson r | {r_val:.4f} (p={p_r:.3e}) |',
         f'| Shapiro-Wilk p | {p_sw_lbl} |',
         f'| Bias t-test p | {p_bt:.4f} |',
+        f'| 이진화 ACC (성별 기준) | {test_acc:.4f} |',
         f'| 이진화 AUC (성별 기준) | {roc_auc:.4f} |',
     ]
+
+    # 피처 선택 목록 저장
+    if has_feat:
+        lines += ['', '## 피처 선택 목록 (Fold별)', '']
+        for i, feats in enumerate(fold_feat_lists, 1):
+            lines += [
+                f'### Fold {i} ({len(feats)}개)',
+                '',
+                ', '.join(feats),
+                '',
+            ]
+        if final_feat_list is not None:
+            lines += [
+                f'### 최종 모델 (Train 전체, {len(final_feat_list)}개)',
+                '',
+                ', '.join(final_feat_list),
+                '',
+            ]
+
     os.makedirs(os.path.join(results_dir, target), exist_ok=True)
     path = os.path.join(results_dir, target, 'ResNet1D_Report.md')
     with open(path, 'w', encoding='utf-8') as f:
@@ -327,13 +370,14 @@ def run_resnet1d(df, y_raw: np.ndarray,
     y_sc_te = y_scaler.transform(y_test_all.reshape(-1, 1)).ravel()
 
     kf = KFold(n_splits=5, shuffle=True, random_state=SEED)
-    fold_maes, fold_r2s = [], []
+    fold_maes, fold_r2s, fold_accs, fold_aucs, fold_feat_lists = [], [], [], [], []
 
     for fold, (tr_idx, vl_idx) in enumerate(kf.split(df_train_all), 1):
         df_fold_tr = df_train_all.iloc[tr_idx]
         df_fold_vl = df_train_all.iloc[vl_idx]
 
         sel_feats = feature_selector(df_fold_tr)
+        fold_feat_lists.append(list(sel_feats))
         print(f'  ── Fold {fold}/5 (train {len(tr_idx)}, val {len(vl_idx)}, feats {len(sel_feats)}) ──')
 
         X_tr_raw = df_fold_tr[sel_feats].values.astype(float)
@@ -358,6 +402,22 @@ def run_resnet1d(df, y_raw: np.ndarray,
         fold_maes.append(mae)
         fold_r2s.append(r2)
 
+        # fold validation의 성별별 임계값 기반 ACC / AUC
+        sex_vl_val = df_fold_vl['PatientSex'].values
+        thr_m_f, thr_f_f, _ = _get_gender_thresholds(
+            y_train_all[tr_idx], df_train_all['PatientSex'].values[tr_idx]
+        )
+        vl_sample_thrs = np.where(sex_vl_val == 0, thr_m_f, thr_f_f)
+        vl_bin   = (trues >= vl_sample_thrs).astype(int)
+        vl_score = (preds - preds.min()) / (np.ptp(preds) + 1e-8)
+        vl_pred_bin = (preds >= vl_sample_thrs).astype(int)
+        fold_accs.append((vl_pred_bin == vl_bin).mean())
+        try:
+            from sklearn.metrics import roc_auc_score as _roc_auc
+            fold_aucs.append(_roc_auc(vl_bin, vl_score))
+        except Exception:
+            fold_aucs.append(float('nan'))
+
     # 최종 모델: train 전체로 학습 → test 평가
     sel_feats_final = feature_selector(df_train_all)
     X_tr_raw = df_train_all[sel_feats_final].values.astype(float)
@@ -379,6 +439,10 @@ def run_resnet1d(df, y_raw: np.ndarray,
     test_preds = y_scaler.inverse_transform(ps_te.reshape(-1, 1)).ravel()
     test_trues = y_scaler.inverse_transform(ts_te.reshape(-1, 1)).ravel()
 
-    # 수정된 평가 함수 호출 (sex_arr 전달)
-    _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, label, sex_arr=sex_test)
+    _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, label,
+             sex_arr=sex_test,
+             fold_accs=fold_accs,
+             fold_aucs=fold_aucs,
+             fold_feat_lists=fold_feat_lists,
+             final_feat_list=list(sel_feats_final))
     _plot_oof(test_trues.tolist(), test_preds.tolist(), target, results_dir, label, sex_arr=sex_test)
