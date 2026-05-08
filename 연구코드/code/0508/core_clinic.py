@@ -13,8 +13,11 @@ from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 from sklearn.metrics import (
     mean_squared_error, r2_score,
     roc_auc_score, roc_curve,
+    average_precision_score, precision_recall_curve,
+    brier_score_loss,
     confusion_matrix, classification_report,
 )
+from sklearn.calibration import calibration_curve
 
 # ── 경로 설정 ──────────────────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -168,7 +171,7 @@ def run_logistic_regression(target: str) -> None:
     x_tr, x_te, y_tr, y_te = train_test_split(x, y, test_size=0.2, random_state=42, stratify=y)
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    fold_acc, fold_auc = [], []
+    fold_acc, fold_auc, fold_auprc, fold_brier = [], [], [], []
 
     for train_idx, val_idx in skf.split(x_tr, y_tr):
         xf_tr, xf_val = x_tr.iloc[train_idx], x_tr.iloc[val_idx]
@@ -178,9 +181,13 @@ def run_logistic_regression(target: str) -> None:
         y_pred = (y_prob >= 0.5).astype(int)
         fold_acc.append((y_pred == yf_val.values).mean())
         fold_auc.append(roc_auc_score(yf_val, y_prob))
+        fold_auprc.append(average_precision_score(yf_val, y_prob))
+        fold_brier.append(brier_score_loss(yf_val, y_prob))
 
     print(f'  5-Fold CV (Train 80%) — Accuracy={np.mean(fold_acc):.4f}±{np.std(fold_acc):.4f}'
-          f'  AUC-ROC={np.mean(fold_auc):.4f}±{np.std(fold_auc):.4f}')
+          f'  AUC-ROC={np.mean(fold_auc):.4f}±{np.std(fold_auc):.4f}'
+          f'  AUPRC={np.mean(fold_auprc):.4f}±{np.std(fold_auprc):.4f}'
+          f'  Brier={np.mean(fold_brier):.4f}±{np.std(fold_brier):.4f}')
 
     full_result = sm.Logit(y_tr, sm.add_constant(x_tr)).fit(disp=0)
     coef_arr = full_result.params[FEATURES].to_numpy()
@@ -189,11 +196,14 @@ def run_logistic_regression(target: str) -> None:
 
     y_prob_te = full_result.predict(sm.add_constant(x_te)).to_numpy()
     y_pred_te = (y_prob_te >= 0.5).astype(int)
-    test_acc  = (y_pred_te == y_te.values).mean()
-    test_auc  = roc_auc_score(y_te, y_prob_te)
-    test_cm   = confusion_matrix(y_te, y_pred_te)
+    test_acc   = (y_pred_te == y_te.values).mean()
+    test_auc   = roc_auc_score(y_te, y_prob_te)
+    test_auprc = average_precision_score(y_te, y_prob_te)
+    test_brier = brier_score_loss(y_te, y_prob_te)
+    test_cm    = confusion_matrix(y_te, y_pred_te)
 
-    print(f'  Test (20%) — Accuracy={test_acc:.4f}  AUC-ROC={test_auc:.4f}')
+    print(f'  Test (20%) — Accuracy={test_acc:.4f}  AUC-ROC={test_auc:.4f}'
+          f'  AUPRC={test_auprc:.4f}  Brier={test_brier:.4f}')
     print(classification_report(y_te, y_pred_te, target_names=['Normal', f'Low {target}']))
 
     print('\n  Train Logit 결과:')
@@ -204,12 +214,15 @@ def run_logistic_regression(target: str) -> None:
     _plot_roc_curve(pd.Series(y_te.values), y_prob_te, test_auc, target)
     _plot_prob_distribution(pd.Series(y_te.values), y_prob_te, target)
     _plot_logistic_coefficients(coef_arr, target)
+    _plot_pr_curve(pd.Series(y_te.values), y_prob_te, test_auprc, target)
+    _plot_calibration(pd.Series(y_te.values), y_prob_te, target)
 
     thresholds = {
         label: df[df['PatientSex'] == code][target].quantile(0.25)
         for code, label in [(0, 'Male'), (1, 'Female')]
     }
-    _save_logistic_md(target, fold_acc, fold_auc, test_acc, test_auc, test_cm,
+    _save_logistic_md(target, fold_acc, fold_auc, fold_auprc, fold_brier,
+                      test_acc, test_auc, test_auprc, test_brier, test_cm,
                       y_te.values, y_pred_te, thresholds, coef_arr, pval_arr, df)
 
 
@@ -257,6 +270,31 @@ def _plot_logistic_coefficients(coef_array, target):
     ax.set_xlabel('Coefficient (log-odds)')
     ax.set_title(f'Feature Coefficients — {target} Logistic Regression')
     save_fig(target, f'Logistic_Coefficients.png')
+
+
+def _plot_pr_curve(y_test, y_prob, auprc, target):
+    precision, recall, _ = precision_recall_curve(y_test, y_prob)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.plot(recall, precision, lw=2, label=f'AUPRC = {auprc:.3f}')
+    baseline = float(y_test.mean())
+    ax.axhline(baseline, color='r', linestyle='--', label=f'Baseline ({baseline:.3f})')
+    ax.set_xlabel('Recall')
+    ax.set_ylabel('Precision')
+    ax.set_title(f'PR Curve — {target} Logistic Regression')
+    ax.legend(loc='upper right')
+    save_fig(target, 'Logistic_PR_Curve.png')
+
+
+def _plot_calibration(y_test, y_prob, target):
+    prob_true, prob_pred = calibration_curve(y_test, y_prob, n_bins=10)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.plot(prob_pred, prob_true, 's-', label='Model')
+    ax.plot([0, 1], [0, 1], 'r--', label='Perfect Calibration')
+    ax.set_xlabel('Mean Predicted Probability')
+    ax.set_ylabel('Fraction of Positives')
+    ax.set_title(f'Calibration Plot — {target} Logistic Regression')
+    ax.legend()
+    save_fig(target, 'Logistic_Calibration.png')
 
 
 # ── MD 보고서 ──────────────────────────────────────────────
@@ -326,7 +364,8 @@ def _save_linear_md(target, fold_mse, fold_rmse, fold_r2,
     print(f'  → Linear MD 저장: {path}')
 
 
-def _save_logistic_md(target, fold_acc, fold_auc, test_acc, test_auc, test_cm,
+def _save_logistic_md(target, fold_acc, fold_auc, fold_auprc, fold_brier,
+                      test_acc, test_auc, test_auprc, test_brier, test_cm,
                       test_y_true, test_y_pred, thresholds, coef, pvalues, df):
     df = df.copy()
     df['Sex_Label'] = df['PatientSex'].map({0: 'Male', 1: 'Female'})
@@ -359,20 +398,20 @@ def _save_logistic_md(target, fold_acc, fold_auc, test_acc, test_auc, test_cm,
         '',
         '## 5-Fold CV 성능 (Train 80%)',
         '',
-        '| Fold | Accuracy | AUC-ROC |',
-        '|---|---|---|',
+        '| Fold | Accuracy | AUC-ROC | AUPRC | Brier |',
+        '|---|---|---|---|---|',
     ]
-    for i, (acc, a) in enumerate(zip(fold_acc, fold_auc), 1):
-        lines.append(f'| {i} | {acc:.4f} | {a:.4f} |')
+    for i, (acc, a, ap, br) in enumerate(zip(fold_acc, fold_auc, fold_auprc, fold_brier), 1):
+        lines.append(f'| {i} | {acc:.4f} | {a:.4f} | {ap:.4f} | {br:.4f} |')
     lines += [
-        f'| **Mean** | **{np.mean(fold_acc):.4f}** | **{np.mean(fold_auc):.4f}** |',
-        f'| **Std** | **{np.std(fold_acc):.4f}** | **{np.std(fold_auc):.4f}** |',
+        f'| **Mean** | **{np.mean(fold_acc):.4f}** | **{np.mean(fold_auc):.4f}** | **{np.mean(fold_auprc):.4f}** | **{np.mean(fold_brier):.4f}** |',
+        f'| **Std** | **{np.std(fold_acc):.4f}** | **{np.std(fold_auc):.4f}** | **{np.std(fold_auprc):.4f}** | **{np.std(fold_brier):.4f}** |',
         '',
         '## Test Set 성능 (Test 20%)',
         '',
-        '| Accuracy | AUC-ROC |',
-        '|---|---|',
-        f'| **{test_acc:.4f}** | **{test_auc:.4f}** |',
+        '| Accuracy | AUC-ROC | AUPRC | Brier |',
+        '|---|---|---|---|',
+        f'| **{test_acc:.4f}** | **{test_auc:.4f}** | **{test_auprc:.4f}** | **{test_brier:.4f}** |',
         '',
         '## Confusion Matrix (Test)',
         '',

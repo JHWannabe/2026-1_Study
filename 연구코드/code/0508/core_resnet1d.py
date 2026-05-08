@@ -5,8 +5,12 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import KFold, train_test_split
+from sklearn.metrics import (
+    mean_absolute_error, r2_score, roc_curve, auc, confusion_matrix,
+    average_precision_score, precision_recall_curve, brier_score_loss,
+)
+from sklearn.calibration import calibration_curve
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error, r2_score, roc_curve, auc, confusion_matrix
 from scipy import stats
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -15,6 +19,14 @@ BATCH_SIZE = 32
 EPOCHS     = 500
 LR         = 1e-3
 SEED       = 42
+
+# (이름, scale_X, scale_y) 조합 — 모두 학습·비교
+SCALE_CONFIGS = [
+    ('noScale', False, False),
+    ('scaleX',  True,  False),
+    ('scaleY',  False, True),
+    ('scaleXY', True,  True),
+]
 
 torch.manual_seed(SEED)
 np.random.seed(SEED)
@@ -143,7 +155,8 @@ def _get_gender_thresholds(trues, sex_arr):
 
 def _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, label,
              sex_arr, fold_accs=None, fold_aucs=None,
-             fold_feat_lists=None, final_feat_list=None):
+             fold_feat_lists=None, final_feat_list=None,
+             report_name='ResNet1D_Report.md'):
     maes  = np.array(fold_maes)
     r2s   = np.array(fold_r2s)
     trues = np.array(test_trues)
@@ -157,10 +170,12 @@ def _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, l
     y_pred_bin = (preds >= sample_thrs).astype(int)
     test_acc = (y_pred_bin == y_bin).mean()
 
-    # ROC 분석용 스코어 정규화
+    # ROC/PR 분석용 스코어 정규화
     score_norm = (preds - preds.min()) / (np.ptp(preds) + 1e-8)
     fpr, tpr, _ = roc_curve(y_bin, score_norm)
-    roc_auc = auc(fpr, tpr)
+    roc_auc  = auc(fpr, tpr)
+    test_auprc = average_precision_score(y_bin, score_norm)
+    test_brier = brier_score_loss(y_bin, score_norm)
 
     # 통계 분석
     r_val, p_r = stats.pearsonr(trues, preds)
@@ -233,6 +248,8 @@ def _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, l
         f'| Bias t-test p | {p_bt:.4f} |',
         f'| 이진화 ACC (성별 기준) | {test_acc:.4f} |',
         f'| 이진화 AUC (성별 기준) | {roc_auc:.4f} |',
+        f'| 이진화 AUPRC (성별 기준) | {test_auprc:.4f} |',
+        f'| 이진화 Brier Score (성별 기준) | {test_brier:.4f} |',
     ]
 
     # 피처 선택 목록 저장
@@ -254,13 +271,14 @@ def _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, l
             ]
 
     os.makedirs(os.path.join(results_dir, target), exist_ok=True)
-    path = os.path.join(results_dir, target, 'ResNet1D_Report.md')
+    path = os.path.join(results_dir, target, report_name)
     with open(path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines) + '\n')
     print(f'  → ResNet1D MD 저장: {path}')
 
 
-def _plot_oof(all_trues, all_preds, target, results_dir, label, sex_arr):
+def _plot_oof(all_trues, all_preds, target, results_dir, label, sex_arr,
+              plot_name='ResNet1D_Results.png'):
     trues = np.array(all_trues)
     preds = np.array(all_preds)
     resid = preds - trues
@@ -278,11 +296,12 @@ def _plot_oof(all_trues, all_preds, target, results_dir, label, sex_arr):
     score_norm = (preds - preds.min()) / (np.ptp(preds) + 1e-8)
     fpr, tpr, _ = roc_curve(y_bin, score_norm)
     roc_auc    = auc(fpr, tpr)
+    auprc_val  = average_precision_score(y_bin, score_norm)
     cm         = confusion_matrix(y_bin, preds_bin)
 
-    fig = plt.figure(figsize=(18, 11))
-    gs  = gridspec.GridSpec(2, 3, hspace=0.45, wspace=0.38)
-    ax  = [fig.add_subplot(gs[ri, c]) for ri in range(2) for c in range(3)]
+    fig = plt.figure(figsize=(24, 11))
+    gs  = gridspec.GridSpec(2, 4, hspace=0.45, wspace=0.38)
+    ax  = [fig.add_subplot(gs[ri, c]) for ri in range(2) for c in range(4)]
 
     # 1. Predicted vs True
     lo, hi = min(trues.min(), preds.min()), max(trues.max(), preds.max())
@@ -336,10 +355,27 @@ def _plot_oof(all_trues, all_preds, target, results_dir, label, sex_arr):
     ax[5].set(xlabel='Theoretical Quantiles', ylabel='Sample Quantiles',
               title=f'Q-Q Plot (Shapiro-Wilk p={p_sw_lbl})')
 
+    # 7. PR Curve
+    precision_arr, recall_arr, _ = precision_recall_curve(y_bin, score_norm)
+    baseline_pr = float(y_bin.mean())
+    ax[6].plot(recall_arr, precision_arr, color='darkorange', lw=2, label=f'AUPRC={auprc_val:.3f}')
+    ax[6].axhline(baseline_pr, color='r', linestyle='--', lw=1, label=f'Baseline ({baseline_pr:.3f})')
+    ax[6].set(xlabel='Recall', ylabel='Precision',
+              title=f'PR Curve\n(Gender-specific 25th pct: M={thr_m:.1f}, F={thr_f:.1f})')
+    ax[6].legend(fontsize=8)
+
+    # 8. Calibration Plot
+    prob_true_cal, prob_pred_cal = calibration_curve(y_bin, score_norm, n_bins=10)
+    ax[7].plot(prob_pred_cal, prob_true_cal, 's-', label='Model')
+    ax[7].plot([0, 1], [0, 1], 'r--', lw=1.5, label='Perfect')
+    ax[7].set(xlabel='Mean Predicted Probability', ylabel='Fraction of Positives',
+              title='Calibration Plot')
+    ax[7].legend(fontsize=8)
+
     fig.suptitle(f'{label} — Test Set Evaluation ({target})',
                  fontsize=14, fontweight='bold', y=1.01)
     os.makedirs(os.path.join(results_dir, target), exist_ok=True)
-    out = os.path.join(results_dir, target, 'ResNet1D_Results.png')
+    out = os.path.join(results_dir, target, plot_name)
     fig.savefig(out, dpi=150, bbox_inches='tight')
     plt.close(fig)
     print(f'  → 시각화 저장: {out}')
@@ -350,7 +386,9 @@ def run_resnet1d(df, y_raw: np.ndarray,
                  label: str,
                  feature_selector) -> None:
     """
-    80/20 split 후, Test 평가 단계에서 PatientSex 정보를 참조하여 성별별 임계값 적용
+    SCALE_CONFIGS 4가지 조합(noScale/scaleX/scaleY/scaleXY)을 모두 학습·평가.
+    피처 선택은 스케일링과 무관하므로 fold당 1회만 수행해 공유.
+    noScale 결과는 기존 파일명(ResNet1D_Report.md) 유지.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -361,88 +399,130 @@ def run_resnet1d(df, y_raw: np.ndarray,
     df_test_all  = df.iloc[te_idx_all].reset_index(drop=True)
     y_train_all  = y_raw[tr_idx_all]
     y_test_all   = y_raw[te_idx_all]
-    
-    # Test set 성별 정보 확보 (PatientSex 컬럼)
-    sex_test = df_test_all['PatientSex'].values
+    sex_test     = df_test_all['PatientSex'].values
 
-    y_scaler = StandardScaler()
-    y_sc_tr = y_scaler.fit_transform(y_train_all.reshape(-1, 1)).ravel()
-    y_sc_te = y_scaler.transform(y_test_all.reshape(-1, 1)).ravel()
-
+    # 피처 선택: 스케일링 무관 → fold당 1회 미리 계산
     kf = KFold(n_splits=5, shuffle=True, random_state=SEED)
-    fold_maes, fold_r2s, fold_accs, fold_aucs, fold_feat_lists = [], [], [], [], []
-
-    for fold, (tr_idx, vl_idx) in enumerate(kf.split(df_train_all), 1):
-        df_fold_tr = df_train_all.iloc[tr_idx]
-        df_fold_vl = df_train_all.iloc[vl_idx]
-
-        sel_feats = feature_selector(df_fold_tr)
-        fold_feat_lists.append(list(sel_feats))
-        print(f'  ── Fold {fold}/5 (train {len(tr_idx)}, val {len(vl_idx)}, feats {len(sel_feats)}) ──')
-
-        X_tr_raw = df_fold_tr[sel_feats].values.astype(float)
-        X_vl_raw = df_fold_vl[sel_feats].values.astype(float)
-
-        x_scaler = StandardScaler()
-        X_tr = x_scaler.fit_transform(X_tr_raw)[:, np.newaxis, :]
-        X_vl = x_scaler.transform(X_vl_raw)[:, np.newaxis, :]
-
-        model = ResNet1D().to(device)
-        best_state, criterion = _fit(
-            _loader(X_tr, y_sc_tr[tr_idx], True),
-            _loader(X_vl, y_sc_tr[vl_idx], False),
-            model, device,
-        )
-        model.load_state_dict(best_state)
-        _, ps, ts = _eval_epoch(model, _loader(X_vl, y_sc_tr[vl_idx], False), criterion, device)
-        preds = y_scaler.inverse_transform(ps.reshape(-1, 1)).ravel()
-        trues = y_scaler.inverse_transform(ts.reshape(-1, 1)).ravel()
-        mae = mean_absolute_error(trues, preds)
-        r2  = r2_score(trues, preds)
-        fold_maes.append(mae)
-        fold_r2s.append(r2)
-
-        # fold validation의 성별별 임계값 기반 ACC / AUC
-        sex_vl_val = df_fold_vl['PatientSex'].values
-        thr_m_f, thr_f_f, _ = _get_gender_thresholds(
-            y_train_all[tr_idx], df_train_all['PatientSex'].values[tr_idx]
-        )
-        vl_sample_thrs = np.where(sex_vl_val == 0, thr_m_f, thr_f_f)
-        vl_bin   = (trues >= vl_sample_thrs).astype(int)
-        vl_score = (preds - preds.min()) / (np.ptp(preds) + 1e-8)
-        vl_pred_bin = (preds >= vl_sample_thrs).astype(int)
-        fold_accs.append((vl_pred_bin == vl_bin).mean())
-        try:
-            from sklearn.metrics import roc_auc_score as _roc_auc
-            fold_aucs.append(_roc_auc(vl_bin, vl_score))
-        except Exception:
-            fold_aucs.append(float('nan'))
-
-    # 최종 모델: train 전체로 학습 → test 평가
+    fold_splits = list(kf.split(df_train_all))
+    fold_feat_lists = []
+    for fold_i, (tr_idx, vl_idx) in enumerate(fold_splits, 1):
+        sel = feature_selector(df_train_all.iloc[tr_idx])
+        fold_feat_lists.append(list(sel))
+        print(f'  ── [피처선택] Fold {fold_i}/5 → {len(sel)}개 ──')
     sel_feats_final = feature_selector(df_train_all)
-    X_tr_raw = df_train_all[sel_feats_final].values.astype(float)
-    X_te_raw = df_test_all[sel_feats_final].values.astype(float)
-    x_scaler_final = StandardScaler()
-    X_tr_final = x_scaler_final.fit_transform(X_tr_raw)[:, np.newaxis, :]
-    X_te_final = x_scaler_final.transform(X_te_raw)[:, np.newaxis, :]
 
-    model_final = ResNet1D().to(device)
-    best_state_final, criterion_final = _fit(
-        _loader(X_tr_final, y_sc_tr, True),
-        _loader(X_te_final, y_sc_te, False),
-        model_final, device,
-    )
-    model_final.load_state_dict(best_state_final)
-    _, ps_te, ts_te = _eval_epoch(
-        model_final, _loader(X_te_final, y_sc_te, False), criterion_final, device
-    )
-    test_preds = y_scaler.inverse_transform(ps_te.reshape(-1, 1)).ravel()
-    test_trues = y_scaler.inverse_transform(ts_te.reshape(-1, 1)).ravel()
+    for scale_name, scale_X, scale_y in SCALE_CONFIGS:
+        print(f'\n  ══ [ResNet1D | {scale_name}] scale_X={scale_X}, scale_y={scale_y} ══')
+        fold_maes, fold_r2s, fold_accs, fold_aucs = [], [], [], []
 
-    _save_md(fold_maes, fold_r2s, test_trues, test_preds, target, results_dir, label,
-             sex_arr=sex_test,
-             fold_accs=fold_accs,
-             fold_aucs=fold_aucs,
-             fold_feat_lists=fold_feat_lists,
-             final_feat_list=list(sel_feats_final))
-    _plot_oof(test_trues.tolist(), test_preds.tolist(), target, results_dir, label, sex_arr=sex_test)
+        for fold_i, (tr_idx, vl_idx) in enumerate(fold_splits, 1):
+            df_fold_tr = df_train_all.iloc[tr_idx]
+            df_fold_vl = df_train_all.iloc[vl_idx]
+            sel_feats  = fold_feat_lists[fold_i - 1]
+            y_fold_tr  = y_train_all[tr_idx]
+            y_fold_vl  = y_train_all[vl_idx]
+            print(f'    Fold {fold_i}/5 (train {len(tr_idx)}, val {len(vl_idx)}, feats {len(sel_feats)})')
+
+            X_tr_raw = df_fold_tr[sel_feats].values.astype(float)
+            X_vl_raw = df_fold_vl[sel_feats].values.astype(float)
+
+            if scale_X:
+                sc_X = StandardScaler().fit(X_tr_raw)
+                X_tr_raw = sc_X.transform(X_tr_raw)
+                X_vl_raw = sc_X.transform(X_vl_raw)
+
+            y_tr_s = y_fold_tr.copy()
+            y_vl_s = y_fold_vl.copy()
+            sc_y = None
+            if scale_y:
+                sc_y = StandardScaler().fit(y_fold_tr.reshape(-1, 1))
+                y_tr_s = sc_y.transform(y_fold_tr.reshape(-1, 1)).ravel()
+                y_vl_s = sc_y.transform(y_fold_vl.reshape(-1, 1)).ravel()
+
+            X_tr = X_tr_raw[:, np.newaxis, :]
+            X_vl = X_vl_raw[:, np.newaxis, :]
+
+            model = ResNet1D().to(device)
+            best_state, criterion = _fit(
+                _loader(X_tr, y_tr_s, True),
+                _loader(X_vl, y_vl_s, False),
+                model, device,
+            )
+            model.load_state_dict(best_state)
+            _, ps, ts = _eval_epoch(model, _loader(X_vl, y_vl_s, False), criterion, device)
+
+            if sc_y is not None:
+                ps = sc_y.inverse_transform(ps.reshape(-1, 1)).ravel()
+                ts = y_fold_vl
+
+            fold_maes.append(mean_absolute_error(ts, ps))
+            fold_r2s.append(r2_score(ts, ps))
+
+            sex_vl_val = df_fold_vl['PatientSex'].values
+            thr_m_f, thr_f_f, _ = _get_gender_thresholds(
+                y_train_all[tr_idx], df_train_all['PatientSex'].values[tr_idx]
+            )
+            vl_sample_thrs = np.where(sex_vl_val == 0, thr_m_f, thr_f_f)
+            vl_bin      = (ts >= vl_sample_thrs).astype(int)
+            vl_score    = (ps - ps.min()) / (np.ptp(ps) + 1e-8)
+            vl_pred_bin = (ps >= vl_sample_thrs).astype(int)
+            fold_accs.append((vl_pred_bin == vl_bin).mean())
+            try:
+                from sklearn.metrics import roc_auc_score as _roc_auc
+                fold_aucs.append(_roc_auc(vl_bin, vl_score))
+            except Exception:
+                fold_aucs.append(float('nan'))
+
+        # 최종 모델: train 전체로 학습 → test 평가
+        X_tr_raw = df_train_all[sel_feats_final].values.astype(float)
+        X_te_raw = df_test_all[sel_feats_final].values.astype(float)
+
+        if scale_X:
+            sc_X_final = StandardScaler().fit(X_tr_raw)
+            X_tr_raw = sc_X_final.transform(X_tr_raw)
+            X_te_raw = sc_X_final.transform(X_te_raw)
+
+        y_tr_s = y_train_all.copy()
+        y_te_s = y_test_all.copy()
+        sc_y_final = None
+        if scale_y:
+            sc_y_final = StandardScaler().fit(y_train_all.reshape(-1, 1))
+            y_tr_s = sc_y_final.transform(y_train_all.reshape(-1, 1)).ravel()
+            y_te_s = sc_y_final.transform(y_test_all.reshape(-1, 1)).ravel()
+
+        X_tr_final = X_tr_raw[:, np.newaxis, :]
+        X_te_final = X_te_raw[:, np.newaxis, :]
+
+        model_final = ResNet1D().to(device)
+        best_state_final, criterion_final = _fit(
+            _loader(X_tr_final, y_tr_s, True),
+            _loader(X_te_final, y_te_s, False),
+            model_final, device,
+        )
+        model_final.load_state_dict(best_state_final)
+        _, ps_te, ts_te = _eval_epoch(
+            model_final, _loader(X_te_final, y_te_s, False), criterion_final, device
+        )
+
+        if sc_y_final is not None:
+            ps_te = sc_y_final.inverse_transform(ps_te.reshape(-1, 1)).ravel()
+            ts_te = y_test_all
+
+        # noScale은 기존 파일명 유지 (5_generate_plots.py 호환)
+        if scale_name == 'noScale':
+            report_name = 'ResNet1D_Report.md'
+            plot_name   = 'ResNet1D_Results.png'
+        else:
+            report_name = f'ResNet1D_{scale_name}_Report.md'
+            plot_name   = f'ResNet1D_{scale_name}_Results.png'
+
+        _save_md(fold_maes, fold_r2s, ts_te, ps_te, target, results_dir,
+                 f'{label}_{scale_name}',
+                 sex_arr=sex_test,
+                 fold_accs=fold_accs, fold_aucs=fold_aucs,
+                 fold_feat_lists=fold_feat_lists,
+                 final_feat_list=list(sel_feats_final),
+                 report_name=report_name)
+        _plot_oof(ts_te.tolist(), ps_te.tolist(), target, results_dir,
+                  f'{label}_{scale_name}',
+                  sex_arr=sex_test, plot_name=plot_name)

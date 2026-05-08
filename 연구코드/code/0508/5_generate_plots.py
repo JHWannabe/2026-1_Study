@@ -99,21 +99,31 @@ def _parse_resnet1d(path: Path) -> dict:
     text = path.read_text(encoding='utf-8')
     result = {}
     m = re.search(
-        r'\|\s*\*\*Mean\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|',
+        r'\|\s*\*\*Mean\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|'
+        r'\s*\*\*([-0-9.]+)\*\*\s*\|\s*\*\*([-0-9.]+)\*\*',
         text)
     if m:
-        result['mae_mean'], result['r2_mean'] = float(m.group(1)), float(m.group(2))
+        result['mae_mean'], result['r2_mean'], result['acc_mean'], result['auc_mean'] = \
+            float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4))
     m = re.search(
-        r'\|\s*\*\*Std\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|',
+        r'\|\s*\*\*Std\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|\s*\*\*([-0-9.]+)\*\*\s*\|'
+        r'\s*\*\*([-0-9.]+)\*\*\s*\|\s*\*\*([-0-9.]+)\*\*',
         text)
     if m:
-        result['mae_std'], result['r2_std'] = float(m.group(1)), float(m.group(2))
+        result['mae_std'], result['r2_std'], result['acc_std'], result['auc_std'] = \
+            float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4))
     m = re.search(r'Test R² = \*\*([-0-9.]+)\*\*', text)
     if m:
         result['test_r2'] = float(m.group(1))
     m = re.search(r'Test MAE = \*\*([-0-9.]+)\*\*', text)
     if m:
         result['test_mae'] = float(m.group(1))
+    m = re.search(r'이진화 ACC[^\|]*\|\s*([-0-9.]+)', text)
+    if m:
+        result['test_acc'] = float(m.group(1))
+    m = re.search(r'이진화 AUC[^\|]*\|\s*([-0-9.]+)', text)
+    if m:
+        result['test_auc'] = float(m.group(1))
     return result
 
 
@@ -391,6 +401,61 @@ def plot_resnet1d_comparison(data: dict):
     print(f'  [저장] {out.name}')
 
 
+# ── 05: ResNet1D AUC / Accuracy 비교 ─────────────────────────
+def plot_resnet1d_auc_acc(data: dict):
+    method_labels = [label for _, label in METHODS_RESNET1D]
+    x = np.arange(len(METHODS_RESNET1D))
+    bw = 0.35
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), facecolor='white')
+    fig.suptitle('ResNet1D (1D CNN) AUC / Accuracy 비교 — 분석 방법 × 타겟',
+                 fontsize=14, fontweight='bold')
+
+    # AUC 비교 (5-Fold CV)
+    ax = axes[0]
+    for ti, target in enumerate(TARGETS):
+        aucs = [data[mk][target]['resnet1d'].get('auc_mean', np.nan) for mk, _ in METHODS_RESNET1D]
+        stds = [data[mk][target]['resnet1d'].get('auc_std',  0)      for mk, _ in METHODS_RESNET1D]
+        offset = (ti - 0.5) * bw
+        bars = ax.bar(x + offset, aucs, bw,
+                      color=COLORS[target], alpha=0.8,
+                      label=target,
+                      yerr=stds, capsize=4,
+                      error_kw=dict(ecolor='#555', elinewidth=1.2))
+        _bar_labels(ax, bars)
+
+    ax.axhline(0.5, color='gray', ls='--', lw=1, label='무작위 기준 (0.5)')
+    ax.axhline(0.7, color='#f39c12', ls=':', lw=1, label='양호 기준 (0.7)')
+    ax.set_xticks(x)
+    ax.set_xticklabels(method_labels, fontsize=10)
+    ax.legend(fontsize=9, loc='upper left')
+    _style_ax(ax, 'ResNet1D AUC (5-Fold CV Mean±Std)', 'AUC  (높을수록 우수)', ylim=(0.4, 1.05))
+
+    # Accuracy 비교 (5-Fold CV)
+    ax = axes[1]
+    for ti, target in enumerate(TARGETS):
+        accs = [data[mk][target]['resnet1d'].get('acc_mean', np.nan) for mk, _ in METHODS_RESNET1D]
+        stds = [data[mk][target]['resnet1d'].get('acc_std',  0)      for mk, _ in METHODS_RESNET1D]
+        offset = (ti - 0.5) * bw
+        bars = ax.bar(x + offset, accs, bw,
+                      color=COLORS[target], alpha=0.8,
+                      label=target,
+                      yerr=stds, capsize=4,
+                      error_kw=dict(ecolor='#555', elinewidth=1.2))
+        _bar_labels(ax, bars)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(method_labels, fontsize=10)
+    ax.legend(fontsize=10)
+    _style_ax(ax, 'ResNet1D Accuracy (5-Fold CV Mean±Std)', 'Accuracy  (높을수록 우수)', ylim=(0, 1.05))
+
+    plt.tight_layout()
+    out = FIG_DIR / '05_resnet1d_auc_acc.png'
+    fig.savefig(str(out), dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f'  [저장] {out.name}')
+
+
 # ── 메인 ─────────────────────────────────────────────────────
 def main():
     print('=' * 55)
@@ -406,8 +471,9 @@ def main():
     plot_logistic_comparison(data)
     plot_overview(data)
     plot_resnet1d_comparison(data)
+    plot_resnet1d_auc_acc(data)
 
-    print(f'\n[완료] 4개 그래프 → {FIG_DIR}')
+    print(f'\n[완료] 5개 그래프 → {FIG_DIR}')
     print('=' * 55)
 
 
