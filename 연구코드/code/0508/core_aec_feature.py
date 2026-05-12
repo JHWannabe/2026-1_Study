@@ -185,14 +185,14 @@ def run_logistic_regression(target: str) -> None:
     global FEATURES
     df = load_data()
     FEATURES[:] = list(AEC_FEATURES)
-    df[f'{target}_Binary'] = df.groupby('PatientSex')[target].transform(
-        lambda x: (x <= x.quantile(0.25)).astype(int)
+    SEX_THRESHOLDS = {0: 40.96, 1: 30.6}  # 0=M, 1=F
+    df[f'{target}_Binary'] = df.apply(
+        lambda row: int(row[target] <= SEX_THRESHOLDS[row['PatientSex']]), axis=1
     )
 
-    print(f'\n  {target} 하위 25% Thresholds by Sex:')
+    print(f'\n  {target} Thresholds by Sex:')
     for sex_code, label in [(0, 'Male'), (1, 'Female')]:
-        threshold = df[df['PatientSex'] == sex_code][target].quantile(0.25)
-        print(f'    {label}: {threshold:.4f}')
+        print(f'    {label}: {SEX_THRESHOLDS[sex_code]:.4f}')
 
     y_all = np.array(df[f'{target}_Binary'], dtype=int)
 
@@ -256,10 +256,7 @@ def run_logistic_regression(target: str) -> None:
     _plot_pr_curve(pd.Series(y_te), y_prob_te, test_auprc, target)
     _plot_calibration(pd.Series(y_te), y_prob_te, target)
 
-    thresholds = {
-        label: df[df['PatientSex'] == code][target].quantile(0.25)
-        for code, label in [(0, 'Male'), (1, 'Female')]
-    }
+    thresholds = {'Male': 40.96, 'Female': 30.6}
     df['Sex_Label'] = df['PatientSex'].map({0: 'Male', 1: 'Female'})
     _save_logistic_md(target, fold_acc, fold_auc, fold_auprc, fold_brier,
                       test_acc, test_auc, test_auprc, test_brier, test_cm,
@@ -452,7 +449,7 @@ def _save_logistic_md(target, fold_acc, fold_auc, fold_auprc, fold_brier,
         '',
         _sex_dist_table(df, 'PatientAge'),
         '',
-        '## 성별 하위 25% 임계값',
+        '## 성별 임계값 (M=40.96, F=30.6)',
         '',
         '| Sex | Threshold |',
         '|---|---|',
@@ -710,14 +707,14 @@ def run_logistic_regression_selected(target: str) -> None:
     RESULTS_DIR = RESULTS_DIR_SEL
     try:
         df = load_data()
-        df[f'{target}_Binary'] = df.groupby('PatientSex')[target].transform(
-            lambda x: (x <= x.quantile(0.25)).astype(int)
+        SEX_THRESHOLDS = {0: 40.96, 1: 30.6}  # 0=M, 1=F
+        df[f'{target}_Binary'] = df.apply(
+            lambda row: int(row[target] <= SEX_THRESHOLDS[row['PatientSex']]), axis=1
         )
 
-        print(f'\n  {target} 하위 25% Thresholds by Sex:')
+        print(f'\n  {target} Thresholds by Sex:')
         for sex_code, label in [(0, 'Male'), (1, 'Female')]:
-            threshold = df[df['PatientSex'] == sex_code][target].quantile(0.25)
-            print(f'    {label}: {threshold:.4f}')
+            print(f'    {label}: {SEX_THRESHOLDS[sex_code]:.4f}')
 
         y_all = np.array(df[f'{target}_Binary'], dtype=int)
         df_tr, df_te = train_test_split(df, test_size=0.2, random_state=42, stratify=y_all)
@@ -921,7 +918,7 @@ def _save_logistic_md_sel(target, fold_acc, fold_auc, fold_auprc, fold_brier,
         '',
         _sex_dist_table(df, 'PatientAge'),
         '',
-        '## 성별 하위 25% 임계값',
+        '## 성별 임계값 (M=40.96, F=30.6)',
         '',
         '| Sex | Threshold |',
         '|---|---|',
