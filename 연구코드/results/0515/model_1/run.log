@@ -1,0 +1,279 @@
+============================================================
+  MODEL 1 — Clinic Only  (2 cases)
+============================================================
+
+############################################################
+  [M1] CASE : no_scale  (scale_clinic=False)
+############################################################
+=======================================================
+5-Fold Cross-Validation  [scale_X=False]
+=======================================================
+
+── Fold 1/5 ──────────────────────────────
+  LR   — AUC: 0.8329  AUPRC: 0.3651  Brier: 0.1963  Acc: 0.6864  F1: 0.3670
+  RN1D — AUC: 0.8703  AUPRC: 0.4683  Brier: 0.2194  Acc: 0.6409  F1: 0.3577  (best ep=61)
+
+── Fold 2/5 ──────────────────────────────
+  LR   — AUC: 0.8095  AUPRC: 0.3370  Brier: 0.1612  Acc: 0.7591  F1: 0.3765
+  RN1D — AUC: 0.8444  AUPRC: 0.3939  Brier: 0.3022  Acc: 0.4955  F1: 0.2930  (best ep=89)
+
+── Fold 3/5 ──────────────────────────────
+  LR   — AUC: 0.7784  AUPRC: 0.3403  Brier: 0.2040  Acc: 0.6804  F1: 0.3137
+  RN1D — AUC: 0.7806  AUPRC: 0.3370  Brier: 0.0961  Acc: 0.8584  F1: 0.1622  (best ep=14)
+
+── Fold 4/5 ──────────────────────────────
+  LR   — AUC: 0.7233  AUPRC: 0.2329  Brier: 0.1830  Acc: 0.7306  F1: 0.3059
+  RN1D — AUC: 0.8415  AUPRC: 0.4100  Brier: 0.1840  Acc: 0.8265  F1: 0.4062  (best ep=1)
+
+── Fold 5/5 ──────────────────────────────
+  LR   — AUC: 0.8500  AUPRC: 0.5234  Brier: 0.1726  Acc: 0.7489  F1: 0.3956
+  RN1D — AUC: 0.8517  AUPRC: 0.3597  Brier: 0.1172  Acc: 0.8265  F1: 0.4412  (best ep=54)
+
+===========================================================================
+LR  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8329     0.3651     0.1963     0.6864     0.3670
+  2          0.8095     0.3370     0.1612     0.7591     0.3765
+  3          0.7784     0.3403     0.2040     0.6804     0.3137
+  4          0.7233     0.2329     0.1830     0.7306     0.3059
+  5          0.8500     0.5234     0.1726     0.7489     0.3956
+  ──────────────────────────────────────────────────────────
+  Mean       0.7988     0.3598     0.1834     0.7211     0.3517
+  ±Std       0.0448     0.0936     0.0155     0.0322     0.0355
+
+===========================================================================
+ResNet1D  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8703     0.4683     0.2194     0.6409     0.3577
+  2          0.8444     0.3939     0.3022     0.4955     0.2930
+  3          0.7806     0.3370     0.0961     0.8584     0.1622
+  4          0.8415     0.4100     0.1840     0.8265     0.4062
+  5          0.8517     0.3597     0.1172     0.8265     0.4412
+  ──────────────────────────────────────────────────────────
+  Mean       0.8377     0.3938     0.1838     0.7296     0.3321
+  ±Std       0.0303     0.0452     0.0740     0.1400     0.0984
+
+=================================================================
+  Statistical Comparison: [LR]  vs  [ResNet1D]
+  Paired t-test + Wilcoxon signed-rank  (n=5 folds)
+  Δ Mean = ResNet1D − LR  (양수 → ResNet1D가 우세)
+=================================================================
+  Metric          Mean1    Mean2    Δ Mean   t-stat      t p-val      W p-val     
+  -----------------------------------------------------------------------
+  AUC-ROC        0.7988   0.8377   +0.0389   -1.828     1.42e-01     6.25e-02     
+  AUPRC          0.3598   0.3938   +0.0340   -0.591     5.86e-01     6.25e-01     
+  Brier          0.1834   0.1838   +0.0004   -0.010     9.93e-01     1.00e+00     
+  Accuracy       0.7211   0.7296   +0.0085   -0.111     9.17e-01     8.12e-01     
+  F1             0.3517   0.3321   -0.0197    0.439     6.84e-01     8.12e-01     
+  ───────────────────────────────────────────────────────────────────────
+  *** p<0.001  ** p<0.01  * p<0.05  † p<0.10
+  주의: n=5 folds — 검정력이 낮으므로 방향성(Δ) 참고 병행 권장
+
+=======================================================
+Final Test Evaluation  (scale_X=False)
+=======================================================
+
+Logistic Regression — Test Set (Overall):
+  AUC: 0.7527  AUPRC: 0.3338  Brier: 0.1992  Acc: 0.7091  F1: 0.3333
+
+Logistic Regression — Test Set (By Sex):
+  [M] n=112  AUC: 0.7245  AUPRC: 0.4141  Brier: 0.2790  Acc: 0.5357  F1: 0.3333
+              precision    recall  f1-score   support
+
+      Normal       0.92      0.49      0.64        95
+  Sarcopenia       0.21      0.76      0.33        17
+
+    accuracy                           0.54       112
+   macro avg       0.57      0.63      0.49       112
+weighted avg       0.81      0.54      0.60       112
+
+  [F] n=163  AUC: 0.7682  AUPRC: 0.2498  Brier: 0.1444  Acc: 0.8282  F1: 0.3333
+              precision    recall  f1-score   support
+
+      Normal       0.96      0.85      0.90       150
+  Sarcopenia       0.24      0.54      0.33        13
+
+    accuracy                           0.83       163
+   macro avg       0.60      0.70      0.62       163
+weighted avg       0.90      0.83      0.86       163
+
+ResNet1D — training final model for 54 epochs on full CV set …
+
+ResNet1D — Test Set (Overall):
+  AUC: 0.7578  AUPRC: 0.3240  Brier: 0.3256  Acc: 0.4691  F1: 0.2700
+
+ResNet1D — Test Set (By Sex):
+  [M] n=112  AUC: 0.7152  AUPRC: 0.3669  Brier: 0.3875  Acc: 0.3839  F1: 0.3030
+              precision    recall  f1-score   support
+
+      Normal       0.93      0.29      0.45        95
+  Sarcopenia       0.18      0.88      0.30        17
+
+    accuracy                           0.38       112
+   macro avg       0.56      0.59      0.38       112
+weighted avg       0.82      0.38      0.43       112
+
+  [F] n=163  AUC: 0.7985  AUPRC: 0.3133  Brier: 0.2830  Acc: 0.5276  F1: 0.2376
+              precision    recall  f1-score   support
+
+      Normal       0.99      0.49      0.66       150
+  Sarcopenia       0.14      0.92      0.24        13
+
+    accuracy                           0.53       163
+   macro avg       0.56      0.71      0.45       163
+weighted avg       0.92      0.53      0.62       163
+
+
+Saved:
+  연구코드/results/0515/model_1/data_distribution.png
+  연구코드/results/0515/model_1/cv_roc_curves.png
+  연구코드/results/0515/model_1/cv_metric_distribution.png
+  연구코드/results/0515/model_1/confusion_matrices.png
+  연구코드/results/0515/model_1/confusion_matrices_by_sex.png
+  연구코드/results/0515/model_1/training_curves.png
+  연구코드/results/0515/model_1/test_roc_curves.png
+  연구코드/results/0515/model_1/test_roc_by_sex.png
+  연구코드/results/0515/model_1/calibration.png
+  연구코드/results/0515/model_1\no_scale/results.md
+
+############################################################
+  [M1] CASE : scale_clinic  (scale_clinic=True)
+############################################################
+=======================================================
+5-Fold Cross-Validation  [scale_X=True]
+=======================================================
+
+── Fold 1/5 ──────────────────────────────
+  LR   — AUC: 0.8342  AUPRC: 0.3660  Brier: 0.1961  Acc: 0.6864  F1: 0.3670
+  RN1D — AUC: 0.8569  AUPRC: 0.4305  Brier: 0.1990  Acc: 0.6818  F1: 0.3750  (best ep=2)
+
+── Fold 2/5 ──────────────────────────────
+  LR   — AUC: 0.8099  AUPRC: 0.3375  Brier: 0.1609  Acc: 0.7636  F1: 0.3810
+  RN1D — AUC: 0.8442  AUPRC: 0.4189  Brier: 0.1546  Acc: 0.7455  F1: 0.4043  (best ep=19)
+
+── Fold 3/5 ──────────────────────────────
+  LR   — AUC: 0.7778  AUPRC: 0.3408  Brier: 0.2042  Acc: 0.6758  F1: 0.3107
+  RN1D — AUC: 0.8077  AUPRC: 0.3580  Brier: 0.1933  Acc: 0.6895  F1: 0.3704  (best ep=106)
+
+── Fold 4/5 ──────────────────────────────
+  LR   — AUC: 0.7216  AUPRC: 0.2311  Brier: 0.1834  Acc: 0.7260  F1: 0.3023
+  RN1D — AUC: 0.7942  AUPRC: 0.3157  Brier: 0.1861  Acc: 0.7534  F1: 0.3721  (best ep=15)
+
+── Fold 5/5 ──────────────────────────────
+  LR   — AUC: 0.8511  AUPRC: 0.5248  Brier: 0.1722  Acc: 0.7489  F1: 0.3956
+  RN1D — AUC: 0.8551  AUPRC: 0.5568  Brier: 0.1732  Acc: 0.8128  F1: 0.4675  (best ep=1)
+
+===========================================================================
+LR  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8342     0.3660     0.1961     0.6864     0.3670
+  2          0.8099     0.3375     0.1609     0.7636     0.3810
+  3          0.7778     0.3408     0.2042     0.6758     0.3107
+  4          0.7216     0.2311     0.1834     0.7260     0.3023
+  5          0.8511     0.5248     0.1722     0.7489     0.3956
+  ──────────────────────────────────────────────────────────
+  Mean       0.7989     0.3600     0.1833     0.7201     0.3513
+  ±Std       0.0459     0.0945     0.0157     0.0342     0.0378
+
+===========================================================================
+ResNet1D  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8569     0.4305     0.1990     0.6818     0.3750
+  2          0.8442     0.4189     0.1546     0.7455     0.4043
+  3          0.8077     0.3580     0.1933     0.6895     0.3704
+  4          0.7942     0.3157     0.1861     0.7534     0.3721
+  5          0.8551     0.5568     0.1732     0.8128     0.4675
+  ──────────────────────────────────────────────────────────
+  Mean       0.8316     0.4160     0.1812     0.7366     0.3979
+  ±Std       0.0258     0.0818     0.0159     0.0477     0.0370
+
+=================================================================
+  Statistical Comparison: [LR]  vs  [ResNet1D]
+  Paired t-test + Wilcoxon signed-rank  (n=5 folds)
+  Δ Mean = ResNet1D − LR  (양수 → ResNet1D가 우세)
+=================================================================
+  Metric          Mean1    Mean2    Δ Mean   t-stat      t p-val      W p-val     
+  -----------------------------------------------------------------------
+  AUC-ROC        0.7989   0.8316   +0.0327   -2.912     4.36e-02     6.25e-02    *
+  AUPRC          0.3600   0.4160   +0.0560   -4.163     1.41e-02     6.25e-02    *
+  Brier          0.1833   0.1812   -0.0021    0.761     4.89e-01     8.12e-01     
+  Accuracy       0.7201   0.7366   +0.0165   -1.161     3.10e-01     4.38e-01     
+  F1             0.3513   0.3979   +0.0465   -3.580     2.32e-02     6.25e-02    *
+  ───────────────────────────────────────────────────────────────────────
+  *** p<0.001  ** p<0.01  * p<0.05  † p<0.10
+  주의: n=5 folds — 검정력이 낮으므로 방향성(Δ) 참고 병행 권장
+
+=======================================================
+Final Test Evaluation  (scale_X=True)
+=======================================================
+
+Logistic Regression — Test Set (Overall):
+  AUC: 0.7531  AUPRC: 0.3357  Brier: 0.1992  Acc: 0.7055  F1: 0.3306
+
+Logistic Regression — Test Set (By Sex):
+  [M] n=112  AUC: 0.7257  AUPRC: 0.4184  Brier: 0.2805  Acc: 0.5268  F1: 0.3291
+              precision    recall  f1-score   support
+
+      Normal       0.92      0.48      0.63        95
+  Sarcopenia       0.21      0.76      0.33        17
+
+    accuracy                           0.53       112
+   macro avg       0.56      0.62      0.48       112
+weighted avg       0.81      0.53      0.59       112
+
+  [F] n=163  AUC: 0.7687  AUPRC: 0.2505  Brier: 0.1433  Acc: 0.8282  F1: 0.3333
+              precision    recall  f1-score   support
+
+      Normal       0.96      0.85      0.90       150
+  Sarcopenia       0.24      0.54      0.33        13
+
+    accuracy                           0.83       163
+   macro avg       0.60      0.70      0.62       163
+weighted avg       0.90      0.83      0.86       163
+
+ResNet1D — training final model for 15 epochs on full CV set …
+
+ResNet1D — Test Set (Overall):
+  AUC: 0.7676  AUPRC: 0.3389  Brier: 0.2024  Acc: 0.7236  F1: 0.3448
+
+ResNet1D — Test Set (By Sex):
+  [M] n=112  AUC: 0.7412  AUPRC: 0.4243  Brier: 0.2753  Acc: 0.5982  F1: 0.3662
+              precision    recall  f1-score   support
+
+      Normal       0.93      0.57      0.71        95
+  Sarcopenia       0.24      0.76      0.37        17
+
+    accuracy                           0.60       112
+   macro avg       0.59      0.67      0.54       112
+weighted avg       0.83      0.60      0.65       112
+
+  [F] n=163  AUC: 0.7831  AUPRC: 0.2582  Brier: 0.1522  Acc: 0.8098  F1: 0.3111
+              precision    recall  f1-score   support
+
+      Normal       0.95      0.83      0.89       150
+  Sarcopenia       0.22      0.54      0.31        13
+
+    accuracy                           0.81       163
+   macro avg       0.59      0.69      0.60       163
+weighted avg       0.90      0.81      0.84       163
+
+
+Saved:
+  연구코드/results/0515/model_1/data_distribution.png
+  연구코드/results/0515/model_1/cv_roc_curves.png
+  연구코드/results/0515/model_1/cv_metric_distribution.png
+  연구코드/results/0515/model_1/confusion_matrices.png
+  연구코드/results/0515/model_1/confusion_matrices_by_sex.png
+  연구코드/results/0515/model_1/training_curves.png
+  연구코드/results/0515/model_1/test_roc_curves.png
+  연구코드/results/0515/model_1/test_roc_by_sex.png
+  연구코드/results/0515/model_1/calibration.png
+  연구코드/results/0515/model_1\scale_clinic/results.md
