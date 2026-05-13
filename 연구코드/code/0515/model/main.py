@@ -32,7 +32,7 @@ from config import DEVICE, RESULTS_DIR, RESULTS_DIR_CROSS, RESULTS_DIR_CROSS_2_2
 from data import (load_data, split_data,
                   load_data_with_aec, load_data_with_aec_unmatched, split_data_dual,
                   load_data_with_aec_meta, split_data_quad,
-                  aec_variant, print_stats)
+                  aec_variant, print_stats, describe_dataset)
 from cross_val import (run_cross_validation, run_cross_validation_cross,
                        run_cross_validation_cross3)
 from evaluate import evaluate_test, evaluate_test_cross, evaluate_test_cross3
@@ -406,6 +406,9 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
 def run_all_cases():
     """데이터 로드 후 Model 1/2/2_2/3을 병렬 실행하고 결과 비교 테이블·md 파일을 저장."""
     print(f"Device  : {DEVICE}\n")
+
+    # ── 전체 데이터셋 분포 분석 (split 전) ───────────────────
+    describe_dataset()
 
     # ── 공통 데이터 로드 ──────────────────────────────────────
     X,           y,       sex       = load_data()

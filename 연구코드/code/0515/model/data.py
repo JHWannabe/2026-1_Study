@@ -34,11 +34,13 @@ def _load_filtered_meta():
       1. kVp == 100 인 행만 사용
       2. 전체 대비 비율 MIN_MFR_RATIO 미만 소수 제조사 제거
 
-    Returns: PatientID·PatientAge·PatientSex·BMI·SMI·kVp·ManufacturerModelName 컬럼을 가진 DataFrame.
+    Returns: PatientID·PatientAge·PatientSex·BMI·SMI·kVp·ManufacturerModelName (+ TAMA if present) 컬럼을 가진 DataFrame.
     """
     df = pd.read_excel(DATA_PATH, sheet_name="metadata")
-    df = df[["PatientID", "PatientAge", "PatientSex", "BMI", "SMI",
-             "kVp", "ManufacturerModelName"]].dropna().reset_index(drop=True)
+    base_cols = ["PatientID", "PatientAge", "PatientSex", "BMI", "SMI",
+                 "kVp", "ManufacturerModelName"]
+    optional_cols = [c for c in ["TAMA"] if c in df.columns]
+    df = df[base_cols + optional_cols].dropna().reset_index(drop=True)
     df["PatientID"] = df["PatientID"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
 
     # kVp == 100 필터
@@ -256,6 +258,65 @@ def aec_variant(X_aec: np.ndarray, variant: str):
         return X_aec[mask], mask
 
     raise ValueError(f"Unknown AEC variant: {variant!r}")
+
+
+def describe_dataset() -> None:
+    """Train/Test split 전 전체 데이터셋의 분포를 출력한다.
+
+    출력 항목:
+      - 성비 (전체 / 남 / 여)
+      - Age, BMI, SMI, TAMA(있는 경우): mean, SD, P25, Median, P75 by sex
+      - Sarcopenia 유병률 by sex
+    """
+    df = _load_filtered_meta()
+    df = df.copy()
+    df["sarcopenia"] = df.apply(_make_label, axis=1)
+
+    sep = "=" * 66
+    print(f"\n{sep}")
+    print("  DATASET DESCRIPTION  (full dataset, before train/test split)")
+    print(sep)
+
+    n_total = len(df)
+    n_m = (df["PatientSex"] == "M").sum()
+    n_f = (df["PatientSex"] == "F").sum()
+    print(f"\n  Total  : {n_total}")
+    print(f"  Male   : {n_m:>5}  ({n_m / n_total * 100:.1f}%)")
+    print(f"  Female : {n_f:>5}  ({n_f / n_total * 100:.1f}%)")
+
+    cont_vars = [
+        ("Age   (years)", "PatientAge"),
+        ("BMI   (kg/m²)", "BMI"),
+        ("SMI   (cm²/m²)", "SMI"),
+    ]
+    if "TAMA" in df.columns:
+        cont_vars.append(("TAMA  (cm²)", "TAMA"))
+
+    hdr = f"  {'':14}  {'N':>5}  {'Mean':>8}  {'SD':>8}  {'P25':>8}  {'Median':>8}  {'P75':>8}"
+    div = "  " + "-" * (len(hdr) - 2)
+
+    groups = [("Overall", None), ("Male", "M"), ("Female", "F")]
+    for var_label, col in cont_vars:
+        print(f"\n  ── {var_label}")
+        print(hdr)
+        print(div)
+        for grp_label, sex_val in groups:
+            sub = df[col] if sex_val is None else df.loc[df["PatientSex"] == sex_val, col]
+            print(
+                f"  {grp_label:<14}  {len(sub):>5}  {sub.mean():>8.2f}  {sub.std():>8.2f}"
+                f"  {sub.quantile(0.25):>8.2f}  {sub.median():>8.2f}  {sub.quantile(0.75):>8.2f}"
+            )
+
+    print(f"\n  ── Sarcopenia prevalence  (M ≤ {SMI_THRESH_M} cm²/m²,  F ≤ {SMI_THRESH_F} cm²/m²)")
+    print(f"  {'':14}  {'N':>5}  {'Positive':>9}  {'Prevalence':>10}")
+    print(div)
+    for grp_label, sex_val in groups:
+        sub = df if sex_val is None else df[df["PatientSex"] == sex_val]
+        pos = int(sub["sarcopenia"].sum())
+        n   = len(sub)
+        print(f"  {grp_label:<14}  {n:>5}  {pos:>9}  {pos / n * 100:>9.1f}%")
+
+    print()
 
 
 def print_stats(y, sex):
