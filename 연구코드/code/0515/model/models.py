@@ -1,3 +1,20 @@
+"""
+PyTorch 모델 정의 및 학습·평가 유틸리티.
+
+모델 계층:
+  ResNet1D              — tabular 특징을 1D Conv로 처리 (M1/M2/M3 ResNet1D 베이스라인)
+  ClinAECCrossAttn      — Clinic + AEC Bidirectional Cross-Attention (M2)
+  ClinAECScanCrossAttn  — Clinic + Scanner(MFR Embedding) + AEC Cross-Attention (M3)
+
+서브모듈:
+  ResBlock1D            — Conv1d×2 + BN + ReLU 잔차 블록
+  ResNet1DEncoder       — AEC 시퀀스 → (B, n_tokens, d_model) 인코더
+  ScalarFeatureTokenizer — 각 scalar feature → d_model 독립 토큰
+  CrossAttentionBlock   — Pre-norm Cross-Attention + FFN + Dropout
+  MfrTokenizer          — ManufacturerModelName 정수 → Embedding 토큰
+
+build_* 함수는 모델·손실함수·옵티마이저·스케줄러를 묶어 반환한다.
+"""
 import numpy as np
 import torch
 import torch.nn as nn
@@ -7,6 +24,8 @@ from config import DEVICE, LR_RATE, EPOCHS, HIDDEN, N_BLOCKS, N_HEADS, BATCH_SIZ
 
 
 class TabularDataset(Dataset):
+    """단일 입력(X, y) 테이블 데이터를 float32/float32 텐서로 래핑하는 Dataset."""
+
     def __init__(self, X, y):
         self.X = torch.tensor(X, dtype=torch.float32)
         self.y = torch.tensor(y, dtype=torch.float32)
@@ -19,6 +38,8 @@ class TabularDataset(Dataset):
 
 
 class ResBlock1D(nn.Module):
+    """Conv1d(3) × 2 + BatchNorm + ReLU 잔차 블록. 입출력 채널 수 동일(ch)."""
+
     def __init__(self, ch):
         super().__init__()
         self.net = nn.Sequential(
@@ -34,6 +55,12 @@ class ResBlock1D(nn.Module):
 
 
 class ResNet1D(nn.Module):
+    """
+    1D 테이블 피처를 채널 차원으로 처리하는 ResNet 분류 모델.
+
+    stem → N_BLOCKS개 ResBlock → AdaptiveAvgPool → FC head → 스칼라 logit 출력.
+    """
+
     def __init__(self, hidden=HIDDEN, n_blocks=N_BLOCKS):
         super().__init__()
         self.stem = nn.Sequential(
@@ -52,23 +79,27 @@ class ResNet1D(nn.Module):
 
 
 def build_resnet(y_tr_arr):
+    """ResNet1D 모델·BCEWithLogitsLoss(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+    # sarcopenia(양성) 비율이 낮으므로 pos_weight = n_negative/n_positive 로 클래스 불균형 보정
     pos_w = torch.tensor(
         [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
     ).to(DEVICE)
     model = ResNet1D().to(DEVICE)
     crit  = nn.BCEWithLogitsLoss(pos_weight=pos_w)
-    opt   = torch.optim.Adam(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
+    opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
     return model, crit, opt, sched
 
 
 def make_loaders(X_tr, y_tr, X_val, y_val):
+    """TabularDataset으로 train DataLoader(shuffle=True)와 val DataLoader를 생성해 반환."""
     tr_dl  = DataLoader(TabularDataset(X_tr,  y_tr),  batch_size=BATCH_SIZE, shuffle=True)
     val_dl = DataLoader(TabularDataset(X_val, y_val), batch_size=BATCH_SIZE)
     return tr_dl, val_dl
 
 
 def train_one_epoch(model, loader, crit, opt):
+    """ResNet1D 모델을 한 epoch 학습하고 샘플 평균 loss를 반환."""
     model.train()
     total = 0.0
     for xb, yb in loader:
@@ -83,6 +114,7 @@ def train_one_epoch(model, loader, crit, opt):
 
 @torch.no_grad()
 def eval_loader(model, loader, crit):
+    """ResNet1D 모델을 평가 모드로 실행해 (avg_loss, probs, trues)를 반환."""
     model.eval()
     total, probs, trues = 0.0, [], []
     for xb, yb in loader:
@@ -114,7 +146,10 @@ class ResNet1DEncoder(nn.Module):
         # (B, n_aec) → (B, d_model, n_tokens) → (B, n_tokens, d_model)
         return self.pool(self.blocks(self.stem(x.unsqueeze(1)))).transpose(1, 2)
 
+
 class DualDataset(Dataset):
+    """Clinic(X_clin)·AEC(X_aec)·레이블(y) 쌍을 float32 텐서로 래핑하는 Dataset."""
+
     def __init__(self, X_clin, X_aec, y):
         self.X_clin = torch.tensor(X_clin, dtype=torch.float32)
         self.X_aec  = torch.tensor(X_aec,  dtype=torch.float32)
@@ -128,6 +163,7 @@ class DualDataset(Dataset):
 
 
 def make_dual_loaders(X_clin_tr, X_aec_tr, y_tr, X_clin_val, X_aec_val, y_val):
+    """DualDataset으로 train/val DataLoader를 생성해 반환."""
     tr_dl  = DataLoader(DualDataset(X_clin_tr, X_aec_tr, y_tr),  batch_size=BATCH_SIZE, shuffle=True)
     val_dl = DataLoader(DualDataset(X_clin_val, X_aec_val, y_val), batch_size=BATCH_SIZE)
     return tr_dl, val_dl
@@ -253,6 +289,7 @@ class ClinAECCrossAttn(nn.Module):
 
 def build_cross_attn(y_tr_arr, num_clinical_features=3, num_aec_features=256,
                      aec_encoder='resnet'):
+    """ClinAECCrossAttn 모델·BCEWithLogitsLoss(pos_weight)·Adam·CosineAnnealingLR을 생성해 반환."""
     pos_w = torch.tensor(
         [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
     ).to(DEVICE)
@@ -270,10 +307,11 @@ def build_cross_attn(y_tr_arr, num_clinical_features=3, num_aec_features=256,
 # ── Clinic + Scanner + AEC Model (Model 3) ───────────────────
 
 class QuadDataset(Dataset):
-    def __init__(self, X_clin, X_aec, X_scan_kvp, X_scan_mfr, y):
+    """Clinic·AEC·ManufacturerModelName·레이블을 텐서로 래핑하는 Dataset."""
+
+    def __init__(self, X_clin, X_aec, X_scan_mfr, y):
         self.X_clin     = torch.tensor(X_clin,     dtype=torch.float32)
         self.X_aec      = torch.tensor(X_aec,      dtype=torch.float32)
-        self.X_scan_kvp = torch.tensor(X_scan_kvp, dtype=torch.float32)
         self.X_scan_mfr = torch.tensor(X_scan_mfr, dtype=torch.long)
         self.y          = torch.tensor(y,           dtype=torch.float32)
 
@@ -281,63 +319,54 @@ class QuadDataset(Dataset):
         return len(self.y)
 
     def __getitem__(self, idx):
-        return (self.X_clin[idx], self.X_aec[idx],
-                self.X_scan_kvp[idx], self.X_scan_mfr[idx], self.y[idx])
+        return (self.X_clin[idx], self.X_aec[idx], self.X_scan_mfr[idx], self.y[idx])
 
 
-def make_quad_loaders(X_clin_tr, X_aec_tr, X_scan_kvp_tr, X_scan_mfr_tr, y_tr,
-                      X_clin_val, X_aec_val, X_scan_kvp_val, X_scan_mfr_val, y_val):
+def make_quad_loaders(X_clin_tr, X_aec_tr, X_scan_mfr_tr, y_tr,
+                      X_clin_val, X_aec_val, X_scan_mfr_val, y_val):
+    """QuadDataset으로 train/val DataLoader를 생성해 반환."""
     tr_dl  = DataLoader(
-        QuadDataset(X_clin_tr, X_aec_tr, X_scan_kvp_tr, X_scan_mfr_tr, y_tr),
+        QuadDataset(X_clin_tr, X_aec_tr, X_scan_mfr_tr, y_tr),
         batch_size=BATCH_SIZE, shuffle=True,
     )
     val_dl = DataLoader(
-        QuadDataset(X_clin_val, X_aec_val, X_scan_kvp_val, X_scan_mfr_val, y_val),
+        QuadDataset(X_clin_val, X_aec_val, X_scan_mfr_val, y_val),
         batch_size=BATCH_SIZE,
     )
     return tr_dl, val_dl
 
 
-class ScannerTokenizer(nn.Module):
-    """
-    kVp (연속형 스칼라) + ManufacturerModelName (1-indexed 정수) → (B, 2, d_model) 토큰.
-    두 스캐너 파라미터를 독립된 프로젝션으로 각각 토큰화한다.
-    """
+class MfrTokenizer(nn.Module):
+    """ManufacturerModelName (1-indexed 정수) → (B, 1, d_model) 토큰."""
     def __init__(self, n_manufacturers: int, d_model: int):
         super().__init__()
-        self.kvp_proj = nn.Linear(1, d_model)
-        # padding_idx=0 : 인코딩이 1-indexed이므로 0은 실제로 등장하지 않음
-        self.mfr_emb  = nn.Embedding(n_manufacturers + 1, d_model, padding_idx=0)
-        self.feature_embedding = nn.Parameter(torch.randn(1, 2, d_model) * 0.02)
+        self.mfr_emb = nn.Embedding(n_manufacturers + 1, d_model, padding_idx=0)
+        self.feature_embedding = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
 
-    def forward(self, kvp: torch.Tensor, mfr: torch.Tensor) -> torch.Tensor:
-        kvp_tok = self.kvp_proj(kvp.unsqueeze(-1)).unsqueeze(1)  # (B, 1, d_model)
-        mfr_tok = self.mfr_emb(mfr).unsqueeze(1)                # (B, 1, d_model)
-        tokens  = torch.cat([kvp_tok, mfr_tok], dim=1)          # (B, 2, d_model)
-        return tokens + self.feature_embedding
+    def forward(self, mfr: torch.Tensor) -> torch.Tensor:
+        return self.mfr_emb(mfr).unsqueeze(1) + self.feature_embedding  # (B, 1, d_model)
 
 
 class ClinAECScanCrossAttn(nn.Module):
     """
-    Clinic (Age, Sex, BMI) + Scanner (kVp, ManufacturerModelName) + AEC 결합 모델.
+    Clinic (Age, Sex, BMI) + Scanner (ManufacturerModelName) + AEC 결합 모델.
 
     임상 데이터와 스캐너 파라미터를 별도 토크나이저로 처리한 뒤
     Bidirectional Cross-Attention으로 AEC와 결합한다.
 
-      clinical_tokenizer : ScalarFeatureTokenizer(3)   → (B, 3, d_model)
-      scanner_tokenizer  : ScannerTokenizer(n_mfr)     → (B, 2, d_model)
-      [clinical | scanner] concat                      → (B, 5, d_model)
-      aec_encoder        : ResNet1DEncoder             → (B, n_aec_tokens, d_model)
+      clinical_tokenizer : ScalarFeatureTokenizer(3)  → (B, 3, d_model)
+      mfr_tokenizer      : MfrTokenizer(n_mfr)        → (B, 1, d_model)
+      [clinical | mfr] concat                         → (B, 4, d_model)
+      aec_encoder        : ResNet1DEncoder            → (B, n_aec_tokens, d_model)
 
     Cross-Attention (bidirectional):
-      cs_to_aec : [clin|scan] → Query,  AEC → Key/Value
-      aec_to_cs : AEC         → Query,  [clin|scan] → Key/Value
+      cs_to_aec : [clin|mfr] → Query,  AEC → Key/Value
+      aec_to_cs : AEC        → Query,  [clin|mfr] → Key/Value
     """
     def __init__(
         self,
         n_manufacturers:       int,
         num_clinical_features: int   = 3,
-        num_aec_features:      int   = 256,
         d_model:               int   = HIDDEN,
         num_heads:             int   = N_HEADS,
         ff_hidden_dim:         int   = 128,
@@ -347,7 +376,7 @@ class ClinAECScanCrossAttn(nn.Module):
     ):
         super().__init__()
         self.clinical_tokenizer = ScalarFeatureTokenizer(num_clinical_features, d_model)
-        self.scanner_tokenizer  = ScannerTokenizer(n_manufacturers, d_model)
+        self.mfr_tokenizer      = MfrTokenizer(n_manufacturers, d_model)
         self.aec_encoder        = ResNet1DEncoder(d_model=d_model, n_tokens=n_aec_tokens)
 
         self.cs_to_aec = CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
@@ -360,12 +389,11 @@ class ClinAECScanCrossAttn(nn.Module):
         )
 
     def forward(self, clinical_x: torch.Tensor, aec_x: torch.Tensor,
-                kvp_x: torch.Tensor, mfr_x: torch.Tensor,
-                return_attention: bool = False):
-        c_tokens  = self.clinical_tokenizer(clinical_x)     # (B, 3, d_model)
-        s_tokens  = self.scanner_tokenizer(kvp_x, mfr_x)   # (B, 2, d_model)
-        a_tokens  = self.aec_encoder(aec_x)                 # (B, n_aec_tokens, d_model)
-        cs_tokens = torch.cat([c_tokens, s_tokens], dim=1)  # (B, 5, d_model)
+                mfr_x: torch.Tensor, return_attention: bool = False):
+        c_tokens  = self.clinical_tokenizer(clinical_x)    # (B, 3, d_model)
+        s_tokens  = self.mfr_tokenizer(mfr_x)              # (B, 1, d_model)
+        a_tokens  = self.aec_encoder(aec_x)                # (B, n_aec_tokens, d_model)
+        cs_tokens = torch.cat([c_tokens, s_tokens], dim=1) # (B, 4, d_model)
 
         if return_attention:
             cs_fused, attn_cs2a = self.cs_to_aec(cs_tokens, a_tokens, return_attention=True)
@@ -382,13 +410,13 @@ class ClinAECScanCrossAttn(nn.Module):
         return logits
 
 
-def build_cross_attn3(y_tr_arr, n_manufacturers, num_aec_features=256):
+def build_cross_attn3(y_tr_arr, n_manufacturers):
+    """ClinAECScanCrossAttn 모델·BCEWithLogitsLoss(pos_weight)·Adam·CosineAnnealingLR을 생성해 반환."""
     pos_w = torch.tensor(
         [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
     ).to(DEVICE)
     model = ClinAECScanCrossAttn(
         n_manufacturers=n_manufacturers,
-        num_aec_features=num_aec_features,
     ).to(DEVICE)
     crit  = nn.BCEWithLogitsLoss(pos_weight=pos_w)
     opt   = torch.optim.Adam(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
@@ -397,15 +425,13 @@ def build_cross_attn3(y_tr_arr, n_manufacturers, num_aec_features=256):
 
 
 def train_cross3_epoch(model, loader, crit, opt):
+    """ClinAECScanCrossAttn 모델을 한 epoch 학습하고 샘플 평균 loss를 반환."""
     model.train()
     total = 0.0
-    for xc, xa, xkv, xmfr, yb in loader:
-        xc, xa, xkv, xmfr, yb = (
-            xc.to(DEVICE), xa.to(DEVICE),
-            xkv.to(DEVICE), xmfr.to(DEVICE), yb.to(DEVICE),
-        )
+    for xc, xa, xmfr, yb in loader:
+        xc, xa, xmfr, yb = xc.to(DEVICE), xa.to(DEVICE), xmfr.to(DEVICE), yb.to(DEVICE)
         opt.zero_grad()
-        loss = crit(model(xc, xa, xkv, xmfr), yb)
+        loss = crit(model(xc, xa, xmfr), yb)
         loss.backward()
         opt.step()
         total += loss.item() * len(yb)
@@ -414,14 +440,12 @@ def train_cross3_epoch(model, loader, crit, opt):
 
 @torch.no_grad()
 def eval_cross3_loader(model, loader, crit):
+    """ClinAECScanCrossAttn 모델을 평가 모드로 실행해 (avg_loss, probs, trues)를 반환."""
     model.eval()
     total, probs, trues = 0.0, [], []
-    for xc, xa, xkv, xmfr, yb in loader:
-        xc, xa, xkv, xmfr, yb = (
-            xc.to(DEVICE), xa.to(DEVICE),
-            xkv.to(DEVICE), xmfr.to(DEVICE), yb.to(DEVICE),
-        )
-        logits = model(xc, xa, xkv, xmfr)
+    for xc, xa, xmfr, yb in loader:
+        xc, xa, xmfr, yb = xc.to(DEVICE), xa.to(DEVICE), xmfr.to(DEVICE), yb.to(DEVICE)
+        logits = model(xc, xa, xmfr)
         total += crit(logits, yb).item() * len(yb)
         probs.extend(torch.sigmoid(logits).cpu().numpy())
         trues.extend(yb.cpu().numpy())
@@ -429,6 +453,7 @@ def eval_cross3_loader(model, loader, crit):
 
 
 def train_cross_epoch(model, loader, crit, opt):
+    """ClinAECCrossAttn 모델을 한 epoch 학습하고 샘플 평균 loss를 반환."""
     model.train()
     total = 0.0
     for xc, xa, yb in loader:
@@ -443,6 +468,7 @@ def train_cross_epoch(model, loader, crit, opt):
 
 @torch.no_grad()
 def eval_cross_loader(model, loader, crit):
+    """ClinAECCrossAttn 모델을 평가 모드로 실행해 (avg_loss, probs, trues)를 반환."""
     model.eval()
     total, probs, trues = 0.0, [], []
     for xc, xa, yb in loader:

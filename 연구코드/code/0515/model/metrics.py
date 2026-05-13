@@ -1,3 +1,10 @@
+"""
+CV 성능 지표 계산·출력 유틸리티.
+
+  group_metrics        — 단일 fold/split 에서 5개 지표(Acc·AUC·AUPRC·Brier·F1) dict 계산
+  print_cv_summary     — fold별 결과 콘솔 테이블 + mean±std 출력
+  compare_fold_metrics — Paired t-test + Wilcoxon signed-rank 통계 검정 (n=5 folds)
+"""
 import numpy as np
 from scipy import stats
 from sklearn.metrics import (
@@ -9,6 +16,7 @@ from config import N_FOLDS
 
 
 def group_metrics(y_true, y_pred, y_prob):
+    """ACC·AUC·AUPRC·Brier·F1 dict 반환. 클래스가 1개뿐이면 AUC 관련 항목은 nan."""
     if len(np.unique(y_true)) < 2:
         return dict(
             acc=accuracy_score(y_true, y_pred),
@@ -27,6 +35,7 @@ def group_metrics(y_true, y_pred, y_prob):
 
 
 def print_cv_summary(name, fold_metrics):
+    """fold별 성능 지표(AUC·AUPRC·Brier·Acc·F1)와 mean±std를 콘솔 테이블로 출력."""
     aucs   = [m["auc"]   for m in fold_metrics]
     auprcs = [m["auprc"] for m in fold_metrics]
     briers = [m["brier"] for m in fold_metrics]
