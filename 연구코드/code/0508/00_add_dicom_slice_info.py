@@ -5,9 +5,10 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-DICOM_BASE = r"D:/영상제공/신촌/신촌_axial"
-EXCEL_PATH = r"C:/Users/jhjun/OneDrive/Desktop/2026-1_Study/연구코드/data/신촌_merged_features.xlsx"
-CHECKPOINT_PATH = r"C:/Users/jhjun/OneDrive/Desktop/2026-1_Study/연구코드/data/.dicom_checkpoint.json"
+SITE = "강남"
+DICOM_BASE = rf"D:/영상제공/{SITE}/{SITE}_axial"
+EXCEL_PATH = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\강남\{SITE}_metadata_features.xlsx"
+CHECKPOINT_PATH = rf"C:/Users/jhjun/OneDrive/Desktop/2026-1_Study/연구코드/data/.dicom_checkpoint.json"
 BATCH_SIZE = 100
 
 # 폴더명에서 PatientID → 폴더 경로 매핑 빌드
