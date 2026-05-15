@@ -1,10 +1,9 @@
 """
 데이터 로드·전처리·분할 유틸리티.
 
-공통 전처리 파이프라인 (_load_filtered_meta):
-  1. kVp == 100 필터  — 방사선량 조건 표준화 (다른 kVp는 AEC 신호 특성이 다름)
-  2. 소수 제조사 제거  — MIN_MFR_RATIO 미만 ManufacturerModelName 제거
-  3. SMI 이진 레이블  — 성별 기준 임계값 적용 (sarcopenia=1, normal=0)
+모든 품질 필터(kVp, 소수 제조사, 연령, IQR, AEC 이상치)는
+build_dataset.py에서 사전 적용되어 merged_features.xlsx에 저장된다.
+이 모듈은 Excel에서 필요한 컬럼을 읽고 레이블을 생성하며 train/test를 분할한다.
 
 모델별 로드 함수:
   Model 1       : load_data()
@@ -19,7 +18,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-from config import DATA_PATH, AEC_SHEET, AEC_LEN, SEED, TEST_SIZE, SMI_THRESH_M, SMI_THRESH_F, AEC_SHUFFLE_SEED, MIN_MFR_RATIO
+from config import DATA_PATH, AEC_SHEET, AEC_LEN, SEED, TEST_SIZE, SMI_THRESH_M, SMI_THRESH_F, AEC_SHUFFLE_SEED
 
 
 def _make_label(row):
@@ -28,15 +27,19 @@ def _make_label(row):
     return 1 if row["SMI"] <= thresh else 0
 
 
-def _load_filtered_meta():
-    """
-    모든 모델에 공통 적용되는 metadata 전처리:
-      1. kVp == 100 인 행만 사용
-      2. 전체 대비 비율 MIN_MFR_RATIO 미만 소수 제조사 제거
-      3. 18세 미만 제거
+_filtered_meta_cache: pd.DataFrame | None = None
 
-    Returns: PatientID·PatientAge·PatientSex·BMI·SMI·kVp·ManufacturerModelName (+ TAMA if present) 컬럼을 가진 DataFrame.
+
+def _load_filtered_meta():
+    """metadata 시트를 읽어 모델 학습에 필요한 컬럼을 반환한다.
+
+    필터링은 build_dataset.py에서 사전 적용되므로 컬럼 선택만 수행한다.
+    모듈 내 캐시를 사용해 동일 데이터를 반복 로드하지 않는다.
     """
+    global _filtered_meta_cache
+    if _filtered_meta_cache is not None:
+        return _filtered_meta_cache.copy()
+
     df = pd.read_excel(DATA_PATH, sheet_name="metadata")
     base_cols = ["PatientID", "PatientAge", "PatientSex", "BMI", "SMI",
                  "kVp", "ManufacturerModelName"]
@@ -44,37 +47,12 @@ def _load_filtered_meta():
     df = df[base_cols + optional_cols].dropna().reset_index(drop=True)
     df["PatientID"] = df["PatientID"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
 
-    # kVp == 100 필터
-    before_kvp = len(df)
-    df = df[df["kVp"] == 100].reset_index(drop=True)
-    print(f"[Filter] kVp==100: {len(df)} / {before_kvp} samples retained")
-
-    # 소수 제조사 제거
-    mfr_counts = df["ManufacturerModelName"].value_counts()
-    total = len(df)
-    major_mfr = mfr_counts[mfr_counts / total >= MIN_MFR_RATIO].index
-    minor_mfr = mfr_counts[mfr_counts / total < MIN_MFR_RATIO]
-    if len(minor_mfr) > 0:
-        removed = total - df["ManufacturerModelName"].isin(major_mfr).sum()
-        print(f"[Filter] Minor manufacturer filter (threshold={MIN_MFR_RATIO:.0%}):")
-        for mname, cnt in minor_mfr.items():
-            print(f"  - '{mname}': {cnt} samples ({cnt/total:.1%}) → removed")
-        print(f"  Total removed: {removed} samples  ({total} → {total - removed})")
-        df = df[df["ManufacturerModelName"].isin(major_mfr)].reset_index(drop=True)
-
-    # 18세 미만 제거
-    before_age = len(df)
-    df = df[df["PatientAge"] >= 18].reset_index(drop=True)
-    removed_age = before_age - len(df)
-    if removed_age:
-        print(f"[Filter] Age < 18: {removed_age} samples removed  ({before_age} -> {len(df)})")
-
-    return df
+    _filtered_meta_cache = df
+    return df.copy()
 
 
 def load_data():
-    """임상 데이터(Age, Sex, BMI)와 sarcopenia 레이블을 로드해 (X, y, sex)를 반환.
-    kVp==100 필터 및 소수 제조사 제거가 공통 적용된다."""
+    """임상 데이터(Age, Sex, BMI)와 sarcopenia 레이블을 로드해 (X, y, sex)를 반환."""
     df = _load_filtered_meta()
 
     df["label"]   = df.apply(_make_label, axis=1)
@@ -99,8 +77,7 @@ def split_data(X, y, sex):
 
 
 def load_data_with_aec():
-    """Clinic + AEC 결합 데이터 로드. PatientID 기준 inner join.
-    kVp==100 필터 및 소수 제조사 제거가 공통 적용된다."""
+    """Clinic + AEC 결합 데이터 로드. PatientID 기준 inner join."""
     df_meta = _load_filtered_meta()
 
     df_aec = pd.read_excel(DATA_PATH, sheet_name=AEC_SHEET)
@@ -108,13 +85,6 @@ def load_data_with_aec():
     aec_cols = [c for c in df_aec.columns if c != "PatientID"][:AEC_LEN]
 
     df = pd.merge(df_meta, df_aec[["PatientID"] + aec_cols], on="PatientID", how="inner").reset_index(drop=True)
-
-    # AEC 전체 값이 단일값인 샘플 제거 (std == 0)
-    before_flat = len(df)
-    flat_mask = df[aec_cols].std(axis=1) == 0
-    if flat_mask.any():
-        print(f"[Filter] Flat AEC removed: {flat_mask.sum()} samples ({before_flat} → {before_flat - flat_mask.sum()})")
-    df = df[~flat_mask].reset_index(drop=True)
 
     df["label"]   = df.apply(_make_label, axis=1)
     df["sex_enc"] = (df["PatientSex"] == "M").astype(int)
@@ -156,7 +126,6 @@ def split_data_dual(X_clin, X_aec, y, sex):
 def load_data_with_aec_meta():
     """
     Clinic (Age, Sex, BMI) + Scanner (kVp, ManufacturerModelName) + AEC 결합.
-    kVp==100 필터 및 소수 제조사 제거가 공통 적용된다.
 
     Returns
     -------
@@ -172,13 +141,6 @@ def load_data_with_aec_meta():
     aec_cols = [c for c in df_aec.columns if c != "PatientID"][:AEC_LEN]
 
     df = pd.merge(df_meta, df_aec[["PatientID"] + aec_cols], on="PatientID", how="inner").reset_index(drop=True)
-
-    # AEC 전체 값이 단일값인 샘플 제거 (std == 0)
-    before_flat = len(df)
-    flat_mask = df[aec_cols].std(axis=1) == 0
-    if flat_mask.any():
-        print(f"[Filter] Flat AEC removed: {flat_mask.sum()} samples ({before_flat} → {before_flat - flat_mask.sum()})")
-    df = df[~flat_mask].reset_index(drop=True)
 
     df["label"]   = df.apply(_make_label, axis=1)
     df["sex_enc"] = (df["PatientSex"] == "M").astype(int)
