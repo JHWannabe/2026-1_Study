@@ -1,8 +1,8 @@
 """
 시각화 및 Markdown 보고서 생성 유틸리티.
 
-Model 1 (Clinic Only):
-  save_all()       — 8종 PNG + results.md 를 out_dir에 일괄 저장
+Model 1 (Clinic Only, LR):
+  save_all()       — 7종 PNG + results.md 를 out_dir에 일괄 저장
 
 Model 2/2_2/3 (Clinic + AEC / Scanner):
   save_all_cross() — 8종 PNG + results.md 를 out_dir에 일괄 저장
@@ -38,74 +38,68 @@ _dir1: str = RESULTS_DIR
 _dir2: str = RESULTS_DIR_CROSS
 
 
-def plot_roc_curves(lr_roc_folds, rn_roc_folds):
-    """LR·ResNet1D의 fold별 ROC 커브를 나란히 그려 cv_roc_curves.png로 저장."""
-    fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(14, 6))
-    fig.suptitle(f"ROC Curves — {N_FOLDS}-Fold CV", fontsize=13, fontweight="bold")
+def plot_roc_curves(lr_roc_folds):
+    """LR의 fold별 ROC 커브를 그려 cv_roc_curves.png로 저장."""
+    fig, ax = plt.subplots(figsize=(7, 6))
+    fig.suptitle(f"ROC Curves — {N_FOLDS}-Fold CV  [Logistic Regression]",
+                 fontsize=13, fontweight="bold")
 
-    for ax, roc_data, name in [
-        (ax_l, lr_roc_folds, "Logistic Regression"),
-        (ax_r, rn_roc_folds, "ResNet1D"),
-    ]:
-        for i, d in enumerate(roc_data):
-            ax.plot(d["fpr"], d["tpr"], color=FOLD_COLORS[i], alpha=0.7,
-                    label=f"Fold {i+1} (AUC={d['auc']:.3f})")
-        ax.plot([0, 1], [0, 1], "k--", alpha=0.3)
-        ax.set_title(name); ax.set_xlabel("FPR"); ax.set_ylabel("TPR")
-        ax.legend(fontsize=8)
+    for i, d in enumerate(lr_roc_folds):
+        ax.plot(d["fpr"], d["tpr"], color=FOLD_COLORS[i], alpha=0.7,
+                label=f"Fold {i+1} (AUC={d['auc']:.3f})")
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.3)
+    ax.set_title("Logistic Regression"); ax.set_xlabel("FPR"); ax.set_ylabel("TPR")
+    ax.legend(fontsize=8)
 
     fig.tight_layout()
     fig.savefig(f"{_dir1}/cv_roc_curves.png", dpi=150, bbox_inches="tight")
 
 
-def plot_metric_distribution(lr_cv, rn_cv):
-    """LR·ResNet1D의 fold별 AUC·Accuracy·F1 박스플롯을 그려 cv_metric_distribution.png로 저장."""
+def plot_metric_distribution(lr_cv):
+    """LR의 fold별 AUC·Accuracy·F1 박스플롯을 그려 cv_metric_distribution.png로 저장."""
     fig, axes = plt.subplots(1, 3, figsize=(14, 6))
-    fig.suptitle(f"{N_FOLDS}-Fold CV Metric Distribution", fontsize=13, fontweight="bold")
+    fig.suptitle(f"{N_FOLDS}-Fold CV Metric Distribution  [Logistic Regression]",
+                 fontsize=13, fontweight="bold")
 
     for ax, (mname, mkey) in zip(axes, [("AUC-ROC", "auc"), ("Accuracy", "acc"), ("F1-Score", "f1")]):
         lr_vals = [m[mkey] for m in lr_cv]
-        rn_vals = [m[mkey] for m in rn_cv]
-        all_vals = lr_vals + rn_vals
-        bp = ax.boxplot([lr_vals, rn_vals], labels=["Log. Reg.", "ResNet1D"],
+        bp = ax.boxplot([lr_vals], labels=["Log. Reg."],
                         patch_artist=True,
                         medianprops=dict(color="black", linewidth=2))
-        for patch, color in zip(bp["boxes"], ["steelblue", "tomato"]):
-            patch.set_facecolor(color); patch.set_alpha(0.6)
-        margin = max((max(all_vals) - min(all_vals)) * 0.4, 0.05)
-        ax.set_ylim(max(0.0, min(all_vals) - margin), min(1.0, max(all_vals) + margin))
+        for patch in bp["boxes"]:
+            patch.set_facecolor("steelblue"); patch.set_alpha(0.6)
+        margin = max((max(lr_vals) - min(lr_vals)) * 0.4, 0.05)
+        ax.set_ylim(max(0.0, min(lr_vals) - margin), min(1.0, max(lr_vals) + margin))
         ax.set_title(mname); ax.set_ylabel(mname)
 
     fig.tight_layout()
     fig.savefig(f"{_dir1}/cv_metric_distribution.png", dpi=150, bbox_inches="tight")
 
 
-def plot_confusion_matrices(y_te, lr_pred, rn_true_te, rn_pred_te, sex_te):
-    """LR·ResNet1D의 test set confusion matrix(전체 + 성별)를 confusion_matrices.png로 저장."""
+def plot_confusion_matrices(y_te, lr_pred, sex_te):
+    """LR의 test set confusion matrix(전체 + 성별)를 confusion_matrices.png로 저장."""
     sexes = [s for s in ["M", "F"] if (sex_te == s).any()]
     n_cols = 1 + len(sexes)
 
-    fig, axes = plt.subplots(2, n_cols, figsize=(5 * n_cols, 10))
-    fig.suptitle("Confusion Matrices — Test Set", fontsize=13, fontweight="bold")
+    fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5))
+    if n_cols == 1:
+        axes = [axes]
+    fig.suptitle("Confusion Matrices — Test Set  [Logistic Regression]",
+                 fontsize=13, fontweight="bold")
 
-    for row, (model_name, yt_all, yp_all) in enumerate([
-        ("Logistic Regression", y_te, lr_pred),
-        ("ResNet1D", rn_true_te, rn_pred_te),
-    ]):
-        combos = [
-            (f"{model_name} — Overall", yt_all, yp_all),
-            *[(f"{model_name} — {'Male' if s == 'M' else 'Female'} (n={(sex_te == s).sum()})",
-               yt_all[sex_te == s], yp_all[sex_te == s]) for s in sexes],
-        ]
-        for col, (title, yt, yp) in enumerate(combos):
-            ax = axes[row, col]
-            cm = confusion_matrix(yt, yp)
-            sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax,
-                        xticklabels=["Normal", "Sarco"],
-                        yticklabels=["Normal", "Sarco"], cbar=False)
-            ax.set_title(title)
-            ax.set_ylabel("True")
-            ax.set_xlabel("Pred")
+    combos = [
+        ("Logistic Regression — Overall", y_te, lr_pred),
+        *[(f"Logistic Regression — {'Male' if s == 'M' else 'Female'} (n={(sex_te == s).sum()})",
+           y_te[sex_te == s], lr_pred[sex_te == s]) for s in sexes],
+    ]
+    for ax, (title, yt, yp) in zip(axes, combos):
+        cm = confusion_matrix(yt, yp)
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax,
+                    xticklabels=["Normal", "Sarco"],
+                    yticklabels=["Normal", "Sarco"], cbar=False)
+        ax.set_title(title)
+        ax.set_ylabel("True")
+        ax.set_xlabel("Pred")
 
     fig.tight_layout()
     fig.savefig(f"{_dir1}/confusion_matrices.png", dpi=150, bbox_inches="tight")
@@ -142,16 +136,14 @@ def plot_training_curves(rn_histories, med_epoch):
     fig.savefig(f"{_dir1}/training_curves.png", dpi=150, bbox_inches="tight")
 
 
-def plot_test_roc(y_te, lr_prob, rn_true_te, rn_prob_te):
-    """LR·ResNet1D의 test set 전체 ROC 커브를 test_roc_curves.png로 저장."""
+def plot_test_roc(y_te, lr_prob):
+    """LR의 test set 전체 ROC 커브를 test_roc_curves.png로 저장."""
     fig, ax = plt.subplots(figsize=(7, 6))
-    fig.suptitle("Test Set ROC Curves", fontsize=13, fontweight="bold")
+    fig.suptitle("Test Set ROC Curves  [Logistic Regression]", fontsize=13, fontweight="bold")
 
-    for name, yt, yprob, col in [("Log. Reg.", y_te, lr_prob, "steelblue"),
-                                   ("ResNet1D", rn_true_te, rn_prob_te, "tomato")]:
-        fpr, tpr, _ = roc_curve(yt, yprob)
-        auc = roc_auc_score(yt, yprob)
-        ax.plot(fpr, tpr, color=col, linewidth=2, label=f"{name} (AUC={auc:.3f})")
+    fpr, tpr, _ = roc_curve(y_te, lr_prob)
+    auc = roc_auc_score(y_te, lr_prob)
+    ax.plot(fpr, tpr, color="steelblue", linewidth=2, label=f"Log. Reg. (AUC={auc:.3f})")
 
     ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
     ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
@@ -159,55 +151,53 @@ def plot_test_roc(y_te, lr_prob, rn_true_te, rn_prob_te):
     fig.savefig(f"{_dir1}/test_roc_curves.png", dpi=150, bbox_inches="tight")
 
 
-def plot_confusion_matrices_by_sex(y_te, lr_pred, rn_true_te, rn_pred_te, sex_te):
-    """LR·ResNet1D의 성별 분리 confusion matrix 4개를 confusion_matrices_by_sex.png로 저장."""
+def plot_confusion_matrices_by_sex(y_te, lr_pred, sex_te):
+    """LR의 성별 분리 confusion matrix를 confusion_matrices_by_sex.png로 저장."""
     sexes = [s for s in ["M", "F"] if (sex_te == s).any()]
-    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
-    fig.suptitle("Confusion Matrices by Sex — Test Set", fontsize=13, fontweight="bold")
+    fig, axes = plt.subplots(1, len(sexes), figsize=(5 * len(sexes), 5))
+    if len(sexes) == 1:
+        axes = [axes]
+    fig.suptitle("Confusion Matrices by Sex — Test Set  [Logistic Regression]",
+                 fontsize=13, fontweight="bold")
 
-    combos = (
-        [(f"LR — {'Male' if s=='M' else 'Female'} (n={(sex_te==s).sum()})",
-          y_te[sex_te==s], lr_pred[sex_te==s]) for s in sexes] +
-        [(f"ResNet1D — {'Male' if s=='M' else 'Female'} (n={(sex_te==s).sum()})",
-          rn_true_te[sex_te==s], rn_pred_te[sex_te==s]) for s in sexes]
-    )
-    for col, (title, yt, yp) in enumerate(combos):
+    combos = [
+        (f"LR — {'Male' if s=='M' else 'Female'} (n={(sex_te==s).sum()})",
+         y_te[sex_te==s], lr_pred[sex_te==s]) for s in sexes
+    ]
+    for ax, (title, yt, yp) in zip(axes, combos):
         cm = confusion_matrix(yt, yp)
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=axes[col],
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax,
                     xticklabels=["Normal", "Sarco"],
                     yticklabels=["Normal", "Sarco"], cbar=False)
-        axes[col].set_title(title); axes[col].set_ylabel("True"); axes[col].set_xlabel("Pred")
+        ax.set_title(title); ax.set_ylabel("True"); ax.set_xlabel("Pred")
 
     fig.tight_layout()
     fig.savefig(f"{_dir1}/confusion_matrices_by_sex.png", dpi=150, bbox_inches="tight")
 
 
-def plot_test_roc_by_sex(y_te, lr_prob, rn_true_te, rn_prob_te, sex_te):
-    """LR·ResNet1D의 test set 성별 분리 ROC 커브를 test_roc_by_sex.png로 저장."""
-    sex_colors = {"M": ("steelblue", "royalblue"), "F": ("tomato", "crimson")}
+def plot_test_roc_by_sex(y_te, lr_prob, sex_te):
+    """LR의 test set 성별 분리 ROC 커브를 test_roc_by_sex.png로 저장."""
+    sex_colors = {"M": "steelblue", "F": "tomato"}
     sex_labels = {"M": "Male", "F": "Female"}
 
-    fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(14, 6))
-    fig.suptitle("Test Set ROC Curves by Sex", fontsize=13, fontweight="bold")
+    fig, ax = plt.subplots(figsize=(7, 6))
+    fig.suptitle("Test Set ROC Curves by Sex  [Logistic Regression]",
+                 fontsize=13, fontweight="bold")
 
-    for ax, name, yt_all, yprob_all in [
-        (ax_l, "Logistic Regression", y_te, lr_prob),
-        (ax_r, "ResNet1D", rn_true_te, rn_prob_te),
-    ]:
-        for s, (col, _) in sex_colors.items():
-            mask = sex_te == s
-            if not mask.any():
-                continue
-            yt, ypr = yt_all[mask], yprob_all[mask]
-            if len(np.unique(yt)) < 2:
-                continue
-            fpr, tpr, _ = roc_curve(yt, ypr)
-            auc = roc_auc_score(yt, ypr)
-            ax.plot(fpr, tpr, color=col, linewidth=2,
-                    label=f"{sex_labels[s]} (n={mask.sum()}, AUC={auc:.3f})")
+    for s, col in sex_colors.items():
+        mask = sex_te == s
+        if not mask.any():
+            continue
+        yt, ypr = y_te[mask], lr_prob[mask]
+        if len(np.unique(yt)) < 2:
+            continue
+        fpr, tpr, _ = roc_curve(yt, ypr)
+        auc = roc_auc_score(yt, ypr)
+        ax.plot(fpr, tpr, color=col, linewidth=2,
+                label=f"{sex_labels[s]} (n={mask.sum()}, AUC={auc:.3f})")
 
-        ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
-        ax.set_title(name); ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
+    ax.set_title("Logistic Regression"); ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
 
     fig.tight_layout()
     fig.savefig(f"{_dir1}/test_roc_by_sex.png", dpi=150, bbox_inches="tight")
@@ -389,20 +379,17 @@ def _cm_block(y_true, y_pred):
     )
 
 
-def save_report_md(lr_cv, rn_cv,
+def save_report_md(lr_cv,
                    X_cv, y_cv, sex_cv,
                    X_te, y_te, lr_pred, lr_prob,
-                   rn_true_te, rn_pred_te, rn_prob_te,
-                   sex_te, rn_histories, med_epoch):
-    """LR·ResNet1D CV 결과와 test set 성능 지표를 results.md 파일로 저장."""
+                   sex_te):
+    """LR CV 결과와 test set 성능 지표를 results.md 파일로 저장 (Model 1 전용)."""
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    auc_arr = np.array([h["val_auc"] for h in rn_histories])
-    best_val_aucs = auc_arr.max(axis=1)
 
     lines = [
         f"# SMI Binary Classification — Results",
         f"",
-        f"Generated: {now}  |  {N_FOLDS}-Fold CV  |  ResNet1D median best epoch: {med_epoch}",
+        f"Generated: {now}  |  {N_FOLDS}-Fold CV  |  Model 1 (Clinic Only, LR)",
         f"",
         f"---",
         f"",
@@ -424,13 +411,6 @@ def save_report_md(lr_cv, rn_cv,
         f"",
         _cv_table(lr_cv),
         f"",
-        f"### ResNet1D",
-        f"",
-        _cv_table(rn_cv),
-        f"",
-        f"ResNet1D best val AUC per fold: " +
-        ", ".join(f"Fold{i+1}={v:.4f}" for i, v in enumerate(best_val_aucs)),
-        f"",
         f"---",
         f"",
         f"## 2. Test Set Performance",
@@ -444,37 +424,18 @@ def save_report_md(lr_cv, rn_cv,
         f" | {brier_score_loss(y_te, lr_prob):.4f}"
         f" | {accuracy_score(y_te, lr_pred):.4f}"
         f" | {f1_score(y_te, lr_pred, zero_division=0):.4f} |",
-        f"| ResNet1D  | {roc_auc_score(rn_true_te, rn_prob_te):.4f}"
-        f" | {average_precision_score(rn_true_te, rn_prob_te):.4f}"
-        f" | {brier_score_loss(rn_true_te, rn_prob_te):.4f}"
-        f" | {accuracy_score(rn_true_te, rn_pred_te):.4f}"
-        f" | {f1_score(rn_true_te, rn_pred_te, zero_division=0):.4f} |",
         f"",
         f"### By Sex",
-        f"",
-        f"#### Logistic Regression",
         f"",
         f"| Sex | n | AUC-ROC | AUPRC | Brier | Accuracy | F1 |",
         f"|-----|--:|--------:|------:|------:|---------:|---:|",
         _sex_rows(y_te, lr_pred, lr_prob, sex_te),
         f"",
-        f"#### ResNet1D",
-        f"",
-        f"| Sex | n | AUC-ROC | AUPRC | Brier | Accuracy | F1 |",
-        f"|-----|--:|--------:|------:|------:|---------:|---:|",
-        _sex_rows(rn_true_te, rn_pred_te, rn_prob_te, sex_te),
-        f"",
         f"---",
         f"",
-        f"## 3. Confusion Matrices (Test Set)",
-        f"",
-        f"### Logistic Regression",
+        f"## 3. Confusion Matrix (Test Set)",
         f"",
         _cm_block(y_te, lr_pred),
-        f"",
-        f"### ResNet1D",
-        f"",
-        _cm_block(rn_true_te, rn_pred_te),
         f"",
         f"---",
         f"",
@@ -483,11 +444,10 @@ def save_report_md(lr_cv, rn_cv,
         f"| File | Description |",
         f"|------|-------------|",
         f"| `data_distribution.png` | Train/Test class·Age·BMI distributions |",
-        f"| `cv_roc_curves.png` | Per-fold ROC curves (LR & ResNet1D) |",
+        f"| `cv_roc_curves.png` | Per-fold ROC curves (LR) |",
         f"| `cv_metric_distribution.png` | Boxplot of AUC / Acc / F1 across folds |",
         f"| `confusion_matrices.png` | Test-set confusion matrices (overall + by sex) |",
-        f"| `training_curves.png` | ResNet1D loss & AUC training curves (mean ± std) |",
-        f"| `test_roc_curves.png` | Final test-set ROC curves (overall) |",
+        f"| `test_roc_curves.png` | Final test-set ROC curve (overall) |",
         f"| `test_roc_by_sex.png` | Final test-set ROC curves split by sex |",
         f"| `calibration.png` | Calibration plot (reliability diagram) + Precision-Recall curve |",
     ]
@@ -535,40 +495,33 @@ def plot_calibration(entries, out_path, n_bins=10):
     plt.close(fig)
 
 
-def save_all(lr_roc_folds, rn_roc_folds, lr_cv, rn_cv,
+def save_all(lr_roc_folds, lr_cv,
              X_cv, y_cv, sex_cv,
-             X_te, y_te, lr_pred, rn_true_te, rn_pred_te,
-             rn_histories, med_epoch, lr_prob, rn_prob_te,
+             X_te, y_te, lr_pred, lr_prob,
              sex_te, out_dir=None):
-    """Model 1용 시각화 전체(8종 png)와 results.md를 out_dir에 저장."""
+    """Model 1용 시각화 전체(7종 png)와 results.md를 out_dir에 저장."""
     global _dir1
     _dir1 = out_dir or RESULTS_DIR
     plot_data_distribution(X_cv, y_cv, sex_cv, X_te, y_te, sex_te)
-    plot_roc_curves(lr_roc_folds, rn_roc_folds)
-    plot_metric_distribution(lr_cv, rn_cv)
-    plot_confusion_matrices(y_te, lr_pred, rn_true_te, rn_pred_te, sex_te)
-    plot_training_curves(rn_histories, med_epoch)
-    plot_test_roc(y_te, lr_prob, rn_true_te, rn_prob_te)
-    plot_test_roc_by_sex(y_te, lr_prob, rn_true_te, rn_prob_te, sex_te)
+    plot_roc_curves(lr_roc_folds)
+    plot_metric_distribution(lr_cv)
+    plot_confusion_matrices(y_te, lr_pred, sex_te)
+    plot_test_roc(y_te, lr_prob)
+    plot_test_roc_by_sex(y_te, lr_prob, sex_te)
     plot_calibration(
-        [
-            ("Log. Reg.", y_te,       lr_prob,    "steelblue"),
-            ("ResNet1D",  rn_true_te, rn_prob_te, "tomato"),
-        ],
+        [("Log. Reg.", y_te, lr_prob, "steelblue")],
         out_path=f"{_dir1}/calibration.png",
     )
 
     print("\nSaved:")
     for fname in ["data_distribution", "cv_roc_curves", "cv_metric_distribution",
-                  "confusion_matrices", "training_curves",
-                  "test_roc_curves", "test_roc_by_sex", "calibration"]:
-        print(f"  {RESULTS_DIR}/{fname}.png")
+                  "confusion_matrices", "test_roc_curves", "test_roc_by_sex", "calibration"]:
+        print(f"  {_dir1}/{fname}.png")
 
-    save_report_md(lr_cv, rn_cv,
+    save_report_md(lr_cv,
                    X_cv, y_cv, sex_cv,
                    X_te, y_te, lr_pred, lr_prob,
-                   rn_true_te, rn_pred_te, rn_prob_te,
-                   sex_te, rn_histories, med_epoch)
+                   sex_te)
 
 
 # ── Model 2 : Clinic + AEC Cross-Attention ───────────────────
@@ -580,39 +533,34 @@ def _save_cross(fname, fig):
     plt.close(fig)
 
 
-def plot_cv_roc_cross(lr_roc_folds, ca_roc_folds):
-    """LR·CrossAttn의 fold별 ROC 커브를 나란히 그려 cv_roc_curves.png로 저장."""
-    fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(14, 6))
-    fig.suptitle(f"CV ROC Curves — {N_FOLDS}-Fold", fontsize=13, fontweight="bold")
-    for ax, roc_data, name in [
-        (ax_l, lr_roc_folds, "Logistic Regression"),
-        (ax_r, ca_roc_folds, "CrossAttn"),
-    ]:
-        for i, d in enumerate(roc_data):
-            ax.plot(d["fpr"], d["tpr"], color=FOLD_COLORS[i], alpha=0.7,
-                    label=f"Fold {i+1} (AUC={d['auc']:.3f})")
-        ax.plot([0, 1], [0, 1], "k--", alpha=0.3)
-        ax.set_title(name); ax.set_xlabel("FPR"); ax.set_ylabel("TPR")
-        ax.legend(fontsize=8)
+def plot_cv_roc_cross(ca_roc_folds):
+    """CrossAttn의 fold별 ROC 커브를 그려 cv_roc_curves.png로 저장."""
+    fig, ax = plt.subplots(figsize=(7, 6))
+    fig.suptitle(f"CV ROC Curves — {N_FOLDS}-Fold  [CrossAttn]",
+                 fontsize=13, fontweight="bold")
+    for i, d in enumerate(ca_roc_folds):
+        ax.plot(d["fpr"], d["tpr"], color=FOLD_COLORS[i], alpha=0.7,
+                label=f"Fold {i+1} (AUC={d['auc']:.3f})")
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.3)
+    ax.set_title("CrossAttn"); ax.set_xlabel("FPR"); ax.set_ylabel("TPR")
+    ax.legend(fontsize=8)
     _save_cross("cv_roc_curves.png", fig)
 
 
-def plot_cv_metric_cross(lr_cv, ca_cv):
-    """LR·CrossAttn의 fold별 AUC·Accuracy·F1 박스플롯을 그려 cv_metric_distribution.png로 저장."""
+def plot_cv_metric_cross(ca_cv):
+    """CrossAttn의 fold별 AUC·Accuracy·F1 박스플롯을 그려 cv_metric_distribution.png로 저장."""
     fig, axes = plt.subplots(1, 3, figsize=(14, 5))
     fig.suptitle(f"CV Metric Distribution ({N_FOLDS}-Fold)",
                  fontsize=13, fontweight="bold")
     for ax, (mname, mkey) in zip(axes, [("AUC-ROC", "auc"), ("Accuracy", "acc"), ("F1-Score", "f1")]):
-        lr_vals = [m[mkey] for m in lr_cv]
         ca_vals = [m[mkey] for m in ca_cv]
-        all_vals = lr_vals + ca_vals
-        bp = ax.boxplot([lr_vals, ca_vals], labels=["Log. Reg.", "CrossAttn"],
+        bp = ax.boxplot([ca_vals], labels=["CrossAttn"],
                         patch_artist=True,
                         medianprops=dict(color="black", linewidth=2))
-        for patch, color in zip(bp["boxes"], ["steelblue", "tomato"]):
-            patch.set_facecolor(color); patch.set_alpha(0.6)
-        margin = max((max(all_vals) - min(all_vals)) * 0.4, 0.05)
-        ax.set_ylim(max(0.0, min(all_vals) - margin), min(1.0, max(all_vals) + margin))
+        for patch in bp["boxes"]:
+            patch.set_facecolor("tomato"); patch.set_alpha(0.6)
+        margin = max((max(ca_vals) - min(ca_vals)) * 0.4, 0.05)
+        ax.set_ylim(max(0.0, min(ca_vals) - margin), min(1.0, max(ca_vals) + margin))
         ax.set_title(mname); ax.set_ylabel(mname)
     _save_cross("cv_metric_distribution.png", fig)
 
@@ -641,77 +589,67 @@ def plot_training_curves_cross(ca_histories, med_epoch):
     _save_cross("training_curves.png", fig)
 
 
-def plot_test_roc_cross(y_te, lr_prob, ca_true_te, ca_prob_te):
-    """LR·CrossAttn의 test set 전체 ROC 커브를 test_roc_curves.png로 저장."""
+def plot_test_roc_cross(ca_true_te, ca_prob_te):
+    """CrossAttn의 test set 전체 ROC 커브를 test_roc_curves.png로 저장."""
     fig, ax = plt.subplots(figsize=(7, 6))
     fig.suptitle("Test Set ROC Curves", fontsize=13, fontweight="bold")
-    for name, yt, yprob, col in [
-        ("Log. Reg.", y_te,      lr_prob,    "steelblue"),
-        ("CrossAttn", ca_true_te, ca_prob_te, "tomato"),
-    ]:
-        fpr, tpr, _ = roc_curve(yt, yprob)
-        auc = roc_auc_score(yt, yprob)
-        ax.plot(fpr, tpr, color=col, linewidth=2, label=f"{name} (AUC={auc:.3f})")
+    fpr, tpr, _ = roc_curve(ca_true_te, ca_prob_te)
+    auc = roc_auc_score(ca_true_te, ca_prob_te)
+    ax.plot(fpr, tpr, color="tomato", linewidth=2, label=f"CrossAttn (AUC={auc:.3f})")
     ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
     ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
     _save_cross("test_roc_curves.png", fig)
 
 
-def plot_test_roc_by_sex_cross(y_te, lr_prob, ca_true_te, ca_prob_te, sex_te):
-    """LR·CrossAttn의 test set 성별 분리 ROC 커브를 test_roc_by_sex.png로 저장."""
-    sex_colors = {"M": ("steelblue", "royalblue"), "F": ("tomato", "crimson")}
+def plot_test_roc_by_sex_cross(ca_true_te, ca_prob_te, sex_te):
+    """CrossAttn의 test set 성별 분리 ROC 커브를 test_roc_by_sex.png로 저장."""
+    sex_colors = {"M": "tomato", "F": "steelblue"}
     sex_labels = {"M": "Male", "F": "Female"}
-    fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(14, 6))
-    fig.suptitle("Test Set ROC Curves by Sex", fontsize=13, fontweight="bold")
-    for ax, name, yt_all, yprob_all in [
-        (ax_l, "Logistic Regression", y_te,       lr_prob),
-        (ax_r, "CrossAttn",           ca_true_te,  ca_prob_te),
-    ]:
-        for s, (col, _) in sex_colors.items():
-            mask = sex_te == s
-            if not mask.any(): continue
-            yt, ypr = yt_all[mask], yprob_all[mask]
-            if len(np.unique(yt)) < 2: continue
-            fpr, tpr, _ = roc_curve(yt, ypr)
-            auc = roc_auc_score(yt, ypr)
-            ax.plot(fpr, tpr, color=col, linewidth=2,
-                    label=f"{sex_labels[s]} (n={mask.sum()}, AUC={auc:.3f})")
-        ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
-        ax.set_title(name); ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
+    fig, ax = plt.subplots(figsize=(7, 6))
+    fig.suptitle("Test Set ROC Curves by Sex  [CrossAttn]", fontsize=13, fontweight="bold")
+    for s, col in sex_colors.items():
+        mask = sex_te == s
+        if not mask.any():
+            continue
+        yt, ypr = ca_true_te[mask], ca_prob_te[mask]
+        if len(np.unique(yt)) < 2:
+            continue
+        fpr, tpr, _ = roc_curve(yt, ypr)
+        auc = roc_auc_score(yt, ypr)
+        ax.plot(fpr, tpr, color=col, linewidth=2,
+                label=f"{sex_labels[s]} (n={mask.sum()}, AUC={auc:.3f})")
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
+    ax.set_title("CrossAttn"); ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
     _save_cross("test_roc_by_sex.png", fig)
 
 
-def plot_confusion_matrices_cross(y_te, lr_pred, ca_true_te, ca_pred_te, sex_te):
-    """LR·CrossAttn의 test set confusion matrix(전체 + 성별)를 confusion_matrices.png로 저장."""
+def plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te):
+    """CrossAttn의 test set confusion matrix(전체 + 성별)를 confusion_matrices.png로 저장."""
     sexes = [s for s in ["M", "F"] if (sex_te == s).any()]
-    n_sex = len(sexes)
-    fig, axes = plt.subplots(2, n_sex + 1, figsize=(5 * (n_sex + 1), 10))
-    fig.suptitle("Confusion Matrices — Test Set", fontsize=13, fontweight="bold")
+    n_cols = 1 + len(sexes)
+    fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5))
+    if n_cols == 1:
+        axes = [axes]
+    fig.suptitle("Confusion Matrices — Test Set  [CrossAttn]", fontsize=13, fontweight="bold")
 
-    for row, (model_name, yt_all, yp_all, cmap) in enumerate([
-        ("Log. Reg.",  y_te,       lr_pred,    "Blues"),
-        ("CrossAttn",  ca_true_te, ca_pred_te, "Reds"),
-    ]):
-        combos = [
-            (f"{model_name} — Overall", yt_all, yp_all),
-            *[(f"{model_name} — {'Male' if s=='M' else 'Female'} (n={(sex_te==s).sum()})",
-               yt_all[sex_te==s], yp_all[sex_te==s]) for s in sexes],
-        ]
-        for col, (title, yt, yp) in enumerate(combos):
-            ax = axes[row, col]
-            cm = confusion_matrix(yt, yp)
-            sns.heatmap(cm, annot=True, fmt="d", cmap=cmap, ax=ax,
-                        xticklabels=["Normal", "Sarco"],
-                        yticklabels=["Normal", "Sarco"], cbar=False)
-            ax.set_title(title); ax.set_ylabel("True"); ax.set_xlabel("Pred")
+    combos = [
+        ("CrossAttn — Overall", ca_true_te, ca_pred_te),
+        *[(f"CrossAttn — {'Male' if s=='M' else 'Female'} (n={(sex_te==s).sum()})",
+           ca_true_te[sex_te==s], ca_pred_te[sex_te==s]) for s in sexes],
+    ]
+    for ax, (title, yt, yp) in zip(axes, combos):
+        cm = confusion_matrix(yt, yp)
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Reds", ax=ax,
+                    xticklabels=["Normal", "Sarco"],
+                    yticklabels=["Normal", "Sarco"], cbar=False)
+        ax.set_title(title); ax.set_ylabel("True"); ax.set_xlabel("Pred")
     _save_cross("confusion_matrices.png", fig)
 
 
-def _save_report_md_cross(lr_cv, ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
-                           lr_pred, lr_prob,
+def _save_report_md_cross(ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
                            ca_pred_te, ca_prob_te, ca_true_te,
                            sex_te, ca_histories, med_epoch):
-    """LR·CrossAttn CV 결과와 test set 성능 지표를 results.md 파일로 저장 (Model 2/2_2/3 공용)."""
+    """CrossAttn CV 결과와 test set 성능 지표를 results.md 파일로 저장 (Model 2/2_2/3 공용)."""
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     auc_arr = np.array([h["val_auc"] for h in ca_histories])
     best_val_aucs = auc_arr.max(axis=1)
@@ -737,10 +675,6 @@ def _save_report_md_cross(lr_cv, ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
         "",
         "## 1. Cross-Validation Summary",
         "",
-        "### Logistic Regression",
-        "",
-        _cv_table(lr_cv),
-        "",
         "### CrossAttn",
         "",
         _cv_table(ca_cv),
@@ -756,11 +690,6 @@ def _save_report_md_cross(lr_cv, ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
         "",
         "| Model | AUC-ROC | AUPRC | Brier | Accuracy | F1 |",
         "|-------|--------:|------:|------:|---------:|---:|",
-        f"| Log. Reg. | {roc_auc_score(y_te, lr_prob):.4f}"
-        f" | {average_precision_score(y_te, lr_prob):.4f}"
-        f" | {brier_score_loss(y_te, lr_prob):.4f}"
-        f" | {accuracy_score(y_te, lr_pred):.4f}"
-        f" | {f1_score(y_te, lr_pred, zero_division=0):.4f} |",
         f"| CrossAttn | {roc_auc_score(ca_true_te, ca_prob_te):.4f}"
         f" | {average_precision_score(ca_true_te, ca_prob_te):.4f}"
         f" | {brier_score_loss(ca_true_te, ca_prob_te):.4f}"
@@ -769,14 +698,6 @@ def _save_report_md_cross(lr_cv, ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
         "",
         "### By Sex",
         "",
-        "#### Logistic Regression",
-        "",
-        "| Sex | n | AUC-ROC | AUPRC | Brier | Accuracy | F1 |",
-        "|-----|--:|--------:|------:|------:|---------:|---:|",
-        _sex_rows(y_te, lr_pred, lr_prob, sex_te),
-        "",
-        "#### CrossAttn",
-        "",
         "| Sex | n | AUC-ROC | AUPRC | Brier | Accuracy | F1 |",
         "|-----|--:|--------:|------:|------:|---------:|---:|",
         _sex_rows(ca_true_te, ca_pred_te, ca_prob_te, sex_te),
@@ -784,12 +705,6 @@ def _save_report_md_cross(lr_cv, ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
         "---",
         "",
         "## 3. Confusion Matrix (Test Set)",
-        "",
-        "### Logistic Regression",
-        "",
-        _cm_block(y_te, lr_pred),
-        "",
-        "### CrossAttn",
         "",
         _cm_block(ca_true_te, ca_pred_te),
         "",
@@ -800,12 +715,12 @@ def _save_report_md_cross(lr_cv, ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
         "| File | Description |",
         "|------|-------------|",
         "| `data_distribution.png` | Train/Test class·Age·BMI distributions |",
-        "| `cv_roc_curves.png` | Per-fold ROC curves (LR & CrossAttn) |",
+        "| `cv_roc_curves.png` | Per-fold ROC curves (CrossAttn) |",
         "| `cv_metric_distribution.png` | Boxplot of AUC / Acc / F1 across folds |",
         "| `training_curves.png` | Loss & AUC training curves (mean ± std) |",
-        "| `test_roc_curves.png` | Final test-set ROC curves |",
+        "| `test_roc_curves.png` | Final test-set ROC curve |",
         "| `test_roc_by_sex.png` | Final test-set ROC curves by sex |",
-        "| `confusion_matrices.png` | Test-set confusion matrices (LR & CrossAttn) |",
+        "| `confusion_matrices.png` | Test-set confusion matrices |",
         "| `calibration.png` | Calibration plot (reliability diagram) + Precision-Recall curve |",
     ]
 
@@ -815,10 +730,9 @@ def _save_report_md_cross(lr_cv, ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
     print(f"  {md_path}")
 
 
-def save_all_cross(lr_cv, ca_cv, lr_roc_folds, ca_roc_folds, ca_histories, med_epoch,
+def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,
                    X_clin_cv, y_cv, sex_cv,
                    X_clin_te, y_te,
-                   lr_pred, lr_prob,
                    ca_pred_te, ca_true_te, sex_te, ca_prob_te,
                    model_label="model 2", out_dir=None):
     """Model 2/2_2/3용 시각화 전체(8종 png)와 results.md를 out_dir에 저장."""
@@ -826,17 +740,14 @@ def save_all_cross(lr_cv, ca_cv, lr_roc_folds, ca_roc_folds, ca_histories, med_e
     _dir2 = out_dir or RESULTS_DIR_CROSS
     plot_data_distribution(X_clin_cv, y_cv, sex_cv, X_clin_te, y_te, sex_te,
                            out_dir=_dir2)
-    plot_cv_roc_cross(lr_roc_folds, ca_roc_folds)
-    plot_cv_metric_cross(lr_cv, ca_cv)
+    plot_cv_roc_cross(ca_roc_folds)
+    plot_cv_metric_cross(ca_cv)
     plot_training_curves_cross(ca_histories, med_epoch)
-    plot_test_roc_cross(y_te, lr_prob, ca_true_te, ca_prob_te)
-    plot_test_roc_by_sex_cross(y_te, lr_prob, ca_true_te, ca_prob_te, sex_te)
-    plot_confusion_matrices_cross(y_te, lr_pred, ca_true_te, ca_pred_te, sex_te)
+    plot_test_roc_cross(ca_true_te, ca_prob_te)
+    plot_test_roc_by_sex_cross(ca_true_te, ca_prob_te, sex_te)
+    plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te)
     plot_calibration(
-        [
-            ("Log. Reg.", y_te,       lr_prob,    "steelblue"),
-            ("CrossAttn", ca_true_te, ca_prob_te, "tomato"),
-        ],
+        [("CrossAttn", ca_true_te, ca_prob_te, "tomato")],
         out_path=f"{_dir2}/calibration.png",
     )
 
@@ -846,7 +757,6 @@ def save_all_cross(lr_cv, ca_cv, lr_roc_folds, ca_roc_folds, ca_histories, med_e
                   "confusion_matrices", "calibration"]:
         print(f"  {_dir2}/{fname}.png")
 
-    _save_report_md_cross(lr_cv, ca_cv, X_clin_cv, y_cv, sex_cv, X_clin_te, y_te,
-                          lr_pred, lr_prob,
+    _save_report_md_cross(ca_cv, X_clin_cv, y_cv, sex_cv, X_clin_te, y_te,
                           ca_pred_te, ca_prob_te, ca_true_te,
                           sex_te, ca_histories, med_epoch)

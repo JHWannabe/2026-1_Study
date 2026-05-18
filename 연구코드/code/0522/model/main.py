@@ -2,17 +2,18 @@
 SMI Binary Classification — 모델별 스케일링 케이스 비교 실험 진입점.
 
 모델 구성:
-  Model 1   : Clinic Only (Age, Sex, BMI)                — LR / ResNet1D
-  Model 2   : Clinic + AEC Matched                       — LR / CrossAttn / ResNet1D
-  Model 2_2 : Clinic + AEC Unmatched (음성 대조군)         — LR / CrossAttn / ResNet1D
-  Model 3   : Clinic + Scanner(MFR Embedding) + AEC      — LR / CrossAttn3 / ResNet1D
+  Model 1   : Clinic Only (Age, Sex, BMI)                — LR
+  Model 2   : Clinic + AEC Matched                       — CrossAttn
+  Model 2_2 : Clinic + AEC Unmatched (음성 대조군)         — CrossAttn
+  Model 3   : Clinic + Scanner(MFR Embedding) + AEC      — CrossAttn3
 
-각 모델은 AEC_VARIANTS(7종) × CASES_M*(스케일링 조건) 조합을 순차 실행한다.
+각 모델은 AEC_VARIANTS(5종) × CASES_M*(스케일링 조건) 조합을 순차 실행한다.
 Model 1/2/2_2/3 는 ProcessPoolExecutor 로 병렬 실행되며,
 결과는 scaling_comparison.md 와 각 모델 디렉토리 run.log 에 저장된다.
 
-주의: label(y, 0/1)에는 StandardScaler를 적용하지 않는다.
-      Clinical 스케일링 시 sex_enc(이진값)는 제외하고 Age·BMI만 표준화한다.
+스케일링 원칙:
+  - Clinic(Age·BMI)과 AEC 모두 StandardScaler 적용
+  - sex_enc(이진값)와 label(y, 0/1)에는 StandardScaler를 적용하지 않는다
 """
 
 import os
@@ -36,31 +37,28 @@ from data import (load_data, split_data,
 from cross_val import (run_cross_validation, run_cross_validation_cross,
                        run_cross_validation_cross3)
 from evaluate import evaluate_test, evaluate_test_cross, evaluate_test_cross3
-from metrics import print_cv_summary, compare_fold_metrics, delong_test, bootstrap_ci
+from metrics import print_cv_summary
 from visualize import save_all, save_all_cross
 
 # ── 모델별 스케일링 케이스 정의 ──────────────────────────────
 # 각 튜플: (결과 디렉토리 이름, scale_clinic, [scale_aec])
-# scale_clinic: Age·BMI에 StandardScaler 적용 여부 (sex_enc 제외)
-# scale_aec   : AEC 전 컬럼에 StandardScaler 적용 여부
+# Clinic(Age·BMI)과 AEC 모두 StandardScaler 적용 (sex_enc·label 제외)
 
 # Model 1: (case_name, scale_clinic)
 CASES_M1 = [
-    ("scale_clinic", True),   # Age·BMI 표준화
+    ("scale_clinic", True),          # Age·BMI 표준화
 ]
 
 # Model 2/2_2: (case_name, scale_clinic, scale_aec)
 CASES_M2 = [
-    ("scale_clinic", True,  False),  # Age·BMI만 표준화
-    ("scale_both",   True,  True),   # Age·BMI + AEC 모두 표준화
+    ("scale_both", True, True),      # Clinic + AEC 모두 표준화
 ]
 
 CASES_M2_2 = CASES_M2[:]   # Unmatched 음성 대조군은 M2와 동일 조건
 
 # Model 3: kVp 제거로 scale_scan 없음 — (case_name, scale_clinic, scale_aec)
 CASES_M3 = [
-    ("scale_clinic", True,  False),
-    ("scale_both",   True,  True),
+    ("scale_both", True, True),      # Clinic + AEC 모두 표준화
 ]
 
 
@@ -93,7 +91,7 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
     results = []
     try:
         print(f"{'='*60}")
-        print("  MODEL 1 — Clinic Only  (2 cases)")
+        print("  MODEL 1 — Clinic Only  (1 case)")
         print(f"{'='*60}")
 
         for case_name, sc in CASES_M1:
@@ -104,37 +102,26 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
             out1 = os.path.join(RESULTS_DIR, case_name)
             os.makedirs(out1, exist_ok=True)
 
-            (lr_cv, rn_cv,
-             lr_roc_folds, rn_roc_folds,
-             rn_histories, best_epochs) = run_cross_validation(X_cv, y_cv, scale_X=sc)
+            (lr_cv, lr_roc_folds) = run_cross_validation(X_cv, y_cv, scale_X=sc)
 
-            print_cv_summary("LR",       lr_cv)
-            print_cv_summary("ResNet1D", rn_cv)
+            print_cv_summary("LR", lr_cv)
 
-            stat_lr_rn = compare_fold_metrics("LR", lr_cv, "ResNet1D", rn_cv)
-
-            med_epoch = int(np.median(best_epochs))
-            (lr_pred, lr_prob, rn_pred_te, rn_prob_te,
-             rn_true_te, stats_te) = evaluate_test(
-                X_cv, y_cv, X_te, y_te, sex_te, med_epoch, scale_X=sc
+            (lr_pred, lr_prob, stats_te) = evaluate_test(
+                X_cv, y_cv, X_te, y_te, sex_te, scale_X=sc
             )
 
             save_all(
-                lr_roc_folds, rn_roc_folds, lr_cv, rn_cv,
+                lr_roc_folds, lr_cv,
                 X_cv, y_cv, sex_cv,
-                X_te, y_te, lr_pred, rn_true_te, rn_pred_te,
-                rn_histories, med_epoch, lr_prob, rn_prob_te,
+                X_te, y_te, lr_pred, lr_prob,
                 sex_te, out_dir=out1,
             )
 
             results.append({
                 "case":         case_name,
                 "scale_clinic": sc,
-                "m1_lr":        _metrics(y_te,       lr_pred,    lr_prob),
-                "m1_rn":        _metrics(rn_true_te, rn_pred_te, rn_prob_te),
-                "stat_lr_rn":   stat_lr_rn,
+                "m1_lr":        _metrics(y_te, lr_pred, lr_prob),
                 "lr_cv_folds":  lr_cv,
-                "rn_cv_folds":  rn_cv,
                 "test_stats":   stats_te,
             })
     finally:
@@ -148,13 +135,13 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
 
 def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 X_clin_te, X_aec_te, y2_te, sex2_te):
-    """Model 2(Clinic+AEC Matched)의 모든 AEC len × scaling case를 순차 실행하고 결과 리스트를 반환. 로그는 run.log에 저장."""
+    """Model 2(Clinic+AEC Matched): AEC 변형별로 CrossAttn을 실행하고 결과 리스트를 반환. 로그는 run.log에 저장."""
     buf = io.StringIO()
     sys.stdout = buf
     results = []
     try:
         print(f"{'='*60}")
-        print(f"  MODEL 2 — Clinic + AEC  ({len(AEC_VARIANTS)} AEC variants × {len(CASES_M2)} cases)")
+        print(f"  MODEL 2 — Clinic + AEC  ({len(AEC_VARIANTS)} AEC variants × 1 case)")
         print(f"{'='*60}")
 
         for aec_var in AEC_VARIANTS:
@@ -176,34 +163,24 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 out2 = os.path.join(RESULTS_DIR_CROSS, aec_var, case_name)
                 os.makedirs(out2, exist_ok=True)
 
-                (lr2_cv, ca_cv, rn2_cv,
-                 lr2_roc_folds, ca_roc_folds, rn2_roc_folds,
-                 ca_histories, rn2_histories,
-                 ca_best_epochs2, rn2_best_epochs) = run_cross_validation_cross(
+                (ca_cv, ca_roc_folds,
+                 ca_histories, ca_best_epochs2) = run_cross_validation_cross(
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_clin=sc, scale_aec=sa,
                 )
 
-                print_cv_summary("LR",        lr2_cv)
                 print_cv_summary("CrossAttn", ca_cv)
-                print_cv_summary("ResNet1D",  rn2_cv)
 
-                stat_lr_ca = compare_fold_metrics("LR", lr2_cv, "CrossAttn", ca_cv)
-
-                med_epoch2    = int(np.median(ca_best_epochs2))
-                rn_med_epoch2 = int(np.median(rn2_best_epochs))
-                (lr2_pred_te, lr2_prob_te, ca_pred_te, ca_prob_te, ca_true_te,
-                 rn2_pred_te, rn2_prob_te, stats_te2) = evaluate_test_cross(
+                med_epoch2 = int(np.median(ca_best_epochs2))
+                (ca_pred_te, ca_prob_te, ca_true_te, stats_te2) = evaluate_test_cross(
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v,
                     X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
-                    med_epoch2, rn_med_epoch=rn_med_epoch2,
-                    scale_clin=sc, scale_aec=sa,
+                    med_epoch2, scale_clin=sc, scale_aec=sa,
                 )
 
                 save_all_cross(
-                    lr2_cv, ca_cv, lr2_roc_folds, ca_roc_folds, ca_histories, med_epoch2,
+                    ca_cv, ca_roc_folds, ca_histories, med_epoch2,
                     X_clin_cv_v, y2_cv_v, sex2_cv_v,
                     X_clin_te_v, y2_te_v,
-                    lr2_pred_te, lr2_prob_te,
                     ca_pred_te, ca_true_te, sex2_te_v, ca_prob_te,
                     model_label=f"model 2 ({aec_var})", out_dir=out2,
                 )
@@ -213,13 +190,8 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                     "case":         case_name,
                     "scale_clinic": sc,
                     "scale_aec":    sa,
-                    "m2_lr":        _metrics(y2_te_v,    lr2_pred_te,  lr2_prob_te),
-                    "m2_ca":        _metrics(ca_true_te, ca_pred_te,   ca_prob_te),
-                    "m2_rn":        _metrics(ca_true_te, rn2_pred_te,  rn2_prob_te),
-                    "stat_lr_ca":   stat_lr_ca,
-                    "lr_cv_folds":  lr2_cv,
+                    "m2_ca":        _metrics(ca_true_te, ca_pred_te, ca_prob_te),
                     "ca_cv_folds":  ca_cv,
-                    "rn_cv_folds":  rn2_cv,
                     "test_stats":   stats_te2,
                 })
     finally:
@@ -243,7 +215,7 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
     results = []
     try:
         print(f"{'='*60}")
-        print(f"  MODEL 2_2 — Clinic + AEC (Unmatched)  ({len(AEC_VARIANTS)} AEC variants × {len(CASES_M2_2)} cases)")
+        print(f"  MODEL 2_2 — Clinic + AEC (Unmatched)  ({len(AEC_VARIANTS)} AEC variants × 1 case)")
         print(f"{'='*60}")
 
         for aec_var in AEC_VARIANTS:
@@ -264,34 +236,24 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 out2_2 = os.path.join(RESULTS_DIR_CROSS_2_2, aec_var, case_name)
                 os.makedirs(out2_2, exist_ok=True)
 
-                (lr2_cv, ca_cv, rn2_2_cv,
-                 lr2_roc_folds, ca_roc_folds, rn2_2_roc_folds,
-                 ca_histories, rn2_2_histories,
-                 ca_best_epochs2_2, rn2_2_best_epochs) = run_cross_validation_cross(
+                (ca_cv, ca_roc_folds,
+                 ca_histories, ca_best_epochs2_2) = run_cross_validation_cross(
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_clin=sc, scale_aec=sa,
                 )
 
-                print_cv_summary("LR",        lr2_cv)
                 print_cv_summary("CrossAttn", ca_cv)
-                print_cv_summary("ResNet1D",  rn2_2_cv)
 
-                stat_lr_ca_u = compare_fold_metrics("LR", lr2_cv, "CrossAttn", ca_cv)
-
-                med_epoch2_2    = int(np.median(ca_best_epochs2_2))
-                rn_med_epoch2_2 = int(np.median(rn2_2_best_epochs))
-                (lr2_pred_te, lr2_prob_te, ca_pred_te, ca_prob_te, ca_true_te,
-                 rn2_2_pred_te, rn2_2_prob_te, stats_te2_2) = evaluate_test_cross(
+                med_epoch2_2 = int(np.median(ca_best_epochs2_2))
+                (ca_pred_te, ca_prob_te, ca_true_te, stats_te2_2) = evaluate_test_cross(
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v,
                     X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
-                    med_epoch2_2, rn_med_epoch=rn_med_epoch2_2,
-                    scale_clin=sc, scale_aec=sa,
+                    med_epoch2_2, scale_clin=sc, scale_aec=sa,
                 )
 
                 save_all_cross(
-                    lr2_cv, ca_cv, lr2_roc_folds, ca_roc_folds, ca_histories, med_epoch2_2,
+                    ca_cv, ca_roc_folds, ca_histories, med_epoch2_2,
                     X_clin_cv_v, y2_cv_v, sex2_cv_v,
                     X_clin_te_v, y2_te_v,
-                    lr2_pred_te, lr2_prob_te,
                     ca_pred_te, ca_true_te, sex2_te_v, ca_prob_te,
                     model_label=f"model 2_2 ({aec_var}, unmatched)", out_dir=out2_2,
                 )
@@ -301,13 +263,8 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                     "case":         case_name,
                     "scale_clinic": sc,
                     "scale_aec":    sa,
-                    "m2_2_lr":      _metrics(y2_te_v,    lr2_pred_te,    lr2_prob_te),
-                    "m2_2_ca":      _metrics(ca_true_te, ca_pred_te,     ca_prob_te),
-                    "m2_2_rn":      _metrics(ca_true_te, rn2_2_pred_te,  rn2_2_prob_te),
-                    "stat_lr_ca":   stat_lr_ca_u,
-                    "lr_cv_folds":  lr2_cv,
+                    "m2_2_ca":      _metrics(ca_true_te, ca_pred_te, ca_prob_te),
                     "ca_cv_folds":  ca_cv,
-                    "rn_cv_folds":  rn2_2_cv,
                     "test_stats":   stats_te2_2,
                 })
     finally:
@@ -321,7 +278,7 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
 
 def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                 X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr):
-    """Model 3(Clinic+Scanner+AEC)의 모든 AEC variant × scaling case를 순차 실행하고 결과 리스트를 반환. 로그는 run.log에 저장."""
+    """Model 3(Clinic+Scanner+AEC): AEC 변형별로 CrossAttn3를 실행하고 결과 리스트를 반환. 로그는 run.log에 저장."""
     buf = io.StringIO()
     sys.stdout = buf
     results = []
@@ -351,53 +308,38 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                 out3 = os.path.join(RESULTS_DIR_CROSS3, aec_var, case_name)
                 os.makedirs(out3, exist_ok=True)
 
-                (lr3_cv, ca3_cv, rn3_cv,
-                 lr3_roc_folds, ca3_roc_folds, rn3_roc_folds,
-                 ca3_histories, rn3_histories,
-                 ca3_best_epochs3, rn3_best_epochs) = run_cross_validation_cross3(
+                (ca3_cv, ca3_roc_folds,
+                 ca3_histories, ca3_best_epochs3) = run_cross_validation_cross3(
                     X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v, n_mfr,
                     scale_clin=sc, scale_aec=sa,
                 )
 
-                print_cv_summary("LR",         lr3_cv)
                 print_cv_summary("CrossAttn3", ca3_cv)
-                print_cv_summary("ResNet1D",   rn3_cv)
 
-                stat_lr_ca3 = compare_fold_metrics("LR", lr3_cv, "CrossAttn3", ca3_cv)
-
-                med_epoch3    = int(np.median(ca3_best_epochs3))
-                rn_med_epoch3 = int(np.median(rn3_best_epochs))
-                (lr3_pred_te, lr3_prob_te, ca3_pred_te, ca3_prob_te, ca3_true_te,
-                 rn3_pred_te, rn3_prob_te, stats_te3) = evaluate_test_cross3(
+                med_epoch3 = int(np.median(ca3_best_epochs3))
+                (ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te3) = evaluate_test_cross3(
                     X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v,
                     X_clin3_te_v, X_aec3_te_v, X_mfr3_te_v, y3_te_v,
                     sex3_te_v, med_epoch3, n_mfr,
-                    rn_med_epoch=rn_med_epoch3,
                     scale_clin=sc, scale_aec=sa,
                 )
 
                 save_all_cross(
-                    lr3_cv, ca3_cv, lr3_roc_folds, ca3_roc_folds, ca3_histories, med_epoch3,
+                    ca3_cv, ca3_roc_folds, ca3_histories, med_epoch3,
                     X_clin3_cv_v, y3_cv_v, sex3_cv_v,
                     X_clin3_te_v, y3_te_v,
-                    lr3_pred_te, lr3_prob_te,
                     ca3_pred_te, ca3_true_te, sex3_te_v, ca3_prob_te,
                     model_label=f"model 3 ({aec_var})", out_dir=out3,
                 )
 
                 results.append({
-                    "aec_var":      aec_var,
-                    "case":         case_name,
-                    "scale_clinic": sc,
-                    "scale_aec":    sa,
-                    "m3_lr":        _metrics(y3_te_v,      lr3_pred_te,  lr3_prob_te),
-                    "m3_ca3":       _metrics(ca3_true_te,  ca3_pred_te,  ca3_prob_te),
-                    "m3_rn":        _metrics(ca3_true_te,  rn3_pred_te,  rn3_prob_te),
-                    "stat_lr_ca3":  stat_lr_ca3,
-                    "lr_cv_folds":  lr3_cv,
-                    "ca3_cv_folds": ca3_cv,
-                    "rn_cv_folds":  rn3_cv,
-                    "test_stats":   stats_te3,
+                    "aec_var":       aec_var,
+                    "case":          case_name,
+                    "scale_clinic":  sc,
+                    "scale_aec":     sa,
+                    "m3_ca3":        _metrics(ca3_true_te, ca3_pred_te, ca3_prob_te),
+                    "ca3_cv_folds":  ca3_cv,
+                    "test_stats":    stats_te3,
                 })
     finally:
         sys.stdout = sys.__stdout__
@@ -502,23 +444,16 @@ def _model_table_str(results, model_key, col=8):
 
 
 def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3):
-    """각 모델/서브모델의 best case(Test AUC 기준)를 요약 출력."""
+    """각 모델의 best case(Test AUC 기준)를 요약 출력."""
     sep = "=" * 70
     print(f"\n{sep}")
     print("  BEST CASES SUMMARY  (by Test overall AUC)")
     print(sep)
     entries = [
         ("M1",   "LR",         results_m1,   "m1_lr"),
-        ("M1",   "ResNet1D",   results_m1,   "m1_rn"),
-        ("M2",   "LR",         results_m2,   "m2_lr"),
         ("M2",   "CrossAttn",  results_m2,   "m2_ca"),
-        ("M2",   "ResNet1D",   results_m2,   "m2_rn"),
-        ("M2_2", "LR",         results_m2_2, "m2_2_lr"),
         ("M2_2", "CrossAttn",  results_m2_2, "m2_2_ca"),
-        ("M2_2", "ResNet1D",   results_m2_2, "m2_2_rn"),
-        ("M3",   "LR",         results_m3,   "m3_lr"),
         ("M3",   "CrossAttn3", results_m3,   "m3_ca3"),
-        ("M3",   "ResNet1D",   results_m3,   "m3_rn"),
     ]
     col = 8
     hdr = f"  {'Model':<6} {'Sub-model':<12} {'Best Case':<32}"
@@ -536,35 +471,31 @@ def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3):
 
 
 def _print_comparison(results_m1, results_m2, results_m2_2, results_m3):
-    """Model 1~3의 모든 case 결과를 서브모델별 콘솔 테이블로 출력하고, 마지막에 best case 요약을 출력."""
+    """Model 1~3의 모든 case 결과를 콘솔 테이블로 출력하고, 마지막에 best case 요약을 출력."""
     sep = "=" * 70
     print(f"\n{sep}")
-    print("  MODEL 1 — Test Set Performance  (2 scaling cases)")
+    print("  MODEL 1 — Test Set Performance  (1 scaling case)")
     print(sep)
-    for label, key in [("LR", "m1_lr"), ("ResNet1D", "m1_rn")]:
-        print(f"\n  [{label}]")
-        print(_model_table_str(results_m1, key))
+    print(f"\n  [LR]")
+    print(_model_table_str(results_m1, "m1_lr"))
 
     print(f"\n{sep}")
-    print("  MODEL 2 — Clinic + AEC (Matched)  (4 scaling cases)")
+    print(f"  MODEL 2 — Clinic + AEC (Matched)  ({len(AEC_VARIANTS)} AEC variants)")
     print(sep)
-    for label, key in [("LR", "m2_lr"), ("CrossAttn", "m2_ca"), ("ResNet1D", "m2_rn")]:
-        print(f"\n  [{label}]")
-        print(_model_table_str(results_m2, key))
+    print(f"\n  [CrossAttn]")
+    print(_model_table_str(results_m2, "m2_ca"))
 
     print(f"\n{sep}")
-    print("  MODEL 2_2 — Clinic + AEC (Unmatched)  (4 scaling cases)")
+    print(f"  MODEL 2_2 — Clinic + AEC (Unmatched)  ({len(AEC_VARIANTS)} AEC variants)")
     print(sep)
-    for label, key in [("LR", "m2_2_lr"), ("CrossAttn", "m2_2_ca"), ("ResNet1D", "m2_2_rn")]:
-        print(f"\n  [{label}]")
-        print(_model_table_str(results_m2_2, key))
+    print(f"\n  [CrossAttn]")
+    print(_model_table_str(results_m2_2, "m2_2_ca"))
 
     print(f"\n{sep}")
-    print(f"  MODEL 3 — Clinic + Scanner + AEC  ({len(AEC_VARIANTS)} AEC variants × {len(CASES_M3)} scaling cases)")
+    print(f"  MODEL 3 — Clinic + Scanner + AEC  ({len(AEC_VARIANTS)} AEC variants)")
     print(sep)
-    for label, key in [("LR", "m3_lr"), ("CrossAttn3", "m3_ca3"), ("ResNet1D", "m3_rn")]:
-        print(f"\n  [{label}]")
-        print(_model_table_str(results_m3, key))
+    print(f"\n  [CrossAttn3]")
+    print(_model_table_str(results_m3, "m3_ca3"))
 
     _print_best_summary(results_m1, results_m2, results_m2_2, results_m3)
 
@@ -634,19 +565,12 @@ def _cross_model_md_block(results_a, fold_key_a, label_a,
 
 
 def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3):
-    """각 모델/서브모델별 best case(Test AUC 기준) 요약 markdown 테이블 반환."""
+    """각 모델별 best case(Test AUC 기준) 요약 markdown 테이블 반환."""
     entries = [
         ("M1",   "LR",         results_m1,   "m1_lr"),
-        ("M1",   "ResNet1D",   results_m1,   "m1_rn"),
-        ("M2",   "LR",         results_m2,   "m2_lr"),
         ("M2",   "CrossAttn",  results_m2,   "m2_ca"),
-        ("M2",   "ResNet1D",   results_m2,   "m2_rn"),
-        ("M2_2", "LR",         results_m2_2, "m2_2_lr"),
         ("M2_2", "CrossAttn",  results_m2_2, "m2_2_ca"),
-        ("M2_2", "ResNet1D",   results_m2_2, "m2_2_rn"),
-        ("M3",   "LR",         results_m3,   "m3_lr"),
         ("M3",   "CrossAttn3", results_m3,   "m3_ca3"),
-        ("M3",   "ResNet1D",   results_m3,   "m3_rn"),
     ]
     col_hdr = " | ".join(mn for mn, _ in _METRICS_DEF)
     col_sep = " | ".join("------:" for _ in _METRICS_DEF)
@@ -669,182 +593,60 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3):
         "",
         "## Best Cases Summary  (by Test overall AUC)",
         "",
-        "> 각 모델/서브모델에서 Test 전체 AUC가 가장 높은 case. 세부 테이블에서 **굵게** 표시.",
+        "> 각 모델에서 Test 전체 AUC가 가장 높은 case. 세부 테이블에서 **굵게** 표시.",
         "",
         _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3),
         "",
         "---",
         "",
-        "## Model 1 — Clinic Only  (2 scaling cases)",
+        "## Model 1 — Clinic Only  (1 scaling case)",
         "",
         "### Logistic Regression",
         "",
         _md_table(results_m1, "m1_lr"),
         "",
-        "### ResNet1D",
-        "",
-        _md_table(results_m1, "m1_rn"),
-        "",
         "---",
         "",
-        "## Model 2 — Clinic + AEC (Matched)  (4 scaling cases)",
-        "",
-        "### Logistic Regression",
-        "",
-        _md_table(results_m2, "m2_lr"),
+        f"## Model 2 — Clinic + AEC (Matched)  ({len(AEC_VARIANTS)} AEC variants)",
         "",
         "### CrossAttn",
         "",
         _md_table(results_m2, "m2_ca"),
         "",
-        "### ResNet1D",
-        "",
-        _md_table(results_m2, "m2_rn"),
-        "",
         "---",
         "",
-        "## Model 2_2 — Clinic + AEC (Unmatched, Negative Control)  (4 scaling cases)",
+        f"## Model 2_2 — Clinic + AEC (Unmatched, Negative Control)  ({len(AEC_VARIANTS)} AEC variants)",
         "",
         "> Clinic과 AEC가 서로 다른 환자 데이터로 섞인 상태.",
         "> Model 2 > Model 2_2 이면 Clinic-AEC 대응이 실질적인 예측력을 제공함을 의미.",
-        "",
-        "### Logistic Regression",
-        "",
-        _md_table(results_m2_2, "m2_2_lr"),
         "",
         "### CrossAttn",
         "",
         _md_table(results_m2_2, "m2_2_ca"),
         "",
-        "### ResNet1D",
-        "",
-        _md_table(results_m2_2, "m2_2_rn"),
-        "",
         "---",
         "",
-        "## Model 3 — Clinic + Scanner + AEC  (8 scaling cases)",
-        "",
-        "### Logistic Regression",
-        "",
-        _md_table(results_m3, "m3_lr"),
+        f"## Model 3 — Clinic + Scanner + AEC  ({len(AEC_VARIANTS)} AEC variants)",
         "",
         "### CrossAttn3",
         "",
         _md_table(results_m3, "m3_ca3"),
         "",
-        "### ResNet1D",
-        "",
-        _md_table(results_m3, "m3_rn"),
-        "",
         "---",
         "",
-        "# Fold-level Statistical Tests",
+        "# Cross-Model Comparison — Fold-level Statistical Tests",
         "",
-        "> Paired t-test + Wilcoxon signed-rank (n=5 folds)",
-        "> p-value는 지수표현. Δ Mean = Model2 − Model1 (양수 → Model2 우세)",
+        "> Paired t-test + Wilcoxon signed-rank (n=5 folds).",
+        "> p-value는 지수표현. Δ Mean = B − A (양수 → B 우세).",
+        "> M1·M2·M3 간 pairwise 비교 (M2_2 음성 대조군 제외).",
+        "> M1은 단일 case로 M2/M3 각 AEC variant와 개별 비교.",
+        "> M1↔M2/M3는 데이터셋이 다를 수 있으므로 해석 시 주의.",
         "> \\*\\*\\* p<0.001 · \\*\\* p<0.01 · \\* p<0.05 · † p<0.10",
         "",
-        "## Model 1: LR vs ResNet1D",
-        "",
     ]
 
-    _STAT_METRICS = [("auc","AUC-ROC"),("auprc","AUPRC"),
-                     ("brier","Brier"),("acc","Accuracy"),("f1","F1")]
-    _STAT_HDR  = "| Metric | Mean M1 | Mean M2 | Δ Mean | t-stat | t p-val | W p-val |"
-    _STAT_SEP  = "|--------|--------:|--------:|-------:|-------:|--------:|--------:|"
-
-    def _stat_rows(stat_dict):
-        rows = []
-        for mk, mlabel in _STAT_METRICS:
-            s = stat_dict[mk]
-            sig = ("***" if s["t_pval"] < 0.001 else
-                   "**"  if s["t_pval"] < 0.01  else
-                   "*"   if s["t_pval"] < 0.05  else
-                   "†"   if s["t_pval"] < 0.10  else "")
-            rows.append(
-                f"| {mlabel} {sig} "
-                f"| {s['mean1']:.4f} | {s['mean2']:.4f} | {s['delta_mean']:+.4f} "
-                f"| {s['t_stat']:.3f} | {s['t_pval']:.2e} | {s['w_pval']:.2e} |"
-            )
-        return rows
-
-    for r in results_m1:
-        lines.append(f"### [M1] Case: {r['case']}  (LR vs ResNet1D)")
-        lines.append("")
-        lines += [_STAT_HDR, _STAT_SEP]
-        lines += _stat_rows(r["stat_lr_rn"])
-        lines.append("")
-
-    lines += [
-        "## Model 2: LR vs CrossAttn",
-        "",
-    ]
-    for r in results_m2:
-        lines.append(f"### [M2] Case: {_case_label(r)}  (LR vs CrossAttn)")
-        lines.append("")
-        lines += [_STAT_HDR, _STAT_SEP]
-        lines += _stat_rows(r["stat_lr_ca"])
-        lines.append("")
-
-    lines += [
-        "## Model 2_2 (Unmatched): LR vs CrossAttn",
-        "",
-    ]
-    for r in results_m2_2:
-        lines.append(f"### [M2_2] Case: {_case_label(r)}  (LR vs CrossAttn, Unmatched)")
-        lines.append("")
-        lines += [_STAT_HDR, _STAT_SEP]
-        lines += _stat_rows(r["stat_lr_ca"])
-        lines.append("")
-
-    lines += [
-        "## Model 3: LR vs CrossAttn3",
-        "",
-    ]
-    for r in results_m3:
-        lines.append(f"### [M3] Case: {_case_label(r)}  (LR vs CrossAttn3)")
-        lines.append("")
-        lines += [_STAT_HDR, _STAT_SEP]
-        lines += _stat_rows(r["stat_lr_ca3"])
-        lines.append("")
-
-    lines += [
-        "## Model 2: LR vs ResNet1D",
-        "",
-    ]
-    for r in results_m2:
-        stat = _fold_stats(r["lr_cv_folds"], r["rn_cv_folds"])
-        lines.append(f"### [M2] Case: {_case_label(r)}  (LR vs ResNet1D)")
-        lines.append("")
-        lines += [_STAT_HDR, _STAT_SEP]
-        lines += _stat_rows(stat)
-        lines.append("")
-
-    lines += [
-        "## Model 2_2 (Unmatched): LR vs ResNet1D",
-        "",
-    ]
-    for r in results_m2_2:
-        stat = _fold_stats(r["lr_cv_folds"], r["rn_cv_folds"])
-        lines.append(f"### [M2_2] Case: {_case_label(r)}  (LR vs ResNet1D, Unmatched)")
-        lines.append("")
-        lines += [_STAT_HDR, _STAT_SEP]
-        lines += _stat_rows(stat)
-        lines.append("")
-
-    lines += [
-        "## Model 3: LR vs ResNet1D",
-        "",
-    ]
-    for r in results_m3:
-        stat = _fold_stats(r["lr_cv_folds"], r["rn_cv_folds"])
-        lines.append(f"### [M3] Case: {_case_label(r)}  (LR vs ResNet1D)")
-        lines.append("")
-        lines += [_STAT_HDR, _STAT_SEP]
-        lines += _stat_rows(stat)
-        lines.append("")
-
-    # ── Cross-model 비교 (같은 모델 계열, input 확장에 따른 유의성) ──────
+    _STAT_METRICS = [("auc", "AUC-ROC"), ("auprc", "AUPRC"),
+                     ("brier", "Brier"), ("acc", "Accuracy"), ("f1", "F1")]
     _CSTAT_HDR = "| Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |"
     _CSTAT_SEP = "|--------|-------:|-------:|-------:|-------:|--------:|--------:|"
 
@@ -863,98 +665,29 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3):
             )
         return rows
 
-    # M1과 비교 시 M2/M3는 full-curve baseline(len256)만 사용
-    _m2_base = [r for r in results_m2   if r["aec_var"] == "len256"]
-    _m3_base = [r for r in results_m3   if r["aec_var"] == "len256"]
     _duo_key = lambda r: (r["aec_var"], r["case"])  # noqa: E731
+    m1_r = results_m1[0]  # M1은 단일 case
 
+    # ── M1 LR vs M2 CrossAttn ──────────────────────────────────
     lines += [
-        "---",
+        "## M1 (LR) vs M2 (CrossAttn)",
         "",
-        "# Cross-Model Comparison — 동일 모델 계열, Input 확장에 따른 유의성",
-        "",
-        "> LR / Deep Model 각각에서 M1/M2/M2_2/M3 간 pairwise 비교.",
-        "> M1 비교 시 M2/M3는 len256(full AEC baseline)만 사용.",
-        "> M2↔M2_2, M2↔M3 비교 시 (aec_var, case) 키로 매칭. Δ Mean = B − A (양수 → B 우세).",
-        "> M2_2는 Clinic-AEC Unmatching 음성 대조군.",
-        "> \\*\\*\\* p<0.001 · \\*\\* p<0.01 · \\* p<0.05 · † p<0.10",
-        "",
-        "## LR: M1 (Clinic) vs M2 (Clinic+AEC, Matched, len256)",
+        "> A = M1 LR, B = M2 CrossAttn.",
         "",
     ]
-    lines += _cross_model_md_block(
-        results_m1, "lr_cv_folds", "M1-LR",
-        _m2_base,   "lr_cv_folds", "M2-LR(len256)",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-    )
+    for r2 in results_m2:
+        stat = _fold_stats(m1_r["lr_cv_folds"], r2["ca_cv_folds"])
+        lines.append(f"### {_case_label(r2)}  (M1-LR vs M2-CrossAttn)")
+        lines.append("")
+        lines += [_CSTAT_HDR, _CSTAT_SEP]
+        lines += _cstat_rows(stat)
+        lines.append("")
 
+    # ── M2 CrossAttn vs M3 CrossAttn3 ─────────────────────────
     lines += [
-        "## LR: M1 (Clinic) vs M3 (Clinic+Scanner+AEC, len256)",
+        "## M2 (CrossAttn) vs M3 (CrossAttn3)",
         "",
-    ]
-    lines += _cross_model_md_block(
-        results_m1, "lr_cv_folds", "M1-LR",
-        _m3_base,   "lr_cv_folds", "M3-LR(len256)",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-    )
-
-    lines += [
-        "## LR: M2 (Matched) vs M2_2 (Unmatched) — 음성 대조",
-        "",
-    ]
-    lines += _cross_model_md_block(
-        results_m2,   "lr_cv_folds", "M2-LR",
-        results_m2_2, "lr_cv_folds", "M2_2-LR",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-        key_fn=_duo_key,
-    )
-
-    lines += [
-        "## LR: M2 (Clinic+AEC) vs M3 (Clinic+Scanner+AEC)",
-        "",
-    ]
-    lines += _cross_model_md_block(
-        results_m2, "lr_cv_folds", "M2-LR",
-        results_m3, "lr_cv_folds", "M3-LR",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-        key_fn=_duo_key,
-    )
-
-    lines += [
-        "---",
-        "",
-        "## Deep (CrossAttn): M1 ResNet1D (Clinic) vs M2 CrossAttn (Clinic+AEC, len256)",
-        "",
-    ]
-    lines += _cross_model_md_block(
-        results_m1, "rn_cv_folds", "M1-ResNet1D",
-        _m2_base,   "ca_cv_folds", "M2-CrossAttn(len256)",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-    )
-
-    lines += [
-        "## Deep (CrossAttn): M1 ResNet1D (Clinic) vs M3 CrossAttn3 (Clinic+Scanner+AEC, len256)",
-        "",
-    ]
-    lines += _cross_model_md_block(
-        results_m1, "rn_cv_folds",  "M1-ResNet1D",
-        _m3_base,   "ca3_cv_folds", "M3-CrossAttn3(len256)",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-    )
-
-    lines += [
-        "## Deep (CrossAttn): M2 CrossAttn (Matched) vs M2_2 CrossAttn (Unmatched) — 음성 대조",
-        "",
-    ]
-    lines += _cross_model_md_block(
-        results_m2,   "ca_cv_folds", "M2-CrossAttn",
-        results_m2_2, "ca_cv_folds", "M2_2-CrossAttn",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-        key_fn=_duo_key,
-    )
-
-    lines += [
-        "## Deep (CrossAttn): M2 CrossAttn (Clinic+AEC) vs M3 CrossAttn3 (Clinic+Scanner+AEC)",
+        "> A = M2 CrossAttn, B = M3 CrossAttn3. (aec_var, case) 키로 매칭.",
         "",
     ]
     lines += _cross_model_md_block(
@@ -964,122 +697,20 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3):
         key_fn=_duo_key,
     )
 
+    # ── M1 LR vs M3 CrossAttn3 ────────────────────────────────
     lines += [
-        "---",
+        "## M1 (LR) vs M3 (CrossAttn3)",
         "",
-        "## Deep (ResNet1D): M1 ResNet1D (Clinic) vs M2 ResNet1D (Clinic+AEC, len256)",
+        "> A = M1 LR, B = M3 CrossAttn3.",
         "",
     ]
-    lines += _cross_model_md_block(
-        results_m1, "rn_cv_folds", "M1-ResNet1D",
-        _m2_base,   "rn_cv_folds", "M2-ResNet1D(len256)",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-    )
-
-    lines += [
-        "## Deep (ResNet1D): M1 ResNet1D (Clinic) vs M3 ResNet1D (Clinic+Scanner+AEC, len256)",
-        "",
-    ]
-    lines += _cross_model_md_block(
-        results_m1, "rn_cv_folds", "M1-ResNet1D",
-        _m3_base,   "rn_cv_folds", "M3-ResNet1D(len256)",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-    )
-
-    lines += [
-        "## Deep (ResNet1D): M2 ResNet1D (Matched) vs M2_2 ResNet1D (Unmatched) — 음성 대조",
-        "",
-    ]
-    lines += _cross_model_md_block(
-        results_m2,   "rn_cv_folds", "M2-ResNet1D",
-        results_m2_2, "rn_cv_folds", "M2_2-ResNet1D",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-        key_fn=_duo_key,
-    )
-
-    lines += [
-        "## Deep (ResNet1D): M2 ResNet1D (Clinic+AEC) vs M3 ResNet1D (Clinic+Scanner+AEC)",
-        "",
-    ]
-    lines += _cross_model_md_block(
-        results_m2, "rn_cv_folds", "M2-ResNet1D",
-        results_m3, "rn_cv_folds", "M3-ResNet1D",
-        _cstat_rows, _CSTAT_HDR, _CSTAT_SEP,
-        key_fn=_duo_key,
-    )
-
-    # ── Test Set: DeLong AUC 비교 ───────────────────────────────────────────
-    lines += [
-        "---",
-        "",
-        "# Test Set — DeLong AUC Comparison (동일 test set 내 모델 간)",
-        "",
-        "> DeLong (1988) test: 동일 test set에서 두 모델의 ROC AUC를 비교.",
-        "> Δ = AUC(B) − AUC(A). z-통계량, 양측 p-value 제시.",
-        "> \\*\\*\\* p<0.001 · \\*\\* p<0.01 · \\* p<0.05 · † p<0.10 · ns p≥0.10",
-        "",
-    ]
-    _DL_HDR = "| Comparison | AUC(A) | AUC(B) | Δ AUC | z-stat | p-value | Sig |"
-    _DL_SEP = "|------------|-------:|-------:|------:|-------:|--------:|-----|"
-
-    def _delong_row(label_a, label_b, dl):
-        sig = ("***" if dl["p_val"] < 0.001 else "**" if dl["p_val"] < 0.01 else
-               "*"   if dl["p_val"] < 0.05  else "†"  if dl["p_val"] < 0.10 else "ns")
-        return (f"| {label_a} vs {label_b} "
-                f"| {dl['auc1']:.4f} | {dl['auc2']:.4f} | {dl['delta']:+.4f} "
-                f"| {dl['z']:.3f} | {dl['p_val']:.4e} | {sig} |")
-
-    lines.append("## Model 1 — LR vs ResNet1D")
-    lines.append("")
-    lines += [_DL_HDR, _DL_SEP]
-    for r in results_m1:
-        ts = r.get("test_stats", {})
-        dl = ts.get("delong_lr_rn")
-        if dl:
-            lines.append(_delong_row("LR", "ResNet1D", dl) + f"  <!-- {r['case']} -->")
-    lines.append("")
-
-    lines.append("## Model 2 — LR vs CrossAttn / ResNet1D")
-    lines.append("")
-    lines += [_DL_HDR, _DL_SEP]
-    for r in results_m2:
-        ts = r.get("test_stats", {})
-        lbl = _case_label(r)
-        for key_a, key_b, k in [("LR", "CrossAttn", "delong_lr_ca"),
-                                  ("LR", "ResNet1D",  "delong_lr_rn"),
-                                  ("CrossAttn", "ResNet1D", "delong_ca_rn")]:
-            dl = ts.get(k)
-            if dl:
-                lines.append(_delong_row(key_a, key_b, dl) + f"  <!-- {lbl} -->")
-    lines.append("")
-
-    lines.append("## Model 2_2 (Unmatched) — LR vs CrossAttn / ResNet1D")
-    lines.append("")
-    lines += [_DL_HDR, _DL_SEP]
-    for r in results_m2_2:
-        ts = r.get("test_stats", {})
-        lbl = _case_label(r)
-        for key_a, key_b, k in [("LR", "CrossAttn", "delong_lr_ca"),
-                                  ("LR", "ResNet1D",  "delong_lr_rn"),
-                                  ("CrossAttn", "ResNet1D", "delong_ca_rn")]:
-            dl = ts.get(k)
-            if dl:
-                lines.append(_delong_row(key_a, key_b, dl) + f"  <!-- {lbl} -->")
-    lines.append("")
-
-    lines.append("## Model 3 — LR vs CrossAttn3 / ResNet1D")
-    lines.append("")
-    lines += [_DL_HDR, _DL_SEP]
-    for r in results_m3:
-        ts = r.get("test_stats", {})
-        lbl = _case_label(r)
-        for key_a, key_b, k in [("LR", "CrossAttn3", "delong_lr_ca3"),
-                                  ("LR", "ResNet1D",   "delong_lr_rn"),
-                                  ("CrossAttn3", "ResNet1D", "delong_ca3_rn")]:
-            dl = ts.get(k)
-            if dl:
-                lines.append(_delong_row(key_a, key_b, dl) + f"  <!-- {lbl} -->")
-    lines.append("")
+    for r3 in results_m3:
+        stat = _fold_stats(m1_r["lr_cv_folds"], r3["ca3_cv_folds"])
+        lines.append(f"### {_case_label(r3)}  (M1-LR vs M3-CrossAttn3)")
+        lines.append("")
+        lines += [_CSTAT_HDR, _CSTAT_SEP]
+        lines += _cstat_rows(stat)
+        lines.append("")
 
     # ── Test Set: Bootstrap 95% CI ──────────────────────────────────────────
     lines += [
@@ -1108,26 +739,19 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3):
     for r in results_m1:
         ts = r.get("test_stats", {})
         lbl = r["case"]
-        lines += _ci_rows("M1", "LR",       lbl, ts.get("bootstrap_lr", {}))
-        lines += _ci_rows("M1", "ResNet1D", lbl, ts.get("bootstrap_rn", {}))
+        lines += _ci_rows("M1", "LR", lbl, ts.get("bootstrap_lr", {}))
     for r in results_m2:
         ts = r.get("test_stats", {})
         lbl = _case_label(r)
-        lines += _ci_rows("M2", "LR",        lbl, ts.get("bootstrap_lr", {}))
         lines += _ci_rows("M2", "CrossAttn", lbl, ts.get("bootstrap_ca", {}))
-        lines += _ci_rows("M2", "ResNet1D",  lbl, ts.get("bootstrap_rn", {}))
     for r in results_m2_2:
         ts = r.get("test_stats", {})
         lbl = _case_label(r)
-        lines += _ci_rows("M2_2", "LR",        lbl, ts.get("bootstrap_lr", {}))
         lines += _ci_rows("M2_2", "CrossAttn", lbl, ts.get("bootstrap_ca", {}))
-        lines += _ci_rows("M2_2", "ResNet1D",  lbl, ts.get("bootstrap_rn", {}))
     for r in results_m3:
         ts = r.get("test_stats", {})
         lbl = _case_label(r)
-        lines += _ci_rows("M3", "LR",          lbl, ts.get("bootstrap_lr",  {}))
-        lines += _ci_rows("M3", "CrossAttn3",  lbl, ts.get("bootstrap_ca3", {}))
-        lines += _ci_rows("M3", "ResNet1D",    lbl, ts.get("bootstrap_rn",  {}))
+        lines += _ci_rows("M3", "CrossAttn3", lbl, ts.get("bootstrap_ca3", {}))
     lines.append("")
 
     md_path = os.path.join(os.path.dirname(RESULTS_DIR), "scaling_comparison.md")

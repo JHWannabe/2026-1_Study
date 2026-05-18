@@ -225,7 +225,7 @@ dlo_raw.columns = [
     "_idx", "NO", "PatientID", "PatientAge", "PatientSex",
     "VBA_Status", "QCT_Status", "SRC",
     "kVp", "mAs", "VBA_Report", "QCT_Report_1", "QCT_Report_2",
-    "SRC_Report", "TAMA", "BMI",
+    "SRC_Report", "TAMA", "IMATA", "BMI",
     "_a", "_b", "_c",
 ]
 dlo_df = dlo_raw[dlo_raw["PatientID"].notna()].copy()

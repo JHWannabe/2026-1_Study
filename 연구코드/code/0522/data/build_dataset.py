@@ -49,10 +49,12 @@ CLINICAL_COLS = ["TAMA", "IMATA", "신장", "체중", "BMI", "SMI"]
 
 # ── PatientID → DICOM 폴더 매핑 ({idx}_{PatientID}_{date}_CT) ─────────────────
 folder_map = {}
+no_map     = {}   # PatientID → No (폴더명 맨 앞 숫자)
 for folder_name in os.listdir(DICOM_BASE):
     parts = folder_name.split("_")
     if len(parts) >= 2:
         folder_map[parts[1]] = os.path.join(DICOM_BASE, folder_name)
+        no_map[parts[1]]     = int(parts[0])
 
 print(f"총 DICOM 폴더 수: {len(folder_map)}")
 
@@ -62,17 +64,7 @@ print(f"총 DICOM 폴더 수: {len(folder_map)}")
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_patient(pid_str):
-    """DICOM 폴더에서 스캔 메타데이터와 슬라이스별 mA 값을 추출한다.
-
-    슬라이스는 z 위치 오름차순(caudal→cranial)으로 정렬해 AEC 곡선 방향을 통일한다.
-
-    Returns
-    -------
-    meta_dict : dict  — PatientAge, PatientSex, kVp, n_slices, z_range_mm,
-                        SeriesDescription, ManufacturerModelName
-    mA_vals   : list  — z-정렬된 슬라이스별 mA 값
-    (None, None) : DICOM 폴더 없거나 파싱 실패
-    """
+    """DICOM 폴더에서 스캔 메타데이터와 슬라이스별 mA 값을 추출한다."""
     if pid_str not in folder_map:
         return None, None
 
@@ -94,10 +86,9 @@ def extract_patient(pid_str):
         try:
             dcm = pydicom.dcmread(os.path.join(dcm_dir, fname), stop_before_pixels=True)
 
-            # 스캔 레벨 메타데이터는 첫 슬라이스에서만 읽음
             if not header_read:
                 age_raw = str(getattr(dcm, "PatientAge", ""))
-                age_num = "".join(filter(str.isdigit, age_raw))  # "045Y" → "045"
+                age_num = "".join(filter(str.isdigit, age_raw))
                 meta_dict["PatientAge"]            = int(age_num) if age_num else np.nan
                 meta_dict["PatientSex"]            = str(getattr(dcm, "PatientSex", ""))
                 meta_dict["kVp"]                   = float(getattr(dcm, "KVP", np.nan))
@@ -105,7 +96,6 @@ def extract_patient(pid_str):
                 meta_dict["ManufacturerModelName"] = str(getattr(dcm, "ManufacturerModelName", ""))
                 header_read = True
 
-            # z 위치: ImagePositionPatient 우선, 없으면 SliceLocation 사용
             if hasattr(dcm, "ImagePositionPatient"):
                 z = float(dcm.ImagePositionPatient[2])
             elif hasattr(dcm, "SliceLocation"):
@@ -121,11 +111,9 @@ def extract_patient(pid_str):
     if not slice_data:
         return None, None
 
-    # 원본 DICOM 저장 순서 기준 첫/마지막 z → 스캔 방향 판별
     z_first_orig = slice_data[0][0]
     z_last_orig  = slice_data[-1][0]
 
-    # z 오름차순 정렬 → 모든 환자의 AEC 곡선을 caudal(작은 z) → cranial(큰 z) 방향으로 통일
     slice_data.sort(key=lambda x: x[0])
     z_vals  = [s[0] for s in slice_data]
     mA_vals = [s[1] for s in slice_data]
@@ -134,14 +122,12 @@ def extract_patient(pid_str):
     meta_dict["z_range_mm"] = abs(max(z_vals) - min(z_vals)) if len(z_vals) >= 2 else np.nan
     meta_dict["z_min"]      = min(z_vals)
     meta_dict["z_max"]      = max(z_vals)
-    # True = 원본 DICOM이 cranial→caudal(내림차순) 순서로 저장 → 정렬로 뒤집음
     meta_dict["z_flipped"]  = z_first_orig > z_last_orig
 
     return meta_dict, mA_vals
 
 
 def save_checkpoint(processed, meta_rows, aec_rows):
-    """중간 결과를 JSON에 저장한다. np.nan → None 변환 포함."""
     def clean(v):
         return None if isinstance(v, float) and np.isnan(v) else v
 
@@ -155,39 +141,31 @@ def save_checkpoint(processed, meta_rows, aec_rows):
 
 
 def load_checkpoint():
-    """체크포인트 로드. 없으면 (0, [], []) 반환. None → np.nan 역변환 포함."""
     if not os.path.exists(CHECKPOINT):
         return 0, [], []
     with open(CHECKPOINT, "r", encoding="utf-8") as f:
         data = json.load(f)
-    meta_rows = [{k: (np.nan if v is None else v) for k, v in row.items()}
-                 for row in data["meta_rows"]]
-    aec_rows  = [[(np.nan if v is None else v) for v in row]
-                 for row in data["aec_rows"]]
+    meta_rows = [{k: (np.nan if v is None else v) for k, v in row.items()} for row in data["meta_rows"]]
+    aec_rows  = [[(np.nan if v is None else v) for v in row] for row in data["aec_rows"]]
     return data["processed"], meta_rows, aec_rows
 
 
 def write_intermediate(patient_ids_all, meta_rows, aec_rows, clinical_df):
-    """현재까지 추출된 데이터를 META_OUT / AECRAW_PATH에 저장한다.
-
-    CLINICAL_SRC(원본)는 절대 수정하지 않는다.
-    슬라이스 수가 환자마다 다르므로 aec_raw는 최대 슬라이스 수에 맞춰
-    짧은 행 끝에 NaN을 패딩해 직사각형 테이블을 유지한다.
-    """
     n_done = len(meta_rows)
 
-    # DICOM 필드 DataFrame
     meta_df = pd.DataFrame(meta_rows)
     meta_df.insert(0, "PatientID", patient_ids_all[:n_done])
     meta_df["PatientID"] = meta_df["PatientID"].astype(str)
+    
+    # [수정] No 컬럼 매핑 후 맨 앞으로 배치되도록 보장
+    meta_df.insert(0, "No", meta_df["PatientID"].map(no_map))
 
-    # 임상 컬럼 병합 (CLINICAL_SRC에서만 읽음, 원본 보존)
     avail_clinical = [c for c in CLINICAL_COLS if c in clinical_df.columns]
     clin = clinical_df[["PatientID"] + avail_clinical].copy()
     clin["PatientID"] = clin["PatientID"].astype(str)
     meta_df = meta_df.merge(clin, on="PatientID", how="left")
 
-    col_order = ["PatientID", "PatientAge", "PatientSex", "kVp",
+    col_order = ["No", "PatientID", "PatientAge", "PatientSex", "kVp",
                  "n_slices", "z_range_mm", "z_min", "z_max", "z_flipped",
                  "SeriesDescription", "ManufacturerModelName"] + CLINICAL_COLS
     col_order = list(dict.fromkeys(c for c in col_order if c in meta_df.columns))
@@ -195,16 +173,18 @@ def write_intermediate(patient_ids_all, meta_rows, aec_rows, clinical_df):
     meta_df   = meta_df[col_order + remaining]
     meta_df[meta_df.select_dtypes(include="float").columns] = \
         meta_df.select_dtypes(include="float").round(2)
-    meta_df.to_excel(META_OUT, index=False)  # ← CLINICAL_SRC가 아닌 META_OUT에 저장
+    meta_df.to_excel(META_OUT, index=False)
 
-    # aec_raw.xlsx: 슬라이스별 mA 값 (NaN 패딩)
     max_slices = max(len(r) for r in aec_rows) if aec_rows else 0
     slice_cols = [f"slice_{i+1}" for i in range(max_slices)]
     aec_data   = []
     for pid, vals in zip(patient_ids_all[:n_done], aec_rows):
         aec_data.append([pid] + vals + [np.nan] * (max_slices - len(vals)))
     aec_df = pd.DataFrame(aec_data, columns=["PatientID"] + slice_cols)
-    aec_df.insert(1, "n_slices", [row.get("n_slices", np.nan) for row in meta_rows])
+    
+    # [수정] No 컬럼 맨 앞으로 배치되도록 보장
+    aec_df.insert(0, "No", aec_df["PatientID"].map(no_map))
+    aec_df.insert(2, "n_slices", [row.get("n_slices", np.nan) for row in meta_rows])
     aec_df[aec_df.select_dtypes(include="float").columns] = \
         aec_df.select_dtypes(include="float").round(2)
     aec_df.to_excel(AECRAW_PATH, index=False)
@@ -215,18 +195,8 @@ def write_intermediate(patient_ids_all, meta_rows, aec_rows, clinical_df):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def verify_dicom(meta_df, aec_df, n_samples=5, seed=42):
-    """추출된 Excel 데이터를 DICOM 원본과 대조해 정합성을 검증한다.
-
-    n_samples개 환자를 무작위 샘플링해 kVp, n_slices, z_range_mm, mA 시퀀스를
-    DICOM 원본에서 재추출해 비교한다. 불일치 시 WARN을 출력한다.
-    """
     aec_slice_cols = [c for c in aec_df.columns if c.startswith("slice_")]
-
-    # DICOM 폴더가 있는 환자만 샘플링
-    eligible = [
-        pid for pid in meta_df["PatientID"].astype(str).tolist()
-        if pid in folder_map
-    ]
+    eligible = [pid for pid in meta_df["PatientID"].astype(str).tolist() if pid in folder_map]
     if not eligible:
         print("[검증] DICOM 폴더가 있는 환자가 없습니다.")
         return
@@ -239,44 +209,32 @@ def verify_dicom(meta_df, aec_df, n_samples=5, seed=42):
 
     for pid_str in samples:
         meta_dict, mA_vals = extract_patient(pid_str)
-
         m_row = meta_df[meta_df["PatientID"].astype(str) == pid_str]
         a_row = aec_df[aec_df["PatientID"].astype(str) == pid_str]
 
-        if meta_dict is None:
-            print(f"  [FAIL] {pid_str}: DICOM 재추출 실패")
-            continue
-        if m_row.empty:
-            print(f"  [FAIL] {pid_str}: Excel에 metadata 없음")
-            continue
-        if a_row.empty:
-            print(f"  [FAIL] {pid_str}: Excel에 aec_raw 없음")
+        if meta_dict is None or m_row.empty or a_row.empty:
+            print(f"  [FAIL] {pid_str}: 데이터 누락 또는 재추출 실패")
             continue
 
         issues = []
-
-        # kVp 비교
         kv_excel = float(m_row["kVp"].values[0])
         kv_dcm   = meta_dict["kVp"]
         if not (np.isnan(kv_excel) and np.isnan(kv_dcm)):
             if np.isnan(kv_excel) != np.isnan(kv_dcm) or abs(kv_excel - kv_dcm) > 0.5:
                 issues.append(f"kVp: excel={kv_excel} dcm={kv_dcm}")
 
-        # n_slices 비교
         ns_excel_raw = m_row["n_slices"].values[0]
         ns_excel = int(ns_excel_raw) if not pd.isna(ns_excel_raw) else None
         ns_dcm   = meta_dict["n_slices"]
         if ns_excel != ns_dcm:
             issues.append(f"n_slices: excel={ns_excel} dcm={ns_dcm}")
 
-        # z_range_mm 비교 (±1 mm 허용)
         if "z_range_mm" in m_row.columns:
             zr_excel = float(m_row["z_range_mm"].values[0])
             zr_dcm   = meta_dict["z_range_mm"]
             if not (np.isnan(zr_excel) or np.isnan(zr_dcm)) and abs(zr_excel - zr_dcm) > 1.0:
                 issues.append(f"z_range_mm: excel={zr_excel:.1f} dcm={zr_dcm:.1f}")
 
-        # mA 시퀀스 비교
         aec_vals_excel = a_row.iloc[0][aec_slice_cols].dropna().values.astype(float)
         mA_arr_dcm     = np.array(mA_vals, dtype=float)
         if len(aec_vals_excel) != len(mA_arr_dcm):
@@ -290,24 +248,13 @@ def verify_dicom(meta_df, aec_df, n_samples=5, seed=42):
             print(f"  [WARN] {pid_str}: {' | '.join(issues)}")
         else:
             mA_med = np.nanmedian(mA_vals) if mA_vals else float("nan")
-            print(f"  [ OK ] {pid_str}: kVp={meta_dict['kVp']}, "
-                  f"n_slices={meta_dict['n_slices']}, "
-                  f"z_range={meta_dict.get('z_range_mm', float('nan')):.1f}mm, "
-                  f"mA_median={mA_med:.1f}")
+            print(f"  [ OK ] {pid_str}: kVp={meta_dict['kVp']}, n_slices={meta_dict['n_slices']}, z_range={meta_dict.get('z_range_mm', float('nan')):.1f}mm, mA_median={mA_med:.1f}")
             ok_count += 1
 
     print(f"[검증 완료] {ok_count}/{len(samples)} 정상\n")
 
 
 def check_z_direction_consistency(meta_df, z_iqr_factor=3.0):
-    """저장된 AEC 곡선의 방향(z축) 일관성을 검증한다.
-
-    모든 환자는 z 오름차순(caudal→cranial) 정렬로 저장된다.
-    이 함수는 다음을 확인한다:
-      1) z_flipped 비율 — 원본 DICOM이 내림차순이었던 환자 비율 (정규화는 완료됨)
-      2) z_min / z_max 분포 — IQR × z_iqr_factor 밖의 이상치 탐지
-         (해부학적 위치가 다른 스캔 감지용)
-    """
     if "z_min" not in meta_df.columns or "z_max" not in meta_df.columns:
         print("[방향 검증] z_min/z_max 컬럼 없음 — 검증 불가")
         return
@@ -319,42 +266,25 @@ def check_z_direction_consistency(meta_df, z_iqr_factor=3.0):
         return
 
     print(f"\n[방향 일관성 검증]  N={n_total}")
-
-    # 1) z_flipped 비율
     if "z_flipped" in meta_df.columns:
         n_flipped = valid["z_flipped"].astype(float).sum()
-        print(f"  원본 DICOM 내림차순(cranial→caudal) 저장 비율: "
-              f"{int(n_flipped)}/{n_total} ({100*n_flipped/n_total:.1f}%)")
-        print(f"  → 저장 시 z 오름차순 정렬 적용, AEC 곡선 방향 통일 완료")
+        print(f"  원본 DICOM 내림차순(cranial→caudal) 저장 비율: {int(n_flipped)}/{"N_total"} ({100*n_flipped/n_total:.1f}%)")
 
-    # 2) z_min / z_max 이상치 탐지
     for col in ("z_min", "z_max"):
         q1, q3 = valid[col].quantile([0.25, 0.75])
         iqr    = q3 - q1
         lo     = q1 - z_iqr_factor * iqr
         hi     = q3 + z_iqr_factor * iqr
         outliers = valid[~valid[col].between(lo, hi)][["PatientID", col]]
-        print(f"  {col}: median={valid[col].median():.1f}mm, "
-              f"IQR=[{q1:.1f}, {q3:.1f}], "
-              f"허용범위=[{lo:.1f}, {hi:.1f}]")
-        if outliers.empty:
-            print(f"         이상치 없음")
-        else:
-            print(f"         이상치 {len(outliers)}명: "
-                  + ", ".join(f"{r['PatientID']}({r[col]:.1f})"
-                              for _, r in outliers.head(10).iterrows()))
-
-    # 3) 전체 z 범위 요약
-    print(f"  전체 스캔 z범위: [{valid['z_min'].min():.1f}, {valid['z_max'].max():.1f}]mm")
-    print(f"  z_range_mm: median={valid['z_range_mm'].median():.1f}, "
-          f"min={valid['z_range_mm'].min():.1f}, max={valid['z_range_mm'].max():.1f}")
+        print(f"  {col}: median={valid[col].median():.1f}mm, IQR=[{q1:.1f}, {q3:.1f}], 허용범위=[{lo:.1f}, {hi:.1f}]")
+        if not outliers.empty:
+            print(f"         이상치 {len(outliers)}명: " + ", ".join(f"{r['PatientID']}({r[col]:.1f})" for _, r in outliers.head(10).iterrows()))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Step 1: DICOM 추출
 # ══════════════════════════════════════════════════════════════════════════════
 
-# 원본 임상 데이터 로드 — CLINICAL_SRC는 이후 절대 덮어쓰지 않음
 clinical_df = pd.read_excel(CLINICAL_SRC)
 all_pids    = clinical_df["PatientID"].astype(str).tolist()
 total       = len(all_pids)
@@ -365,13 +295,8 @@ if missing_dicom:
 
 if SKIP_STEP1:
     if not os.path.exists(META_OUT) or not os.path.exists(AECRAW_PATH):
-        raise FileNotFoundError(
-            f"SKIP_STEP1=True이지만 Step 1 출력 파일이 없습니다:\n"
-            f"  {META_OUT}\n  {AECRAW_PATH}"
-        )
-    print(f"[Step 1 SKIP] 기존 파일 사용")
-    print(f"  {META_OUT}")
-    print(f"  {AECRAW_PATH}")
+        raise FileNotFoundError(f"SKIP_STEP1=True이지만 Step 1 출력 파일이 없습니다.")
+    print(f"[Step 1 SKIP] 기존 파일 사용\n  {META_OUT}\n  {AECRAW_PATH}")
 else:
     start_idx, meta_rows, aec_rows = load_checkpoint()
     if start_idx > 0:
@@ -402,24 +327,19 @@ else:
     if os.path.exists(CHECKPOINT):
         os.remove(CHECKPOINT)
 
-# Step 1 완료 후 최종 파일 로드 (Step 2 입력용)
 meta_df = pd.read_excel(META_OUT)
 aec_df  = pd.read_excel(AECRAW_PATH)
 
-print(f"\n[Step 1 완료]")
-print(f"  metadata : {meta_df.shape}  (n_slices NaN: {meta_df['n_slices'].isna().sum()})")
-print(f"  aec_raw  : {aec_df.shape}")
-
-# DICOM 원본 대조 검증 및 방향 일관성 확인
+print(f"\n[Step 1 완료]\n  metadata : {meta_df.shape}\n  aec_raw  : {aec_df.shape}")
 verify_dicom(meta_df, aec_df, n_samples=5)
 check_z_direction_consistency(meta_df)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Step 2: 병합 및 필터 → merged_features.xlsx
 # ══════════════════════════════════════════════════════════════════════════════
 
-MIN_MFR_RATIO = 0.05  # 전체 대비 비율 미만인 CT 기기 모델 제거 기준
-
+MIN_MFR_RATIO = 0.05
 slice_cols = [c for c in aec_df.columns if c.startswith("slice_")]
 
 # 1) metadata 결측치 제거
@@ -427,19 +347,19 @@ merged     = pd.merge(meta_df, aec_df[["PatientID"]], on="PatientID", how="inner
 meta_clean = merged.dropna()
 n1 = len(meta_clean)
 
-# 2) AEC 분산 없는 환자 제거 (모든 슬라이스 mA 동일 → AEC 미작동 의심)
+# 2) AEC 분산 없는 환자 제거
 aec_std    = aec_df.set_index("PatientID")[slice_cols].std(axis=1)
 no_var_ids = set(aec_std[aec_std == 0].index)
 meta_clean = meta_clean[~meta_clean["PatientID"].isin(no_var_ids)].reset_index(drop=True)
 n2 = len(meta_clean)
 
-# 3) 비율 MIN_MFR_RATIO 미만 CT 기기 모델 제거 (소수 기기는 학습 불안정)
+# 3) 소수 기기 모델 제거
 model_ratio = meta_clean["ManufacturerModelName"].value_counts(normalize=True)
 rare_models = set(model_ratio[model_ratio < MIN_MFR_RATIO].index)
 meta_clean  = meta_clean[~meta_clean["ManufacturerModelName"].isin(rare_models)].reset_index(drop=True)
 n3 = len(meta_clean)
 
-# 4) kVp == 100 스캔만 유지 (전압이 다르면 mA 분포 비교 불가)
+# 4) kVp == 100만 유지
 meta_clean = meta_clean[meta_clean["kVp"] == 100].reset_index(drop=True)
 n4 = len(meta_clean)
 
@@ -447,7 +367,7 @@ n4 = len(meta_clean)
 meta_clean = meta_clean[meta_clean["PatientAge"] >= 18].reset_index(drop=True)
 n5 = len(meta_clean)
 
-# 6) 임상 컬럼 IQR × 1.5 이상치 제거 (PatientAge, BMI, SMI, TAMA)
+# 6) 임상 컬럼 IQR 이상치 제거
 iqr_cols = ["PatientAge", "BMI", "SMI"] + (["TAMA"] if "TAMA" in meta_clean.columns else [])
 for col in iqr_cols:
     q1, q3 = meta_clean[col].quantile([0.25, 0.75])
@@ -456,9 +376,8 @@ for col in iqr_cols:
     meta_clean = meta_clean[meta_clean[col].between(lo, hi)].reset_index(drop=True)
 n6 = len(meta_clean)
 
-# 7) AEC 행 평균 IQR × 1.5 이상치 제거
-aec_for_iqr = (aec_df[aec_df["PatientID"].isin(set(meta_clean["PatientID"]))]
-               .set_index("PatientID")[slice_cols])
+# 7) AEC 행 평균 IQR 이상치 제거
+aec_for_iqr = aec_df[aec_df["PatientID"].isin(set(meta_clean["PatientID"]))].set_index("PatientID")[slice_cols]
 row_mean    = aec_for_iqr.mean(axis=1)
 q1, q3     = row_mean.quantile([0.25, 0.75])
 iqr        = q3 - q1
@@ -469,58 +388,86 @@ n7 = len(meta_clean)
 
 valid_ids = set(meta_clean["PatientID"])
 
-print(f"[Step 2 필터 결과]")
-print(f"  raw total            : {len(meta_df)}")
-print(f"  after dropna         : {n1}")
-print(f"  after no-var AEC     : {n2}  (dropped {n1-n2})")
-print(f"  after rare model     : {n3}  (dropped {n2-n3}, models={rare_models})")
-print(f"  after kVp==100       : {n4}  (dropped {n3-n4})")
-print(f"  after age>=18        : {n5}  (dropped {n4-n5})")
-print(f"  after clinical IQR   : {n6}  (dropped {n5-n6})")
-print(f"  after AEC IQR        : {n7}  (dropped {n6-n7})")
-print(f"  final                : {n7}")
-
-# Sheet 1: metadata
+# ── Sheet 1: metadata 컬럼 정렬 보장 ─────────────────────────────────────────
 sheet_meta = meta_clean.reset_index(drop=True)
+if "No" in sheet_meta.columns:
+    sheet_meta = sheet_meta.drop(columns=["No"])
+sheet_meta.insert(0, "No", sheet_meta["PatientID"].map(no_map))
 
-# Sheet 2: aec_raw (meta_clean 순서로 정렬, n_slices 앞배치)
+# No와 PatientID를 무조건 제일 앞으로 고정
+_meta_cols = ["No", "PatientID"] + [c for c in sheet_meta.columns if c not in ["No", "PatientID"]]
+sheet_meta = sheet_meta[_meta_cols]
+
+
+# ── Sheet 2: aec_raw 컬럼 정렬 보장 ──────────────────────────────────────────
 sheet_aecraw = (
     meta_clean[["PatientID"]]
     .merge(aec_df[aec_df["PatientID"].isin(valid_ids)], on="PatientID", how="left")
     .reset_index(drop=True)
 )
+if "No" in sheet_aecraw.columns:
+    sheet_aecraw = sheet_aecraw.drop(columns=["No"])
+sheet_aecraw.insert(0, "No", sheet_aecraw["PatientID"].map(no_map))
+
 _aec_slice_cols = [c for c in sheet_aecraw.columns if c.startswith("slice_")]
 if "n_slices" not in sheet_aecraw.columns:
-    sheet_aecraw.insert(1, "n_slices", sheet_aecraw[_aec_slice_cols].notna().sum(axis=1))
-else:
-    _cols = ["PatientID", "n_slices"] + [c for c in sheet_aecraw.columns
-                                         if c not in ("PatientID", "n_slices")]
-    sheet_aecraw = sheet_aecraw[_cols]
+    sheet_aecraw["n_slices"] = sheet_aecraw[_aec_slice_cols].notna().sum(axis=1)
 
-# Sheet 3~5: 보간 AEC (64 / 128 / 256 포인트)
-def make_interp_sheet(aecraw_df, pid_list, s_cols, n_points):
-    """각 환자의 가변 길이 AEC 곡선을 n_points 포인트로 선형 보간한다."""
+# 순서 고정: No, PatientID, n_slices, 그 외 순서
+_raw_cols = ["No", "PatientID", "n_slices"] + [c for c in sheet_aecraw.columns if c not in ["No", "PatientID", "n_slices"]]
+sheet_aecraw = sheet_aecraw[_raw_cols]
+
+
+# ── Sheet 3~5: 보간 AEC (64 / 128 / 256 포인트) 컬럼 정렬 보장 ─────────────────
+def make_interp_sheet(aecraw_df, pid_list, s_cols, n_points, z_bounds=None, meta_idx=None):
     x_new = np.linspace(0, 1, n_points)
-    cols  = ["PatientID"] + [f"z_{i+1}" for i in range(n_points)]
+    cols  = ["No", "PatientID"] + [f"z_{i+1}" for i in range(n_points)]
     rows  = []
     for pid in pid_list:
-        vals   = (aecraw_df[aecraw_df["PatientID"] == pid]
-                  .iloc[0][s_cols].dropna().values.astype(float))
+        vals = aecraw_df[aecraw_df["PatientID"] == pid].iloc[0][s_cols].dropna().values.astype(float)
+
+        if (z_bounds is not None and meta_idx is not None
+                and pid in z_bounds.index and pid in meta_idx.index):
+            z_lo  = z_bounds.at[pid, "z_pubis_bottom"]
+            z_hi  = z_bounds.at[pid, "z_t12_upper"]
+            z_min = meta_idx.at[pid, "z_min"]
+            z_rng = meta_idx.at[pid, "z_range_mm"]
+            n = len(vals)
+            if pd.notna(z_lo) and pd.notna(z_hi) and pd.notna(z_min) and pd.notna(z_rng) and n > 1:
+                z_pos  = np.linspace(z_min, z_min + z_rng, n)
+                lo_idx = max(0, int(np.searchsorted(z_pos, z_lo)))
+                hi_idx = min(n, int(np.searchsorted(z_pos, z_hi, side="right")))
+                if hi_idx - lo_idx > 1:
+                    vals = vals[lo_idx:hi_idx]
+
         x_orig = np.linspace(0, 1, len(vals))
-        rows.append([pid] + np.interp(x_new, x_orig, vals).tolist())
+        rows.append([no_map.get(str(pid)), pid] + np.interp(x_new, x_orig, vals).tolist())
     return pd.DataFrame(rows, columns=cols)
 
 
+Z_BOUNDS_PATH = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_z_bounds.xlsx"
+if os.path.exists(Z_BOUNDS_PATH):
+    _zb = pd.read_excel(Z_BOUNDS_PATH).query("seg_status == 'ok'")
+    _zb["PatientID"] = _zb["PatientID"].astype(int)
+    z_bounds_df = _zb.set_index("PatientID")[["z_t12_upper", "z_pubis_bottom"]]
+    print(f"[z_bounds] {len(z_bounds_df)}명 로드")
+else:
+    z_bounds_df = None
+    print("[z_bounds] 파일 없음 → 전체 구간 보간")
+
+_meta_idx = meta_clean.set_index("PatientID")[["z_min", "z_range_mm"]]
+
+pid_list     = meta_clean["PatientID"].tolist()
+sheet_aec64  = make_interp_sheet(aec_df, pid_list, slice_cols, 64,  z_bounds_df, _meta_idx)
+sheet_aec128 = make_interp_sheet(aec_df, pid_list, slice_cols, 128, z_bounds_df, _meta_idx)
+sheet_aec256 = make_interp_sheet(aec_df, pid_list, slice_cols, 256, z_bounds_df, _meta_idx)
+
+
+# ── 최종 저장 ─────────────────────────────────────────────────────────────────
 def round_floats(df, decimals=2):
     float_cols = df.select_dtypes(include="float").columns
     df[float_cols] = df[float_cols].round(decimals)
     return df
-
-
-pid_list     = meta_clean["PatientID"].tolist()
-sheet_aec64  = make_interp_sheet(aec_df, pid_list, slice_cols, 64)
-sheet_aec128 = make_interp_sheet(aec_df, pid_list, slice_cols, 128)
-sheet_aec256 = make_interp_sheet(aec_df, pid_list, slice_cols, 256)
 
 with pd.ExcelWriter(OUT_PATH, engine="openpyxl") as writer:
     round_floats(sheet_meta).to_excel(writer,    sheet_name="metadata", index=False)
@@ -530,8 +477,3 @@ with pd.ExcelWriter(OUT_PATH, engine="openpyxl") as writer:
     round_floats(sheet_aec256).to_excel(writer,  sheet_name="aec_256",  index=False)
 
 print(f"\n[Step 2 완료]  Saved: {OUT_PATH}")
-print(f"  metadata : {sheet_meta.shape}")
-print(f"  aec_raw  : {sheet_aecraw.shape}")
-print(f"  aec_64   : {sheet_aec64.shape}")
-print(f"  aec_128  : {sheet_aec128.shape}")
-print(f"  aec_256  : {sheet_aec256.shape}")
