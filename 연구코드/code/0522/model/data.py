@@ -18,7 +18,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-from config import DATA_PATH, AEC_SHEET, AEC_LEN, SEED, TEST_SIZE, SMI_THRESH_M, SMI_THRESH_F, AEC_SHUFFLE_SEED
+from config import DATA_PATH, AEC_SHEET, AEC_LEN, SEED, TEST_SIZE, SMI_THRESH_M, SMI_THRESH_F, AEC_SHUFFLE_SEED, MIN_MFR_RATIO
 
 
 def _make_label(row):
@@ -142,6 +142,10 @@ def load_data_with_aec_meta():
 
     df = pd.merge(df_meta, df_aec[["PatientID"] + aec_cols], on="PatientID", how="inner").reset_index(drop=True)
 
+    mfr_freq = df["ManufacturerModelName"].value_counts(normalize=True)
+    valid_mfr = mfr_freq[mfr_freq >= MIN_MFR_RATIO].index
+    df = df[df["ManufacturerModelName"].isin(valid_mfr)].reset_index(drop=True)
+
     df["label"]   = df.apply(_make_label, axis=1)
     df["sex_enc"] = (df["PatientSex"] == "M").astype(int)
 
@@ -196,11 +200,11 @@ def aec_variant(X_aec: np.ndarray, variant: str):
         x_new = np.linspace(0, 1, 64)
         return np.array([np.interp(x_new, x_old, row) for row in X_aec], dtype=np.float32), None
     if variant == "len128":
-        x_old = np.linspace(0, 1, P)
-        x_new = np.linspace(0, 1, 128)
-        return np.array([np.interp(x_new, x_old, row) for row in X_aec], dtype=np.float32), None
+        return X_aec.copy(), None   # baseline: 원본 그대로 (AEC_LEN = 128)
     if variant == "len256":
-        return X_aec.copy(), None   # baseline: 원본 그대로
+        x_old = np.linspace(0, 1, P)
+        x_new = np.linspace(0, 1, 256)
+        return np.array([np.interp(x_new, x_old, row) for row in X_aec], dtype=np.float32), None
 
     # ── 시간 범위 자르기 ─────────────────────────────────────
     # 곡선 양끝은 스캐너 특성(램프업/다운)에 영향받으므로 제거 효과를 확인한다
@@ -271,7 +275,7 @@ def describe_dataset() -> None:
         print(hdr)
         print(div)
         for grp_label, sex_val in groups:
-            sub = df[col] if sex_val is None else df.loc[df["PatientSex"] == sex_val, col]
+            sub = df[col] if sex_val is None else df[df["PatientSex"] == sex_val][col]
             print(
                 f"  {grp_label:<14}  {len(sub):>5}  {sub.mean():>8.2f}  {sub.std():>8.2f}"
                 f"  {sub.quantile(0.25):>8.2f}  {sub.median():>8.2f}  {sub.quantile(0.75):>8.2f}"

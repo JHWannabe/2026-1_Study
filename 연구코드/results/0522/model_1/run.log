@@ -1,0 +1,91 @@
+============================================================
+  MODEL 1 — Clinic Only  (1 case)
+============================================================
+
+############################################################
+  [M1] CASE : scale_clinic  (scale_clinic=True)
+############################################################
+=======================================================
+5-Fold Cross-Validation  [scale_X=True]
+=======================================================
+
+── Fold 1/5 ──────────────────────────────
+  LR — AUC: 0.8168  AUPRC: 0.2829  Brier: 0.1891  Acc: 0.7346  F1: 0.3768
+
+── Fold 2/5 ──────────────────────────────
+  LR — AUC: 0.7501  AUPRC: 0.2753  Brier: 0.1909  Acc: 0.7346  F1: 0.3582
+
+── Fold 3/5 ──────────────────────────────
+  LR — AUC: 0.7085  AUPRC: 0.2596  Brier: 0.2131  Acc: 0.6420  F1: 0.2564
+
+── Fold 4/5 ──────────────────────────────
+  LR — AUC: 0.7409  AUPRC: 0.2460  Brier: 0.1944  Acc: 0.6708  F1: 0.2740
+
+── Fold 5/5 ──────────────────────────────
+  LR — AUC: 0.8659  AUPRC: 0.4718  Brier: 0.1773  Acc: 0.7453  F1: 0.4058
+
+===========================================================================
+LR  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8168     0.2829     0.1891     0.7346     0.3768
+  2          0.7501     0.2753     0.1909     0.7346     0.3582
+  3          0.7085     0.2596     0.2131     0.6420     0.2564
+  4          0.7409     0.2460     0.1944     0.6708     0.2740
+  5          0.8659     0.4718     0.1773     0.7453     0.4058
+  ──────────────────────────────────────────────────────────
+  Mean       0.7765     0.3071     0.1930     0.7055     0.3342
+  ±Std       0.0569     0.0833     0.0116     0.0413     0.0586
+
+=======================================================
+Final Test Evaluation  (scale_X=True)
+=======================================================
+
+Logistic Regression — Test Set (Overall):
+  AUC: 0.8190  AUPRC: 0.3730  Brier: 0.1901  Acc: 0.7030  F1: 0.3478
+
+Logistic Regression — Test Set (By Sex):
+  [M] n=68  AUC: 0.7862  AUPRC: 0.4790  Brier: 0.2569  Acc: 0.6176  F1: 0.5000
+              precision    recall  f1-score   support
+
+      Normal       0.94      0.55      0.69        53
+  Sarcopenia       0.35      0.87      0.50        15
+
+    accuracy                           0.62        68
+   macro avg       0.64      0.71      0.60        68
+weighted avg       0.81      0.62      0.65        68
+
+  [F] n=134  AUC: 0.7057  AUPRC: 0.1095  Brier: 0.1561  Acc: 0.7463  F1: 0.1500
+              precision    recall  f1-score   support
+
+      Normal       0.97      0.76      0.85       128
+  Sarcopenia       0.09      0.50      0.15         6
+
+    accuracy                           0.75       134
+   macro avg       0.53      0.63      0.50       134
+weighted avg       0.93      0.75      0.82       134
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — LR  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.8190         0.7203         0.9040
+  AUPRC            0.3730         0.2143         0.5801
+  Brier            0.1901         0.1634         0.2169
+  Accuracy         0.7030         0.6386         0.7624
+  F1               0.3478         0.2195         0.4696
+
+Saved:
+  연구코드/results/0522/model_1\scale_clinic/data_distribution.png
+  연구코드/results/0522/model_1\scale_clinic/cv_roc_curves.png
+  연구코드/results/0522/model_1\scale_clinic/cv_metric_distribution.png
+  연구코드/results/0522/model_1\scale_clinic/confusion_matrices.png
+  연구코드/results/0522/model_1\scale_clinic/test_roc_curves.png
+  연구코드/results/0522/model_1\scale_clinic/test_roc_by_sex.png
+  연구코드/results/0522/model_1\scale_clinic/calibration.png
+  연구코드/results/0522/model_1\scale_clinic/results.md

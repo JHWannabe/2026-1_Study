@@ -495,6 +495,38 @@ def plot_calibration(entries, out_path, n_bins=10):
     plt.close(fig)
 
 
+def plot_roc_all_models(aec_var,
+                        r1_y, r1_prob,
+                        r2_y, r2_prob,
+                        r2_2_y, r2_2_prob,
+                        r3_y, r3_prob,
+                        out_path):
+    """M1/M2/M2_2/M3의 test-set ROC 커브를 하나의 이미지에 비교."""
+    fig, ax = plt.subplots(figsize=(8, 7))
+    fig.suptitle(f"ROC Comparison — AEC variant: {aec_var}",
+                 fontsize=13, fontweight="bold")
+
+    entries = [
+        ("Model 1  LR (Clinic Only)",        r1_y,   r1_prob,   "steelblue", "--"),
+        (f"Model 2  CrossAttn ({aec_var})",  r2_y,   r2_prob,   "tomato",    "-"),
+        (f"Model 2_2 Unmatched ({aec_var})", r2_2_y, r2_2_prob, "orange",    "-."),
+        (f"Model 3  CrossAttn3 ({aec_var})", r3_y,   r3_prob,   "seagreen",  "-"),
+    ]
+    for label, y_true, y_prob, color, ls in entries:
+        fpr, tpr, _ = roc_curve(y_true, y_prob)
+        auc = roc_auc_score(y_true, y_prob)
+        ax.plot(fpr, tpr, color=color, linewidth=2, linestyle=ls,
+                label=f"{label}  (AUC={auc:.3f})")
+
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.4, label="Chance")
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.legend(fontsize=9, loc="lower right")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def save_all(lr_roc_folds, lr_cv,
              X_cv, y_cv, sex_cv,
              X_te, y_te, lr_pred, lr_prob,
@@ -599,6 +631,30 @@ def plot_test_roc_cross(ca_true_te, ca_prob_te):
     ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
     ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
     _save_cross("test_roc_curves.png", fig)
+
+
+def plot_test_roc_with_baseline(primary_true, primary_prob, primary_label,
+                                 baseline_true, baseline_prob, baseline_label,
+                                 out_path):
+    """Primary 모델의 ROC 커브와 Baseline 모델의 ROC 커브를 함께 그려 out_path에 저장."""
+    fig, ax = plt.subplots(figsize=(7, 6))
+    fig.suptitle("Test Set ROC Curves (vs Baseline)", fontsize=13, fontweight="bold")
+
+    fpr_b, tpr_b, _ = roc_curve(baseline_true, baseline_prob)
+    auc_b = roc_auc_score(baseline_true, baseline_prob)
+    ax.plot(fpr_b, tpr_b, color="steelblue", linewidth=2, linestyle="--", alpha=0.8,
+            label=f"{baseline_label} (AUC={auc_b:.3f})")
+
+    fpr_p, tpr_p, _ = roc_curve(primary_true, primary_prob)
+    auc_p = roc_auc_score(primary_true, primary_prob)
+    ax.plot(fpr_p, tpr_p, color="tomato", linewidth=2,
+            label=f"{primary_label} (AUC={auc_p:.3f})")
+
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
+    ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend(fontsize=9)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
 
 def plot_test_roc_by_sex_cross(ca_true_te, ca_prob_te, sex_te):

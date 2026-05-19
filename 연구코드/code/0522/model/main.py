@@ -38,7 +38,7 @@ from cross_val import (run_cross_validation, run_cross_validation_cross,
                        run_cross_validation_cross3)
 from evaluate import evaluate_test, evaluate_test_cross, evaluate_test_cross3
 from metrics import print_cv_summary
-from visualize import save_all, save_all_cross
+from visualize import save_all, save_all_cross, plot_test_roc_with_baseline, plot_roc_all_models
 
 # ── 모델별 스케일링 케이스 정의 ──────────────────────────────
 # 각 튜플: (결과 디렉토리 이름, scale_clinic, [scale_aec])
@@ -123,6 +123,8 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
                 "m1_lr":        _metrics(y_te, lr_pred, lr_prob),
                 "lr_cv_folds":  lr_cv,
                 "test_stats":   stats_te,
+                "y_te":         y_te,
+                "lr_prob":      lr_prob,
             })
     finally:
         sys.stdout = sys.__stdout__
@@ -193,6 +195,8 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                     "m2_ca":        _metrics(ca_true_te, ca_pred_te, ca_prob_te),
                     "ca_cv_folds":  ca_cv,
                     "test_stats":   stats_te2,
+                    "y_true_te":    ca_true_te,
+                    "ca_prob_te":   ca_prob_te,
                 })
     finally:
         sys.stdout = sys.__stdout__
@@ -266,6 +270,8 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                     "m2_2_ca":      _metrics(ca_true_te, ca_pred_te, ca_prob_te),
                     "ca_cv_folds":  ca_cv,
                     "test_stats":   stats_te2_2,
+                    "y_true_te":    ca_true_te,
+                    "ca_prob_te":   ca_prob_te,
                 })
     finally:
         sys.stdout = sys.__stdout__
@@ -340,6 +346,8 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                     "m3_ca3":        _metrics(ca3_true_te, ca3_pred_te, ca3_prob_te),
                     "ca3_cv_folds":  ca3_cv,
                     "test_stats":    stats_te3,
+                    "y_true_te":     ca3_true_te,
+                    "ca3_prob_te":   ca3_prob_te,
                 })
     finally:
         sys.stdout = sys.__stdout__
@@ -348,6 +356,82 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
         f.write(buf.getvalue())
 
     return results
+
+
+def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3):
+    """병렬 실행 완료 후, baseline을 포함한 test_roc_curves.png를 각 디렉토리에 덮어씀.
+    - M2/M3: Model 1 LR을 baseline으로 비교
+    - M2_2: 동일 aec_var의 Model 2 Matched를 baseline으로 비교
+    """
+    r1 = results_m1[0]
+    m1_y_te    = r1["y_te"]
+    m1_lr_prob = r1["lr_prob"]
+
+    for r in results_m2:
+        out_path = os.path.join(RESULTS_DIR_CROSS, r["aec_var"], r["case"], "test_roc_curves.png")
+        plot_test_roc_with_baseline(
+            primary_true=r["y_true_te"],
+            primary_prob=r["ca_prob_te"],
+            primary_label=f"Model 2 CrossAttn ({r['aec_var']})",
+            baseline_true=m1_y_te,
+            baseline_prob=m1_lr_prob,
+            baseline_label="Model 1 LR (baseline)",
+            out_path=out_path,
+        )
+
+    for r in results_m3:
+        out_path = os.path.join(RESULTS_DIR_CROSS3, r["aec_var"], r["case"], "test_roc_curves.png")
+        plot_test_roc_with_baseline(
+            primary_true=r["y_true_te"],
+            primary_prob=r["ca3_prob_te"],
+            primary_label=f"Model 3 CrossAttn3 ({r['aec_var']})",
+            baseline_true=m1_y_te,
+            baseline_prob=m1_lr_prob,
+            baseline_label="Model 1 LR (baseline)",
+            out_path=out_path,
+        )
+
+    m2_dict = {(r["aec_var"], r["case"]): r for r in results_m2}
+    for r in results_m2_2:
+        key = (r["aec_var"], r["case"])
+        r2 = m2_dict.get(key)
+        if r2 is None:
+            continue
+        out_path = os.path.join(RESULTS_DIR_CROSS_2_2, r["aec_var"], r["case"], "test_roc_curves.png")
+        plot_test_roc_with_baseline(
+            primary_true=r["y_true_te"],
+            primary_prob=r["ca_prob_te"],
+            primary_label=f"Model 2_2 Unmatched ({r['aec_var']})",
+            baseline_true=r2["y_true_te"],
+            baseline_prob=r2["ca_prob_te"],
+            baseline_label=f"Model 2 Matched ({r['aec_var']}, baseline)",
+            out_path=out_path,
+        )
+
+    # ── aec_var별 전체 모델 비교 (하나의 이미지) ─────────────────
+    comparison_dir = os.path.join(os.path.dirname(RESULTS_DIR), "comparison")
+    os.makedirs(comparison_dir, exist_ok=True)
+
+    r2_dict   = {r["aec_var"]: r for r in results_m2}
+    r2_2_dict = {r["aec_var"]: r for r in results_m2_2}
+    r3_dict   = {r["aec_var"]: r for r in results_m3}
+
+    for aec_var in AEC_VARIANTS:
+        if aec_var not in r2_dict or aec_var not in r2_2_dict or aec_var not in r3_dict:
+            continue
+        r2  = r2_dict[aec_var]
+        r22 = r2_2_dict[aec_var]
+        r3  = r3_dict[aec_var]
+        plot_roc_all_models(
+            aec_var=aec_var,
+            r1_y=r1["y_te"],         r1_prob=r1["lr_prob"],
+            r2_y=r2["y_true_te"],    r2_prob=r2["ca_prob_te"],
+            r2_2_y=r22["y_true_te"], r2_2_prob=r22["ca_prob_te"],
+            r3_y=r3["y_true_te"],    r3_prob=r3["ca3_prob_te"],
+            out_path=os.path.join(comparison_dir, f"roc_all_models_{aec_var}.png"),
+        )
+
+    print("  Comparison ROC curves saved.")
 
 
 def run_all_cases():
@@ -407,6 +491,9 @@ def run_all_cases():
         results_m3   = fut3.result()
 
     print("  All models done.\n")
+
+    # ── baseline 포함 ROC 재저장 ──────────────────────────────
+    _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3)
 
     # ── 비교 테이블 출력 & 저장 ──────────────────────────────
     _print_comparison(results_m1, results_m2, results_m2_2, results_m3)
@@ -726,8 +813,9 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3):
     _CI_METS = [("AUC-ROC", "auc"), ("AUPRC", "auprc"),
                 ("Brier",   "brier"), ("Accuracy", "acc"), ("F1", "f1")]
 
-    def _ci_rows(model_lbl, sub_lbl, case_lbl, ci_dict):
-        rows = []
+    def _ci_rows(model_lbl: str, sub_lbl: str, case_lbl: str,
+                 ci_dict: "dict[str, tuple[float, float, float]]") -> "list[str]":
+        rows: list[str] = []
         for mname, mkey in _CI_METS:
             if mkey in ci_dict:
                 est, lo, hi = ci_dict[mkey]

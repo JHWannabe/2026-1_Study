@@ -10,13 +10,13 @@ import torch
 
 # ── 데이터 경로 ──────────────────────────────────────────────
 DATA_PATH = "연구코드/data/강남/강남_merged_features.xlsx"
-AEC_LEN   = 128                        # 사용할 AEC 포인트 수 (64 / 128 / 256)
-AEC_SHEET = f"aec_{AEC_LEN}"          # AEC_LEN에 따라 시트 자동 선택
+AEC_LEN  = 128              # AEC 시퀀스 길이 (원본 길이와 무관하게 고정)
+AEC_SHEET = f"aec_128"          # AEC_LEN에 따라 시트 자동 선택
 
 # AEC 민감도 분석 변환 목록 — data.aec_variant() 참고
 # 해상도(len*)·시간 범위(crop*)·정규화(norm)·이상치 제외(excl_extreme)를 비교한다
 AEC_VARIANTS = [
-    "len128",        # 256→128점 보간
+    "len128",        # interpolated AEC 길이 128 (원본 길이와 무관하게 고정)
     "crop80",        # 중앙 80% 구간 (양끝 10% 제거)
     "crop60",        # 중앙 60% 구간 (양끝 20% 제거)
     "norm",          # 곡선 내 z-score 정규화 (스캐너 간 절대값 차이 제거)
