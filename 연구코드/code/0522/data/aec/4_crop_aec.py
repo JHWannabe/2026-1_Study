@@ -1,6 +1,6 @@
 """
 DICOM 파일에서 직접 AEC(XRayTubeCurrent) 값을 읽어 T12~두덩뼈 구간으로 crop한 뒤
-128포인트로 선형 보간한다.
+128/256포인트로 선형 보간한다.
 
 배경:
   - DICOM 정렬: ImagePositionPatient z좌표 오름차순 (caudal=낮은z=낮은idx → cranial=높은z=높은idx)
@@ -13,6 +13,7 @@ DICOM 파일에서 직접 AEC(XRayTubeCurrent) 값을 읽어 T12~두덩뼈 구�
 출력: 강남_aec_cropped.xlsx
   - 기본 시트 : No, PatientID, n_slices_cropped, z_range, aec_1 ~ aec_N
   - aec_128  : No, PatientID, n_slices_cropped, z_range, aec_1 ~ aec_128 (128포인트 보간)
+  - aec_256  : No, PatientID, n_slices_cropped, z_range, aec_1 ~ aec_256 (256포인트 보간)
 """
 
 import os
@@ -25,11 +26,13 @@ SITE       = "강남"
 DICOM_BASE = rf"D:\영상제공\{SITE}\{SITE}_axial"
 DATA_BASE  = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}"
 
-Z_BOUNDS_PATH = rf"{DATA_BASE}\aec\{SITE}_z_bounds.xlsx"
-OUT_PATH      = rf"{DATA_BASE}\aec\{SITE}_aec_cropped.xlsx"
+Z_BOUNDS_PATH    = rf"{DATA_BASE}\aec\{SITE}_z_bounds.xlsx"
+Z_BOUNDS_OK_PATH = rf"{DATA_BASE}\aec\{SITE}_z_bounds_ok.xlsx"
+OUT_PATH         = rf"{DATA_BASE}\aec\{SITE}_aec_cropped.xlsx"
+OUT_OK_PATH      = rf"{DATA_BASE}\aec\{SITE}_aec_cropped_ok.xlsx"
 
-N_POINTS   = 128
-BATCH_SIZE = 20
+INTERP_SIZES = [128, 256]
+BATCH_SIZE   = 20
 
 
 def build_folder_map(dicom_base: str) -> dict[int, str]:
@@ -106,38 +109,44 @@ def save_cropped(results: list[dict], path: str) -> None:
 
 def save_interp(results: list[dict], path: str) -> None:
     meta_cols = ["No", "PatientID", "n_slices_cropped", "z_range"]
-    interp_rows = []
-    for r in results:
-        aec_keys = sorted(
-            [k for k in r if k.startswith("aec_")],
-            key=lambda x: int(x.split("_")[1])
-        )
-        vals = np.array([r[k] for k in aec_keys], dtype=float)
-
-        interped = interp_row(vals, N_POINTS) if len(vals) >= 2 else np.full(N_POINTS, np.nan)
-        interp_rows.append(
-            {k: r[k] for k in meta_cols}
-            | {f"aec_{i + 1}": round(float(v), 2) for i, v in enumerate(interped)}
-        )
-
-    out_cols = meta_cols + [f"aec_{i + 1}" for i in range(N_POINTS)]
-    result_df = pd.DataFrame(interp_rows, columns=out_cols)
 
     with pd.ExcelWriter(path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-        result_df.to_excel(writer, sheet_name="aec_128", index=False)
+        for n_pts in INTERP_SIZES:
+            interp_rows = []
+            for r in results:
+                aec_keys = sorted(
+                    [k for k in r if k.startswith("aec_")],
+                    key=lambda x: int(x.split("_")[1])
+                )
+                vals = np.array([r[k] for k in aec_keys], dtype=float)
+                interped = interp_row(vals, n_pts) if len(vals) >= 2 else np.full(n_pts, np.nan)
+                interp_rows.append(
+                    {k: r[k] for k in meta_cols}
+                    | {f"aec_{i + 1}": round(float(v), 2) for i, v in enumerate(interped)}
+                )
 
-    print(f"\n[aec_128] 저장 완료 → {path}")
-    print(f"  shape : {result_df.shape}")
-    print(f"  NaN 행: {result_df['aec_1'].isna().sum()}명")
-    print(f"  aec_1   샘플: {result_df['aec_1'].head(3).values}")
-    print(f"  aec_128 샘플: {result_df['aec_128'].head(3).values}")
+            out_cols = meta_cols + [f"aec_{i + 1}" for i in range(n_pts)]
+            result_df = pd.DataFrame(interp_rows, columns=out_cols)
+            sheet_name = f"aec_{n_pts}"
+            result_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+            print(f"\n[{sheet_name}] 저장 완료 → {path}")
+            print(f"  shape : {result_df.shape}")
+            print(f"  NaN 행: {result_df['aec_1'].isna().sum()}명")
+            print(f"  aec_1      샘플: {result_df['aec_1'].head(3).values}")
+            print(f"  aec_{n_pts} 샘플: {result_df[f'aec_{n_pts}'].head(3).values}")
 
 
 def crop_and_interp():
     z_bounds = pd.read_excel(Z_BOUNDS_PATH)
     z_bounds["PatientID"] = z_bounds["PatientID"].astype(int)
 
-    print(f"z_bounds : {len(z_bounds)}명")
+    z_bounds_ok = z_bounds[z_bounds["seg_status"] == "ok"].reset_index(drop=True)
+    z_bounds_ok.to_excel(Z_BOUNDS_OK_PATH, index=False)
+    ok_pids = set(z_bounds_ok["PatientID"])
+
+    print(f"z_bounds : {len(z_bounds)}명 (전체) / {len(z_bounds_ok)}명 (seg_status=ok)")
+    print(f"z_bounds_ok 저장 → {Z_BOUNDS_OK_PATH}")
     print(f"DICOM 기반 : {DICOM_BASE}")
 
     folder_map = build_folder_map(DICOM_BASE)
@@ -149,7 +158,11 @@ def crop_and_interp():
     for i, (_, zrow) in enumerate(
         tqdm(z_bounds.iterrows(), total=len(z_bounds), desc="crop"), start=1
     ):
-        pid      = int(zrow["PatientID"])
+        pid = int(zrow["PatientID"])
+        if pd.isna(zrow["t12_slice"]) or pd.isna(zrow["pubis_slice"]):
+            tqdm.write(f"  [SKIP] {pid}: t12_slice 또는 pubis_slice 누락")
+            n_skip += 1
+            continue
         t12_inst = int(zrow["t12_slice"])
         pub_inst = int(zrow["pubis_slice"])
 
@@ -219,6 +232,12 @@ def crop_and_interp():
           f"mean={nc.mean():.1f}  범위=[{nc.min()}, {nc.max()}]")
 
     save_interp(results, OUT_PATH)
+
+    ok_results = [r for r in results if r["PatientID"] in ok_pids]
+    if ok_results:
+        save_cropped(ok_results, OUT_OK_PATH)
+        save_interp(ok_results, OUT_OK_PATH)
+        print(f"\n[ok 전용] {len(ok_results)}명 저장 → {OUT_OK_PATH}")
 
 
 if __name__ == "__main__":

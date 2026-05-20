@@ -9,9 +9,10 @@ import numpy as np
 import torch
 
 # ── 데이터 경로 ──────────────────────────────────────────────
-DATA_PATH = "연구코드/data/강남/강남_merged_features.xlsx"
-AEC_LEN  = 128              # AEC 시퀀스 길이 (원본 길이와 무관하게 고정)
-AEC_SHEET = f"aec_128"          # AEC_LEN에 따라 시트 자동 선택
+DATA_PATH = "연구코드/data/강남/강남_merged_features_ok.xlsx"
+AEC_LEN   = 128              # AEC 기본 시퀀스 길이 (default, 함수 파라미터로 오버라이드 가능)
+AEC_SHEET = "aec_128"           # AEC_LEN에 따라 시트 자동 선택
+AEC_SIZES = [256, 128]          # 비교할 AEC 보간 해상도 목록
 
 # AEC 민감도 분석 변환 목록 — data.aec_variant() 참고
 # 해상도(len*)·시간 범위(crop*)·정규화(norm)·이상치 제외(excl_extreme)를 비교한다
@@ -43,10 +44,11 @@ N_HEADS    = 4      # Multi-head Attention head 수
 # ── 기기 및 결과 경로 ─────────────────────────────────────────
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-RESULTS_DIR           = "연구코드/results/0522/model_1"   # M1 Clinic Only
-RESULTS_DIR_CROSS     = "연구코드/results/0522/model_2"   # M2 Clinic+AEC (Matched)
-RESULTS_DIR_CROSS_2_2 = "연구코드/results/0522/model_2_2" # M2_2 Clinic+AEC (Unmatched)
-RESULTS_DIR_CROSS3    = "연구코드/results/0522/model_3"   # M3 Clinic+Scanner+AEC
+RESULTS_DIR           = "연구코드/results/0522_ok/"
+RESULTS_MODEL_1_DIR   = RESULTS_DIR + "model_1"   # M1 Clinic Only
+RESULTS_MODEL_2_DIR   = RESULTS_DIR + "model_2"   # M2 Clinic+AEC (Matched)
+RESULTS_MODEL_2_2_DIR = RESULTS_DIR + "model_2_2" # M2_2 Clinic+AEC (Unmatched)
+RESULTS_MODEL_3_DIR   = RESULTS_DIR + "model_3"   # M3 Clinic+Scanner+AEC
 
 # ── Sarcopenia 진단 기준 (SMI, cm²/m²) ───────────────────────
 # AWGS 2019 기준: 남성 < 7.0 kg/m² → SMI 환산값
@@ -60,8 +62,9 @@ MIN_MFR_RATIO = 0.05
 
 # ── 초기화 ────────────────────────────────────────────────────
 os.makedirs(RESULTS_DIR,           exist_ok=True)
-os.makedirs(RESULTS_DIR_CROSS,     exist_ok=True)
-os.makedirs(RESULTS_DIR_CROSS_2_2, exist_ok=True)
-os.makedirs(RESULTS_DIR_CROSS3,    exist_ok=True)
+os.makedirs(RESULTS_MODEL_1_DIR,   exist_ok=True)
+os.makedirs(RESULTS_MODEL_2_DIR,   exist_ok=True)
+os.makedirs(RESULTS_MODEL_2_2_DIR, exist_ok=True)
+os.makedirs(RESULTS_MODEL_3_DIR,   exist_ok=True)
 np.random.seed(SEED)
 torch.manual_seed(SEED)

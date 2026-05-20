@@ -29,7 +29,7 @@ from sklearn.metrics import (
 import matplotlib
 matplotlib.use('Agg')
 
-from config import DEVICE, RESULTS_DIR, RESULTS_DIR_CROSS, RESULTS_DIR_CROSS_2_2, RESULTS_DIR_CROSS3, AEC_VARIANTS
+from config import DEVICE, RESULTS_DIR, RESULTS_MODEL_1_DIR, RESULTS_MODEL_2_DIR, RESULTS_MODEL_2_2_DIR, RESULTS_MODEL_3_DIR, AEC_VARIANTS, AEC_SIZES
 from data import (load_data, split_data,
                   load_data_with_aec, load_data_with_aec_unmatched, split_data_dual,
                   load_data_with_aec_meta, split_data_quad,
@@ -99,7 +99,7 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
             print(f"  [M1] CASE : {case_name}  (scale_clinic={sc})")
             print(f"{'#'*60}")
 
-            out1 = os.path.join(RESULTS_DIR, case_name)
+            out1 = os.path.join(RESULTS_MODEL_1_DIR, case_name)
             os.makedirs(out1, exist_ok=True)
 
             (lr_cv, lr_roc_folds) = run_cross_validation(X_cv, y_cv, scale_X=sc)
@@ -129,24 +129,27 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
     finally:
         sys.stdout = sys.__stdout__
 
-    with open(os.path.join(RESULTS_DIR, "run.log"), "w", encoding="utf-8") as f:
+    with open(os.path.join(RESULTS_MODEL_1_DIR, "run.log"), "w", encoding="utf-8") as f:
         f.write(buf.getvalue())
 
     return results
 
 
 def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
-                X_clin_te, X_aec_te, y2_te, sex2_te):
+                X_clin_te, X_aec_te, y2_te, sex2_te,
+                aec_size: int = 128, aec_variants: list | None = None):
     """Model 2(Clinic+AEC Matched): AEC 변형별로 CrossAttn을 실행하고 결과 리스트를 반환. 로그는 run.log에 저장."""
+    if aec_variants is None:
+        aec_variants = AEC_VARIANTS
     buf = io.StringIO()
     sys.stdout = buf
     results = []
     try:
         print(f"{'='*60}")
-        print(f"  MODEL 2 — Clinic + AEC  ({len(AEC_VARIANTS)} AEC variants × 1 case)")
+        print(f"  MODEL 2 — Clinic + AEC (aec{aec_size})  ({len(aec_variants)} AEC variants × 1 case)")
         print(f"{'='*60}")
 
-        for aec_var in AEC_VARIANTS:
+        for aec_var in aec_variants:
             X_aec_cv_v, mask_cv = aec_variant(X_aec_cv, aec_var)
             X_aec_te_v, mask_te = aec_variant(X_aec_te, aec_var)
             # excl_extreme 변형은 샘플 필터링 포함
@@ -162,7 +165,7 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 print(f"  [M2 {aec_var}] CASE : {case_name}  (scale_clinic={sc}, scale_aec={sa})")
                 print(f"{'#'*60}")
 
-                out2 = os.path.join(RESULTS_DIR_CROSS, aec_var, case_name)
+                out2 = os.path.join(RESULTS_MODEL_2_DIR, f"aec{aec_size}", aec_var, case_name)
                 os.makedirs(out2, exist_ok=True)
 
                 (ca_cv, ca_roc_folds,
@@ -201,28 +204,33 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
     finally:
         sys.stdout = sys.__stdout__
 
-    with open(os.path.join(RESULTS_DIR_CROSS, "run.log"), "w", encoding="utf-8") as f:
+    log_dir = os.path.join(RESULTS_MODEL_2_DIR, f"aec{aec_size}")
+    os.makedirs(log_dir, exist_ok=True)
+    with open(os.path.join(log_dir, "run.log"), "w", encoding="utf-8") as f:
         f.write(buf.getvalue())
 
     return results
 
 
 def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
-                  X_clin_te, X_aec_te, y2_te, sex2_te):
+                  X_clin_te, X_aec_te, y2_te, sex2_te,
+                  aec_size: int = 128, aec_variants: list | None = None):
     """
     Model 2_2: Model 2와 동일한 ClinAECCrossAttn 구조를 사용하되
     Clinic-AEC가 서로 다른 환자 데이터로 섞인 상태(Unmatching)로 학습/평가.
     Model 2 > Model 2_2 이면 Clinic-AEC 대응이 실질적인 예측력을 가진다는 증거.
     """
+    if aec_variants is None:
+        aec_variants = AEC_VARIANTS
     buf = io.StringIO()
     sys.stdout = buf
     results = []
     try:
         print(f"{'='*60}")
-        print(f"  MODEL 2_2 — Clinic + AEC (Unmatched)  ({len(AEC_VARIANTS)} AEC variants × 1 case)")
+        print(f"  MODEL 2_2 — Clinic + AEC Unmatched (aec{aec_size})  ({len(aec_variants)} AEC variants × 1 case)")
         print(f"{'='*60}")
 
-        for aec_var in AEC_VARIANTS:
+        for aec_var in aec_variants:
             X_aec_cv_v, mask_cv = aec_variant(X_aec_cv, aec_var)
             X_aec_te_v, mask_te = aec_variant(X_aec_te, aec_var)
             X_clin_cv_v = X_clin_cv[mask_cv] if mask_cv is not None else X_clin_cv
@@ -237,7 +245,7 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 print(f"  [M2_2 {aec_var}] CASE : {case_name}  (scale_clinic={sc}, scale_aec={sa})")
                 print(f"{'#'*60}")
 
-                out2_2 = os.path.join(RESULTS_DIR_CROSS_2_2, aec_var, case_name)
+                out2_2 = os.path.join(RESULTS_MODEL_2_2_DIR, f"aec{aec_size}", aec_var, case_name)
                 os.makedirs(out2_2, exist_ok=True)
 
                 (ca_cv, ca_roc_folds,
@@ -276,24 +284,29 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
     finally:
         sys.stdout = sys.__stdout__
 
-    with open(os.path.join(RESULTS_DIR_CROSS_2_2, "run.log"), "w", encoding="utf-8") as f:
+    log_dir = os.path.join(RESULTS_MODEL_2_2_DIR, f"aec{aec_size}")
+    os.makedirs(log_dir, exist_ok=True)
+    with open(os.path.join(log_dir, "run.log"), "w", encoding="utf-8") as f:
         f.write(buf.getvalue())
 
     return results
 
 
 def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
-                X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr):
+                X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
+                aec_size: int = 128, aec_variants: list | None = None):
     """Model 3(Clinic+Scanner+AEC): AEC 변형별로 CrossAttn3를 실행하고 결과 리스트를 반환. 로그는 run.log에 저장."""
+    if aec_variants is None:
+        aec_variants = AEC_VARIANTS
     buf = io.StringIO()
     sys.stdout = buf
     results = []
     try:
         print(f"{'='*60}")
-        print(f"  MODEL 3 — Clinic + Scanner + AEC  ({len(AEC_VARIANTS)} AEC variants × {len(CASES_M3)} cases)")
+        print(f"  MODEL 3 — Clinic + Scanner + AEC (aec{aec_size})  ({len(aec_variants)} AEC variants × {len(CASES_M3)} cases)")
         print(f"{'='*60}")
 
-        for aec_var in AEC_VARIANTS:
+        for aec_var in aec_variants:
             X_aec3_cv_v, mask_cv = aec_variant(X_aec3_cv, aec_var)
             X_aec3_te_v, mask_te = aec_variant(X_aec3_te, aec_var)
             X_clin3_cv_v = X_clin3_cv[mask_cv] if mask_cv is not None else X_clin3_cv
@@ -311,7 +324,7 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                       f"  (scale_clinic={sc}, scale_aec={sa})")
                 print(f"{'#'*60}")
 
-                out3 = os.path.join(RESULTS_DIR_CROSS3, aec_var, case_name)
+                out3 = os.path.join(RESULTS_MODEL_3_DIR, f"aec{aec_size}", aec_var, case_name)
                 os.makedirs(out3, exist_ok=True)
 
                 (ca3_cv, ca3_roc_folds,
@@ -352,13 +365,15 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
     finally:
         sys.stdout = sys.__stdout__
 
-    with open(os.path.join(RESULTS_DIR_CROSS3, "run.log"), "w", encoding="utf-8") as f:
+    log_dir = os.path.join(RESULTS_MODEL_3_DIR, f"aec{aec_size}")
+    os.makedirs(log_dir, exist_ok=True)
+    with open(os.path.join(log_dir, "run.log"), "w", encoding="utf-8") as f:
         f.write(buf.getvalue())
 
     return results
 
 
-def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3):
+def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, aec_size: int = 128):
     """병렬 실행 완료 후, baseline을 포함한 test_roc_curves.png를 각 디렉토리에 덮어씀.
     - M2/M3: Model 1 LR을 baseline으로 비교
     - M2_2: 동일 aec_var의 Model 2 Matched를 baseline으로 비교
@@ -367,8 +382,10 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
     m1_y_te    = r1["y_te"]
     m1_lr_prob = r1["lr_prob"]
 
+    size_tag = f"aec{aec_size}"
+
     for r in results_m2:
-        out_path = os.path.join(RESULTS_DIR_CROSS, r["aec_var"], r["case"], "test_roc_curves.png")
+        out_path = os.path.join(RESULTS_MODEL_2_DIR, size_tag, r["aec_var"], r["case"], "test_roc_curves.png")
         plot_test_roc_with_baseline(
             primary_true=r["y_true_te"],
             primary_prob=r["ca_prob_te"],
@@ -380,7 +397,7 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
         )
 
     for r in results_m3:
-        out_path = os.path.join(RESULTS_DIR_CROSS3, r["aec_var"], r["case"], "test_roc_curves.png")
+        out_path = os.path.join(RESULTS_MODEL_3_DIR, size_tag, r["aec_var"], r["case"], "test_roc_curves.png")
         plot_test_roc_with_baseline(
             primary_true=r["y_true_te"],
             primary_prob=r["ca3_prob_te"],
@@ -397,7 +414,7 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
         r2 = m2_dict.get(key)
         if r2 is None:
             continue
-        out_path = os.path.join(RESULTS_DIR_CROSS_2_2, r["aec_var"], r["case"], "test_roc_curves.png")
+        out_path = os.path.join(RESULTS_MODEL_2_2_DIR, size_tag, r["aec_var"], r["case"], "test_roc_curves.png")
         plot_test_roc_with_baseline(
             primary_true=r["y_true_te"],
             primary_prob=r["ca_prob_te"],
@@ -409,14 +426,15 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
         )
 
     # ── aec_var별 전체 모델 비교 (하나의 이미지) ─────────────────
-    comparison_dir = os.path.join(os.path.dirname(RESULTS_DIR), "comparison")
+    comparison_dir = os.path.join(os.path.dirname(RESULTS_MODEL_3_DIR), "comparison", size_tag)
     os.makedirs(comparison_dir, exist_ok=True)
 
+    aec_variants_used = list({r["aec_var"] for r in results_m2})
     r2_dict   = {r["aec_var"]: r for r in results_m2}
     r2_2_dict = {r["aec_var"]: r for r in results_m2_2}
     r3_dict   = {r["aec_var"]: r for r in results_m3}
 
-    for aec_var in AEC_VARIANTS:
+    for aec_var in aec_variants_used:
         if aec_var not in r2_dict or aec_var not in r2_2_dict or aec_var not in r3_dict:
             continue
         r2  = r2_dict[aec_var]
@@ -431,73 +449,81 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
             out_path=os.path.join(comparison_dir, f"roc_all_models_{aec_var}.png"),
         )
 
-    print("  Comparison ROC curves saved.")
+    print(f"  [{size_tag}] Comparison ROC curves saved.")
 
 
 def run_all_cases():
-    """데이터 로드 후 Model 1/2/2_2/3을 병렬 실행하고 결과 비교 테이블·md 파일을 저장."""
+    """Model 1은 1회, Model 2/2_2/3은 AEC_SIZES별로 실행해 결과를 비교·저장."""
     print(f"Device  : {DEVICE}\n")
 
-    # ── 전체 데이터셋 분포 분석 (split 전) ───────────────────
     describe_dataset()
 
-    # ── 공통 데이터 로드 ──────────────────────────────────────
-    X,           y,       sex       = load_data()
-    X_clin,      X_aec,   y2, sex2  = load_data_with_aec()
-    X_clin_u,    X_aec_u, y2u, sex2u = load_data_with_aec_unmatched()
-    X_clin3, X_aec3, X_scan_mfr, y3, sex3, n_mfr = load_data_with_aec_meta()
+    # ── Model 1: AEC 미사용, 1회만 실행 ──────────────────────
+    X, y, sex = load_data()
+    X_cv, y_cv, sex_cv, X_te, y_te, sex_te = split_data(X, y, sex)
+    print("=== Model 1 dataset ==="); print_stats(y, sex)
 
-    print("=== Model 1   dataset ==="); print_stats(y,   sex)
-    print("=== Model 2   dataset ==="); print_stats(y2,  sex2)
-    print("=== Model 2_2 dataset ==="); print_stats(y2u, sex2u)
-    print("=== Model 3   dataset ==="); print_stats(y3,  sex3)
+    with ProcessPoolExecutor(max_workers=1) as executor:
+        results_m1 = executor.submit(
+            _run_model1, X_cv, y_cv, sex_cv, X_te, y_te, sex_te,
+        ).result()
 
-    X_cv,       y_cv,   sex_cv,   X_te,       y_te,   sex_te   = split_data(X, y, sex)
-    X_clin_cv,  X_aec_cv,  y2_cv,  sex2_cv, \
-    X_clin_te,  X_aec_te,  y2_te,  sex2_te                     = split_data_dual(X_clin,   X_aec,   y2,  sex2)
-    X_clin_ucv, X_aec_ucv, y2u_cv, sex2u_cv, \
-    X_clin_ute, X_aec_ute, y2u_te, sex2u_te                    = split_data_dual(X_clin_u, X_aec_u, y2u, sex2u)
-    (X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
-     X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te) = split_data_quad(
-        X_clin3, X_aec3, X_scan_mfr, y3, sex3,
-    )
+    # ── Model 2/2_2/3: AEC 크기별 반복 실행 ─────────────────
+    for aec_size in AEC_SIZES:
+        aec_sheet    = f"aec_{aec_size}"
+        aec_variants = [f"len{aec_size}", "crop80", "crop60", "norm", "excl_extreme"]
 
-    # ── Model 1/2/2_2/3 병렬 실행 ────────────────────────────
-    print("\n  Launching Model 1, 2, 2_2, 3 in parallel ...\n")
+        print(f"\n{'='*60}")
+        print(f"  AEC SIZE : {aec_size} points  (sheet={aec_sheet})")
+        print(f"{'='*60}\n")
 
-    with ProcessPoolExecutor(max_workers=4) as executor:
-        fut1 = executor.submit(
-            _run_model1,
-            X_cv, y_cv, sex_cv, X_te, y_te, sex_te,
+        X_clin,  X_aec,  y2,  sex2  = load_data_with_aec(aec_len=aec_size, aec_sheet=aec_sheet)
+        X_clin_u, X_aec_u, y2u, sex2u = load_data_with_aec_unmatched(aec_len=aec_size, aec_sheet=aec_sheet)
+        X_clin3, X_aec3, X_scan_mfr, y3, sex3, n_mfr = load_data_with_aec_meta(aec_len=aec_size, aec_sheet=aec_sheet)
+
+        print(f"=== Model 2   dataset (aec{aec_size}) ==="); print_stats(y2,  sex2)
+        print(f"=== Model 2_2 dataset (aec{aec_size}) ==="); print_stats(y2u, sex2u)
+        print(f"=== Model 3   dataset (aec{aec_size}) ==="); print_stats(y3,  sex3)
+
+        X_clin_cv,  X_aec_cv,  y2_cv,  sex2_cv, \
+        X_clin_te,  X_aec_te,  y2_te,  sex2_te  = split_data_dual(X_clin,   X_aec,   y2,  sex2)
+        X_clin_ucv, X_aec_ucv, y2u_cv, sex2u_cv, \
+        X_clin_ute, X_aec_ute, y2u_te, sex2u_te = split_data_dual(X_clin_u, X_aec_u, y2u, sex2u)
+        (X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
+         X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te) = split_data_quad(
+            X_clin3, X_aec3, X_scan_mfr, y3, sex3,
         )
-        fut2 = executor.submit(
-            _run_model2,
-            X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
-            X_clin_te, X_aec_te, y2_te, sex2_te,
-        )
-        fut2_2 = executor.submit(
-            _run_model2_2,
-            X_clin_ucv, X_aec_ucv, y2u_cv, sex2u_cv,
-            X_clin_ute, X_aec_ute, y2u_te, sex2u_te,
-        )
-        fut3 = executor.submit(
-            _run_model3,
-            X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
-            X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
-        )
-        results_m1   = fut1.result()
-        results_m2   = fut2.result()
-        results_m2_2 = fut2_2.result()
-        results_m3   = fut3.result()
 
-    print("  All models done.\n")
+        print(f"\n  Launching Model 2, 2_2, 3 in parallel (aec{aec_size}) ...\n")
 
-    # ── baseline 포함 ROC 재저장 ──────────────────────────────
-    _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3)
+        with ProcessPoolExecutor(max_workers=3) as executor:
+            fut2 = executor.submit(
+                _run_model2,
+                X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
+                X_clin_te, X_aec_te, y2_te, sex2_te,
+                aec_size, aec_variants,
+            )
+            fut2_2 = executor.submit(
+                _run_model2_2,
+                X_clin_ucv, X_aec_ucv, y2u_cv, sex2u_cv,
+                X_clin_ute, X_aec_ute, y2u_te, sex2u_te,
+                aec_size, aec_variants,
+            )
+            fut3 = executor.submit(
+                _run_model3,
+                X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
+                X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
+                aec_size, aec_variants,
+            )
+            results_m2   = fut2.result()
+            results_m2_2 = fut2_2.result()
+            results_m3   = fut3.result()
 
-    # ── 비교 테이블 출력 & 저장 ──────────────────────────────
-    _print_comparison(results_m1, results_m2, results_m2_2, results_m3)
-    _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3)
+        print(f"  [aec{aec_size}] All models done.\n")
+
+        _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, aec_size)
+        _print_comparison(results_m1, results_m2, results_m2_2, results_m3, aec_size)
+        _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, aec_size)
 
 
 # ── 출력 헬퍼 ────────────────────────────────────────────────
@@ -557,29 +583,30 @@ def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3):
         print(row)
 
 
-def _print_comparison(results_m1, results_m2, results_m2_2, results_m3):
+def _print_comparison(results_m1, results_m2, results_m2_2, results_m3, aec_size: int = 128):
     """Model 1~3의 모든 case 결과를 콘솔 테이블로 출력하고, 마지막에 best case 요약을 출력."""
+    n_var = len({r["aec_var"] for r in results_m2})
     sep = "=" * 70
     print(f"\n{sep}")
-    print("  MODEL 1 — Test Set Performance  (1 scaling case)")
+    print(f"  AEC {aec_size}pt — MODEL 1 — Test Set Performance  (1 scaling case)")
     print(sep)
     print(f"\n  [LR]")
     print(_model_table_str(results_m1, "m1_lr"))
 
     print(f"\n{sep}")
-    print(f"  MODEL 2 — Clinic + AEC (Matched)  ({len(AEC_VARIANTS)} AEC variants)")
+    print(f"  AEC {aec_size}pt — MODEL 2 — Clinic + AEC (Matched)  ({n_var} AEC variants)")
     print(sep)
     print(f"\n  [CrossAttn]")
     print(_model_table_str(results_m2, "m2_ca"))
 
     print(f"\n{sep}")
-    print(f"  MODEL 2_2 — Clinic + AEC (Unmatched)  ({len(AEC_VARIANTS)} AEC variants)")
+    print(f"  AEC {aec_size}pt — MODEL 2_2 — Clinic + AEC (Unmatched)  ({n_var} AEC variants)")
     print(sep)
     print(f"\n  [CrossAttn]")
     print(_model_table_str(results_m2_2, "m2_2_ca"))
 
     print(f"\n{sep}")
-    print(f"  MODEL 3 — Clinic + Scanner + AEC  ({len(AEC_VARIANTS)} AEC variants)")
+    print(f"  AEC {aec_size}pt — MODEL 3 — Clinic + Scanner + AEC  ({n_var} AEC variants)")
     print(sep)
     print(f"\n  [CrossAttn3]")
     print(_model_table_str(results_m3, "m3_ca3"))
@@ -617,7 +644,7 @@ def _fold_stats(folds1, folds2):
         diff = v2 - v1
         t_stat, t_pval = scipy_stats.ttest_rel(v1, v2)
         try:
-            _, w_pval = scipy_stats.wilcoxon(diff)
+            w_pval = float(scipy_stats.wilcoxon(diff)[1])  # type: ignore[arg-type]
         except ValueError:
             w_pval = float("nan")
         result[key] = {
@@ -673,10 +700,10 @@ def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3):
     return "\n".join(lines)
 
 
-def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3):
-    """모든 모델·케이스의 비교 테이블과 통계 검정 결과를 scaling_comparison.md로 저장."""
+def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, aec_size: int = 128):
+    """모든 모델·케이스의 비교 테이블과 통계 검정 결과를 scaling_comparison_aec{N}.md로 저장."""
     lines = [
-        "# Scaling Comparison — Test Set Performance",
+        f"# Scaling Comparison — Test Set Performance (AEC {aec_size}pt)",
         "",
         "## Best Cases Summary  (by Test overall AUC)",
         "",
@@ -814,7 +841,7 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3):
                 ("Brier",   "brier"), ("Accuracy", "acc"), ("F1", "f1")]
 
     def _ci_rows(model_lbl: str, sub_lbl: str, case_lbl: str,
-                 ci_dict: "dict[str, tuple[float, float, float]]") -> "list[str]":
+                 ci_dict: dict[str, tuple[float, float, float]]) -> list[str]:
         rows: list[str] = []
         for mname, mkey in _CI_METS:
             if mkey in ci_dict:
@@ -842,7 +869,7 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3):
         lines += _ci_rows("M3", "CrossAttn3", lbl, ts.get("bootstrap_ca3", {}))
     lines.append("")
 
-    md_path = os.path.join(os.path.dirname(RESULTS_DIR), "scaling_comparison.md")
+    md_path = os.path.join(os.path.dirname(RESULTS_DIR), f"scaling_comparison_aec{aec_size}.md")
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     print(f"\n  Comparison saved → {md_path}")

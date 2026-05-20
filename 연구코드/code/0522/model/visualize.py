@@ -29,13 +29,13 @@ from sklearn.metrics import (
 )
 from sklearn.calibration import calibration_curve
 
-from config import N_FOLDS, EPOCHS, RESULTS_DIR, RESULTS_DIR_CROSS
+from config import N_FOLDS, EPOCHS, RESULTS_DIR, RESULTS_MODEL_2_DIR
 
 FOLD_COLORS = plt.get_cmap("tab10")(np.linspace(0, 0.45, N_FOLDS))
 
 # 현재 저장 디렉토리 (save_all / save_all_cross 호출 시 갱신)
 _dir1: str = RESULTS_DIR
-_dir2: str = RESULTS_DIR_CROSS
+_dir2: str = RESULTS_MODEL_2_DIR
 
 
 def plot_roc_curves(lr_roc_folds):
@@ -793,7 +793,7 @@ def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,
                    model_label="model 2", out_dir=None):
     """Model 2/2_2/3용 시각화 전체(8종 png)와 results.md를 out_dir에 저장."""
     global _dir2
-    _dir2 = out_dir or RESULTS_DIR_CROSS
+    _dir2 = out_dir or RESULTS_MODEL_2_DIR
     plot_data_distribution(X_clin_cv, y_cv, sex_cv, X_clin_te, y_te, sex_te,
                            out_dir=_dir2)
     plot_cv_roc_cross(ca_roc_folds)

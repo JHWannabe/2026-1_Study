@@ -31,6 +31,10 @@ import SimpleITK as sitk
 import pydicom
 from PIL import Image
 from tqdm import tqdm
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 from totalsegmentator.python_api import totalsegmentator
@@ -147,17 +151,84 @@ def save_slice_png(dcm_path: str, out_path: str) -> bool:
         return False
 
 
+_SEG_COLORS = {
+    "vertebrae_T12": (1.0, 0.25, 0.25),  # 빨강
+    "hip_left":      (0.2,  0.45, 1.0),  # 파랑
+    "hip_right":     (0.2,  0.75, 1.0),  # 하늘
+}
+
+
+def save_slice_png_with_seg(
+    dcm_path: str,
+    seg_masks: dict,  # name -> 2D np.ndarray (nrows, ncols) at this slice
+    out_path: str,
+) -> bool:
+    """DICOM 슬라이스에 segmentation 마스크를 오버레이하여 PNG로 저장."""
+    try:
+        dcm = pydicom.dcmread(dcm_path)
+        pixels = dcm.pixel_array.astype(np.float32)
+        slope = float(getattr(dcm, "RescaleSlope", 1) or 1)
+        intercept = float(getattr(dcm, "RescaleIntercept", 0) or 0)
+        pixels = pixels * slope + intercept
+
+        wc = getattr(dcm, "WindowCenter", None)
+        ww = getattr(dcm, "WindowWidth", None)
+        if wc is not None and ww is not None:
+            wc = float(wc[0]) if hasattr(wc, "__iter__") and not isinstance(wc, str) else float(wc)
+            ww = float(ww[0]) if hasattr(ww, "__iter__") and not isinstance(ww, str) else float(ww)
+            img = _window_to_uint8(pixels, wc, ww)
+        else:
+            lo, hi = np.percentile(pixels, [1, 99])
+            img = _window_to_uint8(pixels, (lo + hi) / 2, hi - lo)
+
+        fig, ax = plt.subplots(figsize=(6, 6), dpi=150)
+        ax.imshow(img, cmap="gray")
+
+        patches = []
+        for name, mask in seg_masks.items():
+            if mask is None or mask.sum() == 0:
+                continue
+            color = _SEG_COLORS.get(name, (0.0, 1.0, 0.0))
+            rgba = np.zeros((*mask.shape, 4), dtype=np.float32)
+            rgba[mask > 0.5] = [*color, 0.45]
+            ax.imshow(rgba)
+            patches.append(mpatches.Patch(color=color, label=name, alpha=0.8))
+
+        if patches:
+            ax.legend(handles=patches, loc="lower right", fontsize=7,
+                      framealpha=0.6, edgecolor="white")
+        ax.axis("off")
+
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        plt.savefig(out_path, bbox_inches="tight", dpi=150, pad_inches=0)
+        plt.close(fig)
+        return True
+    except Exception:
+        plt.close("all")
+        return False
+
+
 def save_boundary_previews(
     pid_str: str,
     upper_dcm: str | None,
     bottom_dcm: str | None,
+    upper_masks: dict | None = None,
+    bottom_masks: dict | None = None,
 ) -> tuple[bool, bool]:
     """T12 upper / pubis bottom 슬라이스를 각각 upper, bottom 폴더에 저장."""
     upper_ok = bottom_ok = False
     if upper_dcm:
-        upper_ok = save_slice_png(upper_dcm, os.path.join(UPPER_DIR, f"{pid_str}.png"))
+        out = os.path.join(UPPER_DIR, f"{pid_str}.png")
+        if upper_masks:
+            upper_ok = save_slice_png_with_seg(upper_dcm, upper_masks, out)
+        else:
+            upper_ok = save_slice_png(upper_dcm, out)
     if bottom_dcm:
-        bottom_ok = save_slice_png(bottom_dcm, os.path.join(BOTTOM_DIR, f"{pid_str}.png"))
+        out = os.path.join(BOTTOM_DIR, f"{pid_str}.png")
+        if bottom_masks:
+            bottom_ok = save_slice_png_with_seg(bottom_dcm, bottom_masks, out)
+        else:
+            bottom_ok = save_slice_png(bottom_dcm, out)
     return upper_ok, bottom_ok
 
 
@@ -254,7 +325,21 @@ def extract_bounds(pid_str: str, tmp_dir: str, folder_map: dict) -> dict:
 
         if pd.notna(result["z_t12"]) and pd.notna(result["z_pubis"]):
             result["z_range"] = round(abs(result["z_t12"] - result["z_pubis"]), 2)
-        save_boundary_previews(pid_str, upper_dcm, bottom_dcm)
+
+        # segmentation 마스크 슬라이스 추출 (NIfTI 축: (ncols, nrows, nslices) → .T 로 DICOM 방향 맞춤)
+        upper_masks: dict = {}
+        bottom_masks: dict = {}
+        t12_path = os.path.join(seg_dir, "vertebrae_T12.nii.gz")
+        if os.path.exists(t12_path):
+            t12_vol = cast(Nifti1Image, nib.load(t12_path)).get_fdata()
+            upper_masks["vertebrae_T12"] = t12_vol[:, :, apex_k].T
+        for side in ("hip_left", "hip_right"):
+            p = os.path.join(seg_dir, f"{side}.nii.gz")
+            if os.path.exists(p):
+                vol = cast(Nifti1Image, nib.load(p)).get_fdata()
+                bottom_masks[side] = vol[:, :, bottom_k].T
+
+        save_boundary_previews(pid_str, upper_dcm, bottom_dcm, upper_masks, bottom_masks)
 
         if t12_found and hip_found:
             if pd.isna(result["t12_slice"]) or pd.isna(result["pubis_slice"]):

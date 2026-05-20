@@ -76,13 +76,13 @@ def split_data(X, y, sex):
     )
 
 
-def load_data_with_aec():
+def load_data_with_aec(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
     """Clinic + AEC 결합 데이터 로드. PatientID 기준 inner join."""
     df_meta = _load_filtered_meta()
 
-    df_aec = pd.read_excel(DATA_PATH, sheet_name=AEC_SHEET)
+    df_aec = pd.read_excel(DATA_PATH, sheet_name=aec_sheet)
     df_aec["PatientID"] = df_aec["PatientID"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-    aec_cols = [c for c in df_aec.columns if c != "PatientID"][:AEC_LEN]
+    aec_cols = [c for c in df_aec.columns if c != "PatientID"][:aec_len]
 
     df = pd.merge(df_meta, df_aec[["PatientID"] + aec_cols], on="PatientID", how="inner").reset_index(drop=True)
 
@@ -96,7 +96,7 @@ def load_data_with_aec():
     return X_clin, X_aec, y, sex
 
 
-def load_data_with_aec_unmatched():
+def load_data_with_aec_unmatched(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
     """
     Model 2_2용: load_data_with_aec()와 동일한 데이터를 로드하되
     X_aec 행 순서를 AEC_SHUFFLE_SEED로 무작위 permutation하여
@@ -105,7 +105,7 @@ def load_data_with_aec_unmatched():
     label(y)과 sex는 Clinic 데이터(X_clin) 기준으로 유지.
     AEC_SHUFFLE_SEED != SEED 이므로 우연한 재정렬이 발생하지 않는다.
     """
-    X_clin, X_aec, y, sex = load_data_with_aec()
+    X_clin, X_aec, y, sex = load_data_with_aec(aec_len=aec_len, aec_sheet=aec_sheet)
     rng  = np.random.default_rng(AEC_SHUFFLE_SEED)
     perm = rng.permutation(len(y))
     return X_clin, X_aec[perm], y, sex
@@ -123,22 +123,22 @@ def split_data_dual(X_clin, X_aec, y, sex):
     )
 
 
-def load_data_with_aec_meta():
+def load_data_with_aec_meta(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
     """
     Clinic (Age, Sex, BMI) + Scanner (kVp, ManufacturerModelName) + AEC 결합.
 
     Returns
     -------
     X_clin      : (N, 3) float  — PatientAge, sex_enc, BMI
-    X_aec       : (N, 256) float
+    X_aec       : (N, aec_len) float
     X_scan_mfr  : (N,) int64    — ManufacturerModelName (1-indexed 정수 인코딩)
     y, sex, n_manufacturers
     """
     df_meta = _load_filtered_meta()
 
-    df_aec = pd.read_excel(DATA_PATH, sheet_name=AEC_SHEET)
+    df_aec = pd.read_excel(DATA_PATH, sheet_name=aec_sheet)
     df_aec["PatientID"] = df_aec["PatientID"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-    aec_cols = [c for c in df_aec.columns if c != "PatientID"][:AEC_LEN]
+    aec_cols = [c for c in df_aec.columns if c != "PatientID"][:aec_len]
 
     df = pd.merge(df_meta, df_aec[["PatientID"] + aec_cols], on="PatientID", how="inner").reset_index(drop=True)
 
