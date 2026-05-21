@@ -12,16 +12,16 @@ import torch
 DATA_PATH = "연구코드/data/강남/강남_merged_features.xlsx"
 AEC_LEN   = 128              # AEC 기본 시퀀스 길이 (default, 함수 파라미터로 오버라이드 가능)
 AEC_SHEET = "aec_128"           # AEC_LEN에 따라 시트 자동 선택
-AEC_SIZES = [256, 128]          # 비교할 AEC 보간 해상도 목록
+AEC_SIZES = [128, 256]          # 비교할 AEC 보간 해상도 목록
 
 # AEC 민감도 분석 변환 목록 — data.aec_variant() 참고
 # 해상도(len*)·시간 범위(crop*)·정규화(norm)·이상치 제외(excl_extreme)를 비교한다
 AEC_VARIANTS = [
+    "norm",          # 곡선 내 z-score 정규화 (스캐너 간 절대값 차이 제거)
+    "excl_extreme",  # scan-length 상하위 5% 극단 샘플 제외
     "len128",        # interpolated AEC 길이 128 (원본 길이와 무관하게 고정)
     "crop80",        # 중앙 80% 구간 (양끝 10% 제거)
     "crop60",        # 중앙 60% 구간 (양끝 20% 제거)
-    "norm",          # 곡선 내 z-score 정규화 (스캐너 간 절대값 차이 제거)
-    "excl_extreme",  # scan-length 상하위 5% 극단 샘플 제외
 ]
 
 # ── 실험 재현성 ────────────────────────────────────────────────
@@ -44,7 +44,7 @@ N_HEADS    = 4      # Multi-head Attention head 수
 # ── 기기 및 결과 경로 ─────────────────────────────────────────
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-RESULTS_DIR           = "연구코드/results/0522/"
+RESULTS_DIR           = "연구코드/results/ok+missing/"
 RESULTS_MODEL_1_DIR   = RESULTS_DIR + "model_1"   # M1 Clinic Only
 RESULTS_MODEL_2_DIR   = RESULTS_DIR + "model_2"   # M2 Clinic+AEC (Matched)
 RESULTS_MODEL_2_2_DIR = RESULTS_DIR + "model_2_2" # M2_2 Clinic+AEC (Unmatched)

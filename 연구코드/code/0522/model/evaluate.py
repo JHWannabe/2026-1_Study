@@ -75,22 +75,23 @@ def _scale_clin_te(X_cv, X_te, do_scale):
     return X_cv_s, X_te_s
 
 
-def evaluate_test(X_cv, y_cv, X_te, y_te, sex_te, scale_X=True):
+def evaluate_test(X_cv, y_cv, X_te, y_te, sex_te, scale_X=True, threshold=0.5):
     """
     전체 CV 세트로 LR 최종 모델을 학습하고 test set 예측 결과를 반환.
 
+    threshold: CV fold별 Youden's J 최적값의 중앙값 (기본 0.5)
     Returns: lr_pred, lr_prob, stats_te
     """
     print(f"\n{'='*55}")
-    print(f"Final Test Evaluation  (scale_X={scale_X})")
+    print(f"Final Test Evaluation  (scale_X={scale_X}, threshold={threshold:.3f})")
     print(f"{'='*55}")
 
     X_cv_s, X_te_s = _scale_clin_te(X_cv, X_te, scale_X)
 
     lr_final = LogisticRegression(max_iter=1000, random_state=SEED, class_weight="balanced")
     lr_final.fit(X_cv_s, y_cv)
-    lr_pred = lr_final.predict(X_te_s)
     lr_prob = lr_final.predict_proba(X_te_s)[:, 1]
+    lr_pred = (lr_prob >= threshold).astype(int)
 
     print(f"\nLogistic Regression — Test Set (Overall):")
     print(f"  AUC: {roc_auc_score(y_te, lr_prob):.4f}"
@@ -115,15 +116,16 @@ def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
                         X_clin_te, X_aec_te, y_te, sex_te,
                         med_epoch,
                         scale_clin=True, scale_aec=True,
-                        return_model=False):
+                        return_model=False, threshold=0.5, use_focal: bool = True):
     """
     전체 CV 세트로 ClinAECCrossAttn 최종 모델을 학습하고 test set 예측 결과를 반환.
 
+    threshold: CV fold별 Youden's J 최적값의 중앙값 (기본 0.5)
     return_model=False (기본): ca_pred_te, ca_prob_te, ca_true_te, stats_te
     return_model=True        : 위 4개 + model, X_clin_te_s, X_aec_te_s (attention map용)
     """
     print(f"\n{'='*55}")
-    print(f"CrossAttn Test Evaluation  (scale_clin={scale_clin}, scale_aec={scale_aec})")
+    print(f"CrossAttn Test Evaluation  (scale_clin={scale_clin}, scale_aec={scale_aec}, threshold={threshold:.3f})")
     print(f"{'='*55}")
 
     X_clin_cv_s, X_clin_te_s = _scale_clin_te(X_clin_cv, X_clin_te, scale_clin)
@@ -131,7 +133,7 @@ def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
 
     tr_dl, te_dl = make_dual_loaders(X_clin_cv_s, X_aec_cv_s, y_cv,
                                      X_clin_te_s,  X_aec_te_s,  y_te)
-    model_f, crit_f, opt_f, sched_f = build_cross_attn(y_cv)
+    model_f, crit_f, opt_f, sched_f = build_cross_attn(y_cv, use_focal=use_focal)
 
     print(f"CrossAttn — training final model for {med_epoch} epochs on full CV set …")
     for _ in range(1, med_epoch + 1):
@@ -139,7 +141,7 @@ def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
         sched_f.step()
 
     _, ca_prob_te, ca_true_te = eval_cross_loader(model_f, te_dl, crit_f)
-    ca_pred_te = (ca_prob_te >= 0.5).astype(int)
+    ca_pred_te = (ca_prob_te >= threshold).astype(int)
 
     print(f"\nCrossAttn — Test Set (Overall):")
     print(f"  AUC: {roc_auc_score(ca_true_te, ca_prob_te):.4f}"
@@ -166,16 +168,17 @@ def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
                           X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
                           sex_te, med_epoch, n_manufacturers,
                           scale_clin=True, scale_aec=True,
-                          return_model=False):
+                          return_model=False, threshold=0.5, use_focal: bool = True):
     """
     전체 CV 세트로 ClinAECScanCrossAttn 최종 모델을 학습하고 test set 예측 결과를 반환.
 
+    threshold: CV fold별 Youden's J 최적값의 중앙값 (기본 0.5)
     ManufacturerModelName은 nn.Embedding index(1-indexed 정수)이므로 스케일링하지 않는다.
     return_model=False (기본): ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te
     return_model=True        : 위 4개 + model, X_clin_te_s, X_aec_te_s (attention map용)
     """
     print(f"\n{'='*65}")
-    print(f"CrossAttn3 Test Evaluation  (scale_clin={scale_clin}, scale_aec={scale_aec})")
+    print(f"CrossAttn3 Test Evaluation  (scale_clin={scale_clin}, scale_aec={scale_aec}, threshold={threshold:.3f})")
     print(f"{'='*65}")
 
     X_clin_cv_s, X_clin_te_s = _scale_clin_te(X_clin_cv, X_clin_te, scale_clin)
@@ -185,7 +188,7 @@ def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
         X_clin_cv_s, X_aec_cv_s, X_scan_mfr_cv, y_cv,
         X_clin_te_s, X_aec_te_s, X_scan_mfr_te, y_te,
     )
-    model_f, crit_f, opt_f, sched_f = build_cross_attn3(y_cv, n_manufacturers)
+    model_f, crit_f, opt_f, sched_f = build_cross_attn3(y_cv, n_manufacturers, use_focal=use_focal)
 
     print(f"CrossAttn3 — training final model for {med_epoch} epochs on full CV set …")
     for _ in range(1, med_epoch + 1):
@@ -193,7 +196,7 @@ def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
         sched_f.step()
 
     _, ca3_prob_te, ca3_true_te = eval_cross3_loader(model_f, te_dl, crit_f)
-    ca3_pred_te = (ca3_prob_te >= 0.5).astype(int)
+    ca3_pred_te = (ca3_prob_te >= threshold).astype(int)
 
     print(f"\nCrossAttn3 — Test Set (Overall):")
     print(f"  AUC: {roc_auc_score(ca3_true_te, ca3_prob_te):.4f}"

@@ -18,6 +18,7 @@ build_* 함수는 모델·손실함수·옵티마이저·스케줄러를 묶어 
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from config import DEVICE, LR_RATE, EPOCHS, HIDDEN, N_BLOCKS, N_HEADS, BATCH_SIZE
@@ -76,6 +77,27 @@ class ResNet1D(nn.Module):
 
     def forward(self, x):
         return self.head(self.blocks(self.stem(x.unsqueeze(1)))).squeeze(-1)
+
+
+class FocalLoss(nn.Module):
+    """Binary Focal Loss — 쉬운 음성 샘플의 기여를 줄여 소수 클래스 학습에 집중.
+
+    FL(p_t) = -(1 - p_t)^gamma * log(p_t)
+    gamma=0 이면 BCEWithLogitsLoss와 동일. gamma=2 가 표준 권장값.
+    pos_weight: 클래스 불균형 보정 (n_neg / n_pos), BCEWithLogitsLoss와 동일한 방식.
+    """
+
+    def __init__(self, gamma: float = 2.0, pos_weight=None):
+        super().__init__()
+        self.gamma = gamma
+        self.pos_weight = pos_weight
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        bce = F.binary_cross_entropy_with_logits(
+            logits, targets, pos_weight=self.pos_weight, reduction="none"
+        )
+        p_t = torch.sigmoid(logits) * targets + (1 - torch.sigmoid(logits)) * (1 - targets)
+        return ((1 - p_t) ** self.gamma * bce).mean()
 
 
 def build_resnet(y_tr_arr):
@@ -288,8 +310,8 @@ class ClinAECCrossAttn(nn.Module):
 
 
 def build_cross_attn(y_tr_arr, num_clinical_features=3, num_aec_features=256,
-                     aec_encoder='resnet'):
-    """ClinAECCrossAttn 모델·BCEWithLogitsLoss(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+                     aec_encoder='resnet', use_focal: bool = True):
+    """ClinAECCrossAttn 모델·손실함수(FocalLoss or BCEWithLogitsLoss)·AdamW·CosineAnnealingLR을 생성해 반환."""
     pos_w = torch.tensor(
         [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
     ).to(DEVICE)
@@ -298,7 +320,7 @@ def build_cross_attn(y_tr_arr, num_clinical_features=3, num_aec_features=256,
         num_aec_features=num_aec_features,
         aec_encoder=aec_encoder,
     ).to(DEVICE)
-    crit  = nn.BCEWithLogitsLoss(pos_weight=pos_w)
+    crit  = FocalLoss(gamma=2.0, pos_weight=pos_w) if use_focal else nn.BCEWithLogitsLoss(pos_weight=pos_w)
     opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
     return model, crit, opt, sched
@@ -410,15 +432,15 @@ class ClinAECScanCrossAttn(nn.Module):
         return logits
 
 
-def build_cross_attn3(y_tr_arr, n_manufacturers):
-    """ClinAECScanCrossAttn 모델·BCEWithLogitsLoss(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+def build_cross_attn3(y_tr_arr, n_manufacturers, use_focal: bool = True):
+    """ClinAECScanCrossAttn 모델·손실함수(FocalLoss or BCEWithLogitsLoss)·AdamW·CosineAnnealingLR을 생성해 반환."""
     pos_w = torch.tensor(
         [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
     ).to(DEVICE)
     model = ClinAECScanCrossAttn(
         n_manufacturers=n_manufacturers,
     ).to(DEVICE)
-    crit  = nn.BCEWithLogitsLoss(pos_weight=pos_w)
+    crit  = FocalLoss(gamma=2.0, pos_weight=pos_w) if use_focal else nn.BCEWithLogitsLoss(pos_weight=pos_w)
     opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
     return model, crit, opt, sched

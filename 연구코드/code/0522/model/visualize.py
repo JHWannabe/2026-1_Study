@@ -265,7 +265,7 @@ def plot_data_distribution(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir=None)
             ax.set_ylabel("Proportion within class"); ax.legend(fontsize=8)
 
     fig.tight_layout()
-    fig.savefig(f"{out_dir or RESULTS_DIR}/data_distribution.png", dpi=150, bbox_inches="tight")
+    fig.savefig(f"{RESULTS_DIR}/data_distribution.png", dpi=150, bbox_inches="tight")
 
 
 def _dist_table(y_cv, sex_cv, y_te, sex_te):
@@ -539,7 +539,7 @@ def save_all(lr_roc_folds, lr_cv,
     """Model 1용 시각화 전체(7종 png)와 results.md를 out_dir에 저장."""
     global _dir1
     _dir1 = out_dir or RESULTS_DIR
-    plot_data_distribution(X_cv, y_cv, sex_cv, X_te, y_te, sex_te)
+    plot_data_distribution(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir=_dir1)
     plot_roc_curves(lr_roc_folds)
     plot_metric_distribution(lr_cv)
     plot_confusion_matrices(y_te, lr_pred, sex_te)

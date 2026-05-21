@@ -44,16 +44,24 @@ def _maybe_scale_clin(X_tr, X_val, do_scale):
     return X_tr_s, X_val_s
 
 
+def _youden_threshold(y_true, y_prob):
+    """ROC 기반 Youden's J (sensitivity + specificity - 1) 최대화 임계값 반환."""
+    fpr, tpr, thresholds = roc_curve(y_true, y_prob)
+    j = tpr - fpr
+    return float(thresholds[np.argmax(j)])
+
+
 def run_cross_validation(X_cv, y_cv, scale_X=True):
     """
-    LR에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC를 반환.
+    LR에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC·최적 임계값을 반환.
 
-    Returns: lr_cv, lr_roc_folds
+    Returns: lr_cv, lr_roc_folds, lr_best_thresholds
     """
     skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
 
-    lr_cv        = []
-    lr_roc_folds = []
+    lr_cv             = []
+    lr_roc_folds      = []
+    lr_best_thresholds = []
 
     print("=" * 55)
     print(f"{N_FOLDS}-Fold Cross-Validation  [scale_X={scale_X}]")
@@ -69,8 +77,11 @@ def run_cross_validation(X_cv, y_cv, scale_X=True):
 
         lr_f     = LogisticRegression(max_iter=1000, random_state=SEED, class_weight="balanced")
         lr_f.fit(Xtr_s, y_ftr)
-        lr_fp    = lr_f.predict(Xval_s)
         lr_fprob = lr_f.predict_proba(Xval_s)[:, 1]
+
+        best_thresh = _youden_threshold(y_fval, lr_fprob)
+        lr_fp = (lr_fprob >= best_thresh).astype(int)
+        lr_best_thresholds.append(best_thresh)
 
         m_lr = group_metrics(y_fval, lr_fp, lr_fprob)
         lr_cv.append({"fold": fold, **m_lr})
@@ -78,21 +89,22 @@ def run_cross_validation(X_cv, y_cv, scale_X=True):
         lr_roc_folds.append({"fpr": fpr, "tpr": tpr, "auc": m_lr["auc"]})
 
         print(f"  LR — AUC: {m_lr['auc']:.4f}  AUPRC: {m_lr['auprc']:.4f}"
-              f"  Brier: {m_lr['brier']:.4f}  Acc: {m_lr['acc']:.4f}  F1: {m_lr['f1']:.4f}")
+              f"  Brier: {m_lr['brier']:.4f}  Acc: {m_lr['acc']:.4f}  F1: {m_lr['f1']:.4f}"
+              f"  (thresh={best_thresh:.3f})")
 
-    return lr_cv, lr_roc_folds
+    return lr_cv, lr_roc_folds, lr_best_thresholds
 
 
 def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
-                               scale_clin=True, scale_aec=True):
+                               scale_clin=True, scale_aec=True, use_focal: bool = True):
     """
-    ClinAECCrossAttn에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC·학습 이력을 반환.
+    ClinAECCrossAttn에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC·학습 이력·최적 임계값을 반환.
 
-    Returns: ca_cv, ca_roc_folds, ca_histories, ca_best_epochs
+    Returns: ca_cv, ca_roc_folds, ca_histories, ca_best_epochs, ca_best_thresholds
     """
     skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
 
-    ca_cv, ca_roc_folds, ca_histories, ca_best_epochs = [], [], [], []
+    ca_cv, ca_roc_folds, ca_histories, ca_best_epochs, ca_best_thresholds = [], [], [], [], []
 
     print("=" * 55)
     print(f"{N_FOLDS}-Fold CV  [CrossAttn | scale_clin={scale_clin}, scale_aec={scale_aec}]")
@@ -110,7 +122,7 @@ def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
 
         # ── CrossAttn ─────────────────────────────────────────
         tr_dl, val_dl = make_dual_loaders(X_clin_tr, X_aec_tr, y_tr, X_clin_val, X_aec_val, y_val)
-        model, crit, opt, sched = build_cross_attn(y_tr)
+        model, crit, opt, sched = build_cross_attn(y_tr, use_focal=use_focal)
 
         best_auc, best_epoch = 0.0, 0
         best_state: dict = {}
@@ -132,7 +144,10 @@ def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
 
         model.load_state_dict(best_state)
         _, ca_fprob, _ = eval_cross_loader(model, val_dl, crit)
-        ca_fp = (ca_fprob >= 0.5).astype(int)
+
+        best_thresh = _youden_threshold(y_val, ca_fprob)
+        ca_fp = (ca_fprob >= best_thresh).astype(int)
+        ca_best_thresholds.append(best_thresh)
 
         m_ca = group_metrics(y_val, ca_fp, ca_fprob)
         ca_cv.append({"fold": fold, **m_ca})
@@ -143,22 +158,22 @@ def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
 
         print(f"  CA   — AUC: {m_ca['auc']:.4f}  AUPRC: {m_ca['auprc']:.4f}"
               f"  Brier: {m_ca['brier']:.4f}  Acc: {m_ca['acc']:.4f}  F1: {m_ca['f1']:.4f}"
-              f"  (best ep={best_epoch})")
+              f"  (best ep={best_epoch}, thresh={best_thresh:.3f})")
 
-    return (ca_cv, ca_roc_folds, ca_histories, ca_best_epochs)
+    return (ca_cv, ca_roc_folds, ca_histories, ca_best_epochs, ca_best_thresholds)
 
 
 def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv,
                                  y_cv, n_manufacturers,
-                                 scale_clin=True, scale_aec=True):
+                                 scale_clin=True, scale_aec=True, use_focal: bool = True):
     """
-    ClinAECScanCrossAttn에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC·학습 이력을 반환.
+    ClinAECScanCrossAttn에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC·학습 이력·최적 임계값을 반환.
 
     ManufacturerModelName은 Embedding으로 처리하므로 스케일링하지 않는다.
-    Returns: ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs
+    Returns: ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs, ca3_best_thresholds
     """
     skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
-    ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs = [], [], [], []
+    ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs, ca3_best_thresholds = [], [], [], [], []
 
     print("=" * 65)
     print(f"{N_FOLDS}-Fold CV  [CrossAttn3 | scale_clin={scale_clin}, scale_aec={scale_aec}]")
@@ -180,7 +195,7 @@ def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv,
             X_clin_tr, X_aec_tr, X_mfr_tr, y_tr,
             X_clin_val, X_aec_val, X_mfr_val, y_val,
         )
-        model, crit, opt, sched = build_cross_attn3(y_tr, n_manufacturers)
+        model, crit, opt, sched = build_cross_attn3(y_tr, n_manufacturers, use_focal=use_focal)
 
         best_auc, best_epoch = 0.0, 0
         best_state: dict = {}
@@ -202,7 +217,10 @@ def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv,
 
         model.load_state_dict(best_state)
         _, ca3_fprob, _ = eval_cross3_loader(model, val_dl, crit)
-        ca3_fp = (ca3_fprob >= 0.5).astype(int)
+
+        best_thresh = _youden_threshold(y_val, ca3_fprob)
+        ca3_fp = (ca3_fprob >= best_thresh).astype(int)
+        ca3_best_thresholds.append(best_thresh)
 
         m_ca3 = group_metrics(y_val, ca3_fp, ca3_fprob)
         ca3_cv.append({"fold": fold, **m_ca3})
@@ -213,6 +231,6 @@ def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv,
 
         print(f"  CA3  — AUC: {m_ca3['auc']:.4f}  AUPRC: {m_ca3['auprc']:.4f}"
               f"  Brier: {m_ca3['brier']:.4f}  Acc: {m_ca3['acc']:.4f}  F1: {m_ca3['f1']:.4f}"
-              f"  (best ep={best_epoch})")
+              f"  (best ep={best_epoch}, thresh={best_thresh:.3f})")
 
-    return (ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs)
+    return (ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs, ca3_best_thresholds)

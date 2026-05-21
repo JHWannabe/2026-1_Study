@@ -26,7 +26,9 @@ import os
 import sys
 import io
 import numpy as np
+from multiprocessing import Manager
 from concurrent.futures import ProcessPoolExecutor
+from tqdm import tqdm
 from sklearn.metrics import (
     roc_auc_score, accuracy_score, f1_score,
     average_precision_score, brier_score_loss,
@@ -43,7 +45,7 @@ from data import (load_data, split_data,
 from cross_val import (run_cross_validation, run_cross_validation_cross,
                        run_cross_validation_cross3)
 from evaluate import evaluate_test, evaluate_test_cross, evaluate_test_cross3
-from metrics import print_cv_summary
+from metrics import print_cv_summary, print_delong_comparison, delong_test
 from visualize import (save_all, save_all_cross, plot_test_roc_with_baseline,
                        plot_roc_all_models, plot_attention_maps)
 
@@ -66,6 +68,12 @@ CASES_M2_2 = CASES_M2[:]   # Unmatched 음성 대조군은 M2와 동일 조건
 # Model 3: (case_name, scale_clinic)
 CASES_M3 = [
     ("scale_clinic", True),          # Clinic만 표준화 (AEC는 raw 값 유지)
+]
+
+# Loss function 비교: (loss_type 이름, use_focal)
+LOSS_TYPES = [
+    ("bce",   False),  # BCEWithLogitsLoss(pos_weight)
+    ("focal", True),   # FocalLoss(gamma=2, pos_weight)
 ]
 
 
@@ -106,17 +114,18 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
             print(f"  [M1] CASE : {case_name}  (scale_clinic={sc})")
             print(f"{'#'*60}")
 
-            out1 = os.path.join(RESULTS_MODEL_1_DIR, case_name)
+            out1 = RESULTS_MODEL_1_DIR
             os.makedirs(out1, exist_ok=True)
 
             print(f"  [M1/{case_name}] Cross-validating LR ...", flush=True)
-            (lr_cv, lr_roc_folds) = run_cross_validation(X_cv, y_cv, scale_X=sc)
+            (lr_cv, lr_roc_folds, lr_best_thresholds) = run_cross_validation(X_cv, y_cv, scale_X=sc)
 
             print_cv_summary("LR", lr_cv)
 
-            print(f"  [M1/{case_name}] Evaluating on test set ...", flush=True)
+            med_thresh_lr = float(np.median(lr_best_thresholds))
+            print(f"  [M1/{case_name}] Evaluating on test set (thresh={med_thresh_lr:.3f}) ...", flush=True)
             (lr_pred, lr_prob, stats_te) = evaluate_test(
-                X_cv, y_cv, X_te, y_te, sex_te, scale_X=sc
+                X_cv, y_cv, X_te, y_te, sex_te, scale_X=sc, threshold=med_thresh_lr
             )
 
             print(f"  [M1/{case_name}] Saving figures ...", flush=True)
@@ -148,7 +157,9 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
 
 def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 X_clin_te, X_aec_te, y2_te, sex2_te,
-                aec_size: int = 128, aec_variants: list | None = None):
+                aec_size: int = 128, aec_variants: list | None = None,
+                loss_type: str = "focal", use_focal: bool = True,
+                progress_queue=None):
     """Model 2(Clinic+AEC Matched): AEC 변형별로 CrossAttn을 실행하고 결과 리스트를 반환.
     평가 후 attention_map_c2a.png / attention_heatmap.png를 케이스 디렉토리에 저장. 로그는 run.log에 저장."""
     if aec_variants is None:
@@ -157,8 +168,9 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
     sys.stdout = buf
     results = []
     try:
+        loss_label = "FocalLoss" if use_focal else "BCEWithLogitsLoss"
         print(f"{'='*60}")
-        print(f"  MODEL 2 — Clinic + AEC (aec{aec_size})  ({len(aec_variants)} AEC variants × 1 case)")
+        print(f"  MODEL 2 — Clinic + AEC (aec{aec_size}, {loss_label})  ({len(aec_variants)} AEC variants × 1 case)")
         print(f"{'='*60}")
 
         for aec_var in aec_variants:
@@ -174,60 +186,68 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
 
             for case_name, sc in CASES_M2:
                 print(f"\n{'#'*60}")
-                print(f"  [M2 {aec_var}] CASE : {case_name}  (scale_clinic={sc})")
+                print(f"  [M2 {aec_var}] CASE : {case_name}  (scale_clinic={sc}, loss={loss_type})")
                 print(f"{'#'*60}")
 
-                out2 = os.path.join(RESULTS_MODEL_2_DIR, f"aec{aec_size}", aec_var, case_name)
+                out2 = os.path.join(RESULTS_MODEL_2_DIR, loss_type, f"aec{aec_size}", aec_var)
                 os.makedirs(out2, exist_ok=True)
 
-                print(f"  [M2/{aec_var}/{case_name}] Cross-validating CrossAttn ...", flush=True)
+                print(f"  [M2/{loss_type}/{aec_var}/{case_name}] Cross-validating CrossAttn ...", flush=True)
                 (ca_cv, ca_roc_folds,
-                 ca_histories, ca_best_epochs2) = run_cross_validation_cross(
+                 ca_histories, ca_best_epochs2,
+                 ca_best_thresholds2) = run_cross_validation_cross(
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_clin=sc, scale_aec=False,
+                    use_focal=use_focal,
                 )
 
                 print_cv_summary("CrossAttn", ca_cv)
 
                 med_epoch2 = int(np.median(ca_best_epochs2))
-                print(f"  [M2/{aec_var}/{case_name}] Evaluating on test set (med_epoch={med_epoch2}) ...", flush=True)
+                med_thresh2 = float(np.median(ca_best_thresholds2))
+                print(f"  [M2/{loss_type}/{aec_var}/{case_name}] Evaluating on test set (med_epoch={med_epoch2}, thresh={med_thresh2:.3f}) ...", flush=True)
                 (ca_pred_te, ca_prob_te, ca_true_te, stats_te2,
                  model_te2, X_clin_te_s2, X_aec_te_s2) = evaluate_test_cross(  # type: ignore[misc]
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v,
                     X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
                     med_epoch2, scale_clin=sc, scale_aec=False, return_model=True,
+                    threshold=med_thresh2, use_focal=use_focal,
                 )
 
-                print(f"  [M2/{aec_var}/{case_name}] Saving figures ...", flush=True)
+                print(f"  [M2/{loss_type}/{aec_var}/{case_name}] Saving figures ...", flush=True)
                 save_all_cross(
                     ca_cv, ca_roc_folds, ca_histories, med_epoch2,
                     X_clin_cv_v, y2_cv_v, sex2_cv_v,
                     X_clin_te_v, y2_te_v,
                     ca_pred_te, ca_true_te, sex2_te_v, ca_prob_te,
-                    model_label=f"model 2 ({aec_var})", out_dir=out2,
+                    model_label=f"model 2 ({aec_var}, {loss_type})", out_dir=out2,
                 )
 
-                print(f"  [M2/{aec_var}/{case_name}] Plotting attention maps ...", flush=True)
+                print(f"  [M2/{loss_type}/{aec_var}/{case_name}] Plotting attention maps ...", flush=True)
                 plot_attention_maps(
                     model_te2, X_clin_te_s2, X_aec_te_s2, ca_true_te,
                     out_dir=out2, aec_var=aec_var,
-                    model_label=f"Model 2 ({aec_var})",
+                    model_label=f"Model 2 ({aec_var}, {loss_type})",
                 )
-                print(f"  [M2/{aec_var}/{case_name}] Done.", flush=True)
+                print(f"  [M2/{loss_type}/{aec_var}/{case_name}] Done.", flush=True)
 
                 results.append({
                     "aec_var":      aec_var,
                     "case":         case_name,
                     "scale_clinic": sc,
+                    "loss_type":    loss_type,
+                    "out_dir":      out2,
                     "m2_ca":        _metrics(ca_true_te, ca_pred_te, ca_prob_te),
                     "ca_cv_folds":  ca_cv,
                     "test_stats":   stats_te2,
                     "y_true_te":    ca_true_te,
                     "ca_prob_te":   ca_prob_te,
                 })
+            if progress_queue is not None:
+                progress_queue.put(("M2", aec_var))
     finally:
         sys.stdout = sys.__stdout__
 
-    log_dir = os.path.join(RESULTS_MODEL_2_DIR, f"aec{aec_size}")
+    log_dir = os.path.join(RESULTS_MODEL_2_DIR, loss_type, f"aec{aec_size}")
     os.makedirs(log_dir, exist_ok=True)
     with open(os.path.join(log_dir, "run.log"), "w", encoding="utf-8") as f:
         f.write(buf.getvalue())
@@ -237,7 +257,9 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
 
 def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                   X_clin_te, X_aec_te, y2_te, sex2_te,
-                  aec_size: int = 128, aec_variants: list | None = None):
+                  aec_size: int = 128, aec_variants: list | None = None,
+                  loss_type: str = "focal", use_focal: bool = True,
+                  progress_queue=None):
     """
     Model 2_2: Model 2와 동일한 ClinAECCrossAttn 구조를 사용하되
     Clinic-AEC가 서로 다른 환자 데이터로 섞인 상태(Unmatching)로 학습/평가.
@@ -250,8 +272,9 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
     sys.stdout = buf
     results = []
     try:
+        loss_label = "FocalLoss" if use_focal else "BCEWithLogitsLoss"
         print(f"{'='*60}")
-        print(f"  MODEL 2_2 — Clinic + AEC Unmatched (aec{aec_size})  ({len(aec_variants)} AEC variants × 1 case)")
+        print(f"  MODEL 2_2 — Clinic + AEC Unmatched (aec{aec_size}, {loss_label})  ({len(aec_variants)} AEC variants × 1 case)")
         print(f"{'='*60}")
 
         for aec_var in aec_variants:
@@ -266,60 +289,68 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
 
             for case_name, sc in CASES_M2_2:
                 print(f"\n{'#'*60}")
-                print(f"  [M2_2 {aec_var}] CASE : {case_name}  (scale_clinic={sc})")
+                print(f"  [M2_2 {aec_var}] CASE : {case_name}  (scale_clinic={sc}, loss={loss_type})")
                 print(f"{'#'*60}")
 
-                out2_2 = os.path.join(RESULTS_MODEL_2_2_DIR, f"aec{aec_size}", aec_var, case_name)
+                out2_2 = os.path.join(RESULTS_MODEL_2_2_DIR, loss_type, f"aec{aec_size}", aec_var)
                 os.makedirs(out2_2, exist_ok=True)
 
-                print(f"  [M2_2/{aec_var}/{case_name}] Cross-validating CrossAttn ...", flush=True)
+                print(f"  [M2_2/{loss_type}/{aec_var}/{case_name}] Cross-validating CrossAttn ...", flush=True)
                 (ca_cv, ca_roc_folds,
-                 ca_histories, ca_best_epochs2_2) = run_cross_validation_cross(
+                 ca_histories, ca_best_epochs2_2,
+                 ca_best_thresholds2_2) = run_cross_validation_cross(
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_clin=sc, scale_aec=False,
+                    use_focal=use_focal,
                 )
 
                 print_cv_summary("CrossAttn", ca_cv)
 
                 med_epoch2_2 = int(np.median(ca_best_epochs2_2))
-                print(f"  [M2_2/{aec_var}/{case_name}] Evaluating on test set (med_epoch={med_epoch2_2}) ...", flush=True)
+                med_thresh2_2 = float(np.median(ca_best_thresholds2_2))
+                print(f"  [M2_2/{loss_type}/{aec_var}/{case_name}] Evaluating on test set (med_epoch={med_epoch2_2}, thresh={med_thresh2_2:.3f}) ...", flush=True)
                 (ca_pred_te, ca_prob_te, ca_true_te, stats_te2_2,
                  model_te2_2, X_clin_te_s2_2, X_aec_te_s2_2) = evaluate_test_cross(  # type: ignore[misc]
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v,
                     X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
                     med_epoch2_2, scale_clin=sc, scale_aec=False, return_model=True,
+                    threshold=med_thresh2_2, use_focal=use_focal,
                 )
 
-                print(f"  [M2_2/{aec_var}/{case_name}] Saving figures ...", flush=True)
+                print(f"  [M2_2/{loss_type}/{aec_var}/{case_name}] Saving figures ...", flush=True)
                 save_all_cross(
                     ca_cv, ca_roc_folds, ca_histories, med_epoch2_2,
                     X_clin_cv_v, y2_cv_v, sex2_cv_v,
                     X_clin_te_v, y2_te_v,
                     ca_pred_te, ca_true_te, sex2_te_v, ca_prob_te,
-                    model_label=f"model 2_2 ({aec_var}, unmatched)", out_dir=out2_2,
+                    model_label=f"model 2_2 ({aec_var}, unmatched, {loss_type})", out_dir=out2_2,
                 )
 
-                print(f"  [M2_2/{aec_var}/{case_name}] Plotting attention maps ...", flush=True)
+                print(f"  [M2_2/{loss_type}/{aec_var}/{case_name}] Plotting attention maps ...", flush=True)
                 plot_attention_maps(
                     model_te2_2, X_clin_te_s2_2, X_aec_te_s2_2, ca_true_te,
                     out_dir=out2_2, aec_var=aec_var,
-                    model_label=f"Model 2_2 Unmatched ({aec_var})",
+                    model_label=f"Model 2_2 Unmatched ({aec_var}, {loss_type})",
                 )
-                print(f"  [M2_2/{aec_var}/{case_name}] Done.", flush=True)
+                print(f"  [M2_2/{loss_type}/{aec_var}/{case_name}] Done.", flush=True)
 
                 results.append({
                     "aec_var":      aec_var,
                     "case":         case_name,
                     "scale_clinic": sc,
+                    "loss_type":    loss_type,
+                    "out_dir":      out2_2,
                     "m2_2_ca":      _metrics(ca_true_te, ca_pred_te, ca_prob_te),
                     "ca_cv_folds":  ca_cv,
                     "test_stats":   stats_te2_2,
                     "y_true_te":    ca_true_te,
                     "ca_prob_te":   ca_prob_te,
                 })
+            if progress_queue is not None:
+                progress_queue.put(("M2_2", aec_var))
     finally:
         sys.stdout = sys.__stdout__
 
-    log_dir = os.path.join(RESULTS_MODEL_2_2_DIR, f"aec{aec_size}")
+    log_dir = os.path.join(RESULTS_MODEL_2_2_DIR, loss_type, f"aec{aec_size}")
     os.makedirs(log_dir, exist_ok=True)
     with open(os.path.join(log_dir, "run.log"), "w", encoding="utf-8") as f:
         f.write(buf.getvalue())
@@ -329,7 +360,9 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
 
 def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                 X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
-                aec_size: int = 128, aec_variants: list | None = None):
+                aec_size: int = 128, aec_variants: list | None = None,
+                loss_type: str = "focal", use_focal: bool = True,
+                progress_queue=None):
     """Model 3(Clinic+Scanner+AEC): AEC 변형별로 CrossAttn3를 실행하고 결과 리스트를 반환.
     평가 후 attention_map_c2a.png / attention_heatmap.png를 케이스 디렉토리에 저장. 로그는 run.log에 저장."""
     if aec_variants is None:
@@ -338,8 +371,9 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
     sys.stdout = buf
     results = []
     try:
+        loss_label = "FocalLoss" if use_focal else "BCEWithLogitsLoss"
         print(f"{'='*60}")
-        print(f"  MODEL 3 — Clinic + Scanner + AEC (aec{aec_size})  ({len(aec_variants)} AEC variants × {len(CASES_M3)} cases)")
+        print(f"  MODEL 3 — Clinic + Scanner + AEC (aec{aec_size}, {loss_label})  ({len(aec_variants)} AEC variants × {len(CASES_M3)} cases)")
         print(f"{'='*60}")
 
         for aec_var in aec_variants:
@@ -356,63 +390,70 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
 
             for case_name, sc in CASES_M3:
                 print(f"\n{'#'*60}")
-                print(f"  [M3 {aec_var}] CASE : {case_name}  (scale_clinic={sc})")
+                print(f"  [M3 {aec_var}] CASE : {case_name}  (scale_clinic={sc}, loss={loss_type})")
                 print(f"{'#'*60}")
 
-                out3 = os.path.join(RESULTS_MODEL_3_DIR, f"aec{aec_size}", aec_var, case_name)
+                out3 = os.path.join(RESULTS_MODEL_3_DIR, loss_type, f"aec{aec_size}", aec_var)
                 os.makedirs(out3, exist_ok=True)
 
-                print(f"  [M3/{aec_var}/{case_name}] Cross-validating CrossAttn3 ...", flush=True)
+                print(f"  [M3/{loss_type}/{aec_var}/{case_name}] Cross-validating CrossAttn3 ...", flush=True)
                 (ca3_cv, ca3_roc_folds,
-                 ca3_histories, ca3_best_epochs3) = run_cross_validation_cross3(
+                 ca3_histories, ca3_best_epochs3,
+                 ca3_best_thresholds3) = run_cross_validation_cross3(
                     X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v, n_mfr,
-                    scale_clin=sc, scale_aec=False,
+                    scale_clin=sc, scale_aec=False, use_focal=use_focal,
                 )
 
                 print_cv_summary("CrossAttn3", ca3_cv)
 
                 med_epoch3 = int(np.median(ca3_best_epochs3))
-                print(f"  [M3/{aec_var}/{case_name}] Evaluating on test set (med_epoch={med_epoch3}) ...", flush=True)
+                med_thresh3 = float(np.median(ca3_best_thresholds3))
+                print(f"  [M3/{loss_type}/{aec_var}/{case_name}] Evaluating on test set (med_epoch={med_epoch3}, thresh={med_thresh3:.3f}) ...", flush=True)
                 (ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te3,
                  model_te3, X_clin3_te_s, X_aec3_te_s) = evaluate_test_cross3(  # type: ignore[misc]
                     X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v,
                     X_clin3_te_v, X_aec3_te_v, X_mfr3_te_v, y3_te_v,
                     sex3_te_v, med_epoch3, n_mfr,
                     scale_clin=sc, scale_aec=False, return_model=True,
+                    threshold=med_thresh3, use_focal=use_focal,
                 )
 
-                print(f"  [M3/{aec_var}/{case_name}] Saving figures ...", flush=True)
+                print(f"  [M3/{loss_type}/{aec_var}/{case_name}] Saving figures ...", flush=True)
                 save_all_cross(
                     ca3_cv, ca3_roc_folds, ca3_histories, med_epoch3,
                     X_clin3_cv_v, y3_cv_v, sex3_cv_v,
                     X_clin3_te_v, y3_te_v,
                     ca3_pred_te, ca3_true_te, sex3_te_v, ca3_prob_te,
-                    model_label=f"model 3 ({aec_var})", out_dir=out3,
+                    model_label=f"model 3 ({aec_var}, {loss_type})", out_dir=out3,
                 )
 
-                print(f"  [M3/{aec_var}/{case_name}] Plotting attention maps ...", flush=True)
+                print(f"  [M3/{loss_type}/{aec_var}/{case_name}] Plotting attention maps ...", flush=True)
                 plot_attention_maps(
                     model_te3, X_clin3_te_s, X_aec3_te_s, ca3_true_te,
                     out_dir=out3, aec_var=aec_var,
-                    model_label=f"Model 3 ({aec_var})",
+                    model_label=f"Model 3 ({aec_var}, {loss_type})",
                     X_mfr_te=X_mfr3_te_v,
                 )
-                print(f"  [M3/{aec_var}/{case_name}] Done.", flush=True)
+                print(f"  [M3/{loss_type}/{aec_var}/{case_name}] Done.", flush=True)
 
                 results.append({
                     "aec_var":       aec_var,
                     "case":          case_name,
                     "scale_clinic":  sc,
+                    "loss_type":     loss_type,
+                    "out_dir":       out3,
                     "m3_ca3":        _metrics(ca3_true_te, ca3_pred_te, ca3_prob_te),
                     "ca3_cv_folds":  ca3_cv,
                     "test_stats":    stats_te3,
                     "y_true_te":     ca3_true_te,
                     "ca3_prob_te":   ca3_prob_te,
                 })
+            if progress_queue is not None:
+                progress_queue.put(("M3", aec_var))
     finally:
         sys.stdout = sys.__stdout__
 
-    log_dir = os.path.join(RESULTS_MODEL_3_DIR, f"aec{aec_size}")
+    log_dir = os.path.join(RESULTS_MODEL_3_DIR, loss_type, f"aec{aec_size}")
     os.makedirs(log_dir, exist_ok=True)
     with open(os.path.join(log_dir, "run.log"), "w", encoding="utf-8") as f:
         f.write(buf.getvalue())
@@ -420,10 +461,92 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
     return results
 
 
-def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, aec_size: int = 128):
+def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3,
+                              aec_size: int = 128, loss_type: str = "focal"):
+    """모델 간 Test-set AUC를 DeLong (1988) 검정으로 쌍별 비교해 콘솔 출력.
+
+    비교 쌍:
+      M1 LR  vs  M2 CrossAttn     (aec_var별, 동일 test set인 경우만)
+      M1 LR  vs  M3 CrossAttn3    (aec_var별, 동일 test set인 경우만)
+      M2 Matched  vs  M2_2 Unmatched  (aec_var별, 동일 크기인 경우만)
+      M2 CrossAttn  vs  M3 CrossAttn3 (aec_var별, 동일 test set)
+
+    excl_extreme 변형은 M1 test set과 크기가 달라 M1 vs M2/M3 비교에서 제외.
+    """
+    loss_label = "FocalLoss" if loss_type == "focal" else "BCEWithLogitsLoss"
+    sep = "=" * 70
+    print(f"\n{sep}")
+    print(f"  AEC {aec_size}pt [{loss_label}] — DeLong Test  (Test-set ROC AUC 쌍별 비교)")
+    print(sep)
+
+    r1      = results_m1[0]
+    m1_y    = r1["y_te"]
+    m1_prob = r1["lr_prob"]
+
+    r2_2_dict = {(r["aec_var"], r["case"]): r for r in results_m2_2}
+    r3_dict   = {(r["aec_var"], r["case"]): r for r in results_m3}
+
+    # ── M1 vs M2 ──────────────────────────────────────────────
+    print(f"\n  [M1 LR  vs  M2 CrossAttn]")
+    for r2 in results_m2:
+        y2 = r2["y_true_te"]
+        if len(y2) != len(m1_y):
+            print(f"    {r2['aec_var']}/{r2['case']} — skip (sample size mismatch: M1={len(m1_y)}, M2={len(y2)})")
+            continue
+        print_delong_comparison(
+            f"M1-LR", f"M2-{r2['aec_var']}",
+            m1_y, m1_prob, r2["ca_prob_te"],
+        )
+
+    # ── M1 vs M3 ──────────────────────────────────────────────
+    print(f"\n  [M1 LR  vs  M3 CrossAttn3]")
+    for r3 in results_m3:
+        y3 = r3["y_true_te"]
+        if len(y3) != len(m1_y):
+            print(f"    {r3['aec_var']}/{r3['case']} — skip (sample size mismatch: M1={len(m1_y)}, M3={len(y3)})")
+            continue
+        print_delong_comparison(
+            f"M1-LR", f"M3-{r3['aec_var']}",
+            m1_y, m1_prob, r3["ca3_prob_te"],
+        )
+
+    # ── M2 Matched vs M2_2 Unmatched ──────────────────────────
+    print(f"\n  [M2 Matched  vs  M2_2 Unmatched]")
+    for r2 in results_m2:
+        key = (r2["aec_var"], r2["case"])
+        r22 = r2_2_dict.get(key)
+        if r22 is None:
+            continue
+        if len(r2["y_true_te"]) != len(r22["y_true_te"]):
+            print(f"    {key[0]}/{key[1]} — skip (sample size mismatch)")
+            continue
+        print_delong_comparison(
+            f"M2-{r2['aec_var']}", f"M2_2-{r22['aec_var']}",
+            r2["y_true_te"], r2["ca_prob_te"], r22["ca_prob_te"],
+        )
+
+    # ── M2 vs M3 ──────────────────────────────────────────────
+    print(f"\n  [M2 CrossAttn  vs  M3 CrossAttn3]")
+    for r2 in results_m2:
+        key = (r2["aec_var"], r2["case"])
+        r3 = r3_dict.get(key)
+        if r3 is None:
+            continue
+        if len(r2["y_true_te"]) != len(r3["y_true_te"]):
+            print(f"    {key[0]}/{key[1]} — skip (sample size mismatch)")
+            continue
+        print_delong_comparison(
+            f"M2-{r2['aec_var']}", f"M3-{r3['aec_var']}",
+            r2["y_true_te"], r2["ca_prob_te"], r3["ca3_prob_te"],
+        )
+
+
+def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3,
+                                aec_size: int = 128, loss_type: str = "focal"):
     """병렬 실행 완료 후, baseline을 포함한 test_roc_curves.png를 각 디렉토리에 덮어씀.
     - M2/M3: Model 1 LR을 baseline으로 비교
     - M2_2: 동일 aec_var의 Model 2 Matched를 baseline으로 비교
+    결과 경로는 각 result dict의 out_dir 필드를 사용.
     """
     r1 = results_m1[0]
     m1_y_te    = r1["y_te"]
@@ -432,27 +555,25 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
     size_tag = f"aec{aec_size}"
 
     for r in results_m2:
-        out_path = os.path.join(RESULTS_MODEL_2_DIR, size_tag, r["aec_var"], r["case"], "test_roc_curves.png")
         plot_test_roc_with_baseline(
             primary_true=r["y_true_te"],
             primary_prob=r["ca_prob_te"],
-            primary_label=f"Model 2 CrossAttn ({r['aec_var']})",
+            primary_label=f"Model 2 CrossAttn ({r['aec_var']}, {loss_type})",
             baseline_true=m1_y_te,
             baseline_prob=m1_lr_prob,
             baseline_label="Model 1 LR (baseline)",
-            out_path=out_path,
+            out_path=os.path.join(r["out_dir"], "test_roc_curves.png"),
         )
 
     for r in results_m3:
-        out_path = os.path.join(RESULTS_MODEL_3_DIR, size_tag, r["aec_var"], r["case"], "test_roc_curves.png")
         plot_test_roc_with_baseline(
             primary_true=r["y_true_te"],
             primary_prob=r["ca3_prob_te"],
-            primary_label=f"Model 3 CrossAttn3 ({r['aec_var']})",
+            primary_label=f"Model 3 CrossAttn3 ({r['aec_var']}, {loss_type})",
             baseline_true=m1_y_te,
             baseline_prob=m1_lr_prob,
             baseline_label="Model 1 LR (baseline)",
-            out_path=out_path,
+            out_path=os.path.join(r["out_dir"], "test_roc_curves.png"),
         )
 
     m2_dict = {(r["aec_var"], r["case"]): r for r in results_m2}
@@ -461,19 +582,18 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
         r2 = m2_dict.get(key)
         if r2 is None:
             continue
-        out_path = os.path.join(RESULTS_MODEL_2_2_DIR, size_tag, r["aec_var"], r["case"], "test_roc_curves.png")
         plot_test_roc_with_baseline(
             primary_true=r["y_true_te"],
             primary_prob=r["ca_prob_te"],
-            primary_label=f"Model 2_2 Unmatched ({r['aec_var']})",
+            primary_label=f"Model 2_2 Unmatched ({r['aec_var']}, {loss_type})",
             baseline_true=r2["y_true_te"],
             baseline_prob=r2["ca_prob_te"],
             baseline_label=f"Model 2 Matched ({r['aec_var']}, baseline)",
-            out_path=out_path,
+            out_path=os.path.join(r["out_dir"], "test_roc_curves.png"),
         )
 
     # ── aec_var별 전체 모델 비교 (하나의 이미지) ─────────────────
-    comparison_dir = os.path.join(os.path.dirname(RESULTS_MODEL_3_DIR), "comparison", size_tag)
+    comparison_dir = os.path.join(os.path.dirname(RESULTS_MODEL_3_DIR), "comparison", loss_type, size_tag)
     os.makedirs(comparison_dir, exist_ok=True)
 
     aec_variants_used = list({r["aec_var"] for r in results_m2})
@@ -496,11 +616,11 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
             out_path=os.path.join(comparison_dir, f"roc_all_models_{aec_var}.png"),
         )
 
-    print(f"  [{size_tag}] Comparison ROC curves saved.")
+    print(f"  [{size_tag}/{loss_type}] Comparison ROC curves saved.")
 
 
 def run_all_cases():
-    """Model 1은 1회, Model 2/2_2/3은 AEC_SIZES별로 실행해 결과를 비교·저장."""
+    """Model 1은 1회, Model 2/2_2/3은 AEC_SIZES × LOSS_TYPES 조합으로 실행해 결과를 비교·저장."""
     print(f"Device  : {DEVICE}\n")
 
     describe_dataset()
@@ -519,10 +639,10 @@ def run_all_cases():
         ).result()
     print("[Model 1] Finished.\n")
 
-    # ── Model 2/2_2/3: AEC 크기별 반복 실행 ─────────────────
+    # ── Model 2/2_2/3: AEC 크기 × Loss 유형별 반복 실행 ──────
     for aec_size in AEC_SIZES:
         aec_sheet    = f"aec_{aec_size}"
-        aec_variants = [f"len{aec_size}", "crop80", "crop60", "norm", "excl_extreme"]
+        aec_variants = AEC_VARIANTS
 
         print(f"\n{'='*60}")
         print(f"  AEC SIZE : {aec_size} points  (sheet={aec_sheet})")
@@ -549,40 +669,68 @@ def run_all_cases():
         )
         print(f"[Data] aec{aec_size} splits ready.")
 
-        print(f"\n  Launching Model 2, 2_2, 3 in parallel (aec{aec_size}) ...\n")
+        # ── Loss 유형별 반복 ────────────────────────────────
+        for loss_name, use_focal in LOSS_TYPES:
+            loss_label = "FocalLoss" if use_focal else "BCEWithLogitsLoss"
+            print(f"\n{'─'*60}")
+            print(f"  aec{aec_size} / Loss : {loss_label}  ({loss_name})")
+            print(f"{'─'*60}")
+            print(f"\n  Launching Model 2, 2_2, 3 in parallel (aec{aec_size}, {loss_name}) ...\n")
 
-        with ProcessPoolExecutor(max_workers=3) as executor:
-            fut2 = executor.submit(
-                _run_model2,
-                X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
-                X_clin_te, X_aec_te, y2_te, sex2_te,
-                aec_size, aec_variants,
-            )
-            fut2_2 = executor.submit(
-                _run_model2_2,
-                X_clin_ucv, X_aec_ucv, y2u_cv, sex2u_cv,
-                X_clin_ute, X_aec_ute, y2u_te, sex2u_te,
-                aec_size, aec_variants,
-            )
-            fut3 = executor.submit(
-                _run_model3,
-                X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
-                X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
-                aec_size, aec_variants,
-            )
-            results_m2   = fut2.result()
-            results_m2_2 = fut2_2.result()
-            results_m3   = fut3.result()
+            n_variants = len(aec_variants)
+            with Manager() as mp_manager:
+                q = mp_manager.Queue()
+                bars = {
+                    "M2":   tqdm(total=n_variants, desc=f"M2    aec{aec_size}/{loss_name}", position=0, leave=True),
+                    "M2_2": tqdm(total=n_variants, desc=f"M2_2  aec{aec_size}/{loss_name}", position=1, leave=True),
+                    "M3":   tqdm(total=n_variants, desc=f"M3    aec{aec_size}/{loss_name}", position=2, leave=True),
+                }
+                with ProcessPoolExecutor(max_workers=3) as executor:
+                    fut2 = executor.submit(
+                        _run_model2,
+                        X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
+                        X_clin_te, X_aec_te, y2_te, sex2_te,
+                        aec_size, aec_variants, loss_name, use_focal, q,
+                    )
+                    fut2_2 = executor.submit(
+                        _run_model2_2,
+                        X_clin_ucv, X_aec_ucv, y2u_cv, sex2u_cv,
+                        X_clin_ute, X_aec_ute, y2u_te, sex2u_te,
+                        aec_size, aec_variants, loss_name, use_focal, q,
+                    )
+                    fut3 = executor.submit(
+                        _run_model3,
+                        X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
+                        X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
+                        aec_size, aec_variants, loss_name, use_focal, q,
+                    )
+                    total_updates = n_variants * 3
+                    received = 0
+                    while received < total_updates:
+                        try:
+                            model, done_var = q.get(timeout=0.5)
+                            bars[model].update(1)
+                            bars[model].set_postfix(variant=done_var)
+                            received += 1
+                        except Exception:
+                            if all(f.done() for f in [fut2, fut2_2, fut3]):
+                                break
+                    results_m2   = fut2.result()
+                    results_m2_2 = fut2_2.result()
+                    results_m3   = fut3.result()
+                for bar in bars.values():
+                    bar.close()
 
-        print(f"  [aec{aec_size}] All models done.\n")
+            print(f"  [aec{aec_size}/{loss_name}] All models done.\n")
 
-        print(f"[aec{aec_size}] Plotting comparison ROC curves ...")
-        _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, aec_size)
-        print(f"[aec{aec_size}] Printing comparison table ...")
-        _print_comparison(results_m1, results_m2, results_m2_2, results_m3, aec_size)
-        print(f"[aec{aec_size}] Saving comparison markdown ...")
-        _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, aec_size)
-        print(f"[aec{aec_size}] All done.\n")
+            print(f"[aec{aec_size}/{loss_name}] Plotting comparison ROC curves ...")
+            _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, aec_size, loss_name)
+            print(f"[aec{aec_size}/{loss_name}] Printing comparison table ...")
+            _print_comparison(results_m1, results_m2, results_m2_2, results_m3, aec_size, loss_name)
+            _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, aec_size, loss_name)
+            print(f"[aec{aec_size}/{loss_name}] Saving comparison markdown ...")
+            _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, aec_size, loss_name)
+            print(f"[aec{aec_size}/{loss_name}] All done.\n")
 
 
 # ── 출력 헬퍼 ────────────────────────────────────────────────
@@ -642,12 +790,14 @@ def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3):
         print(row)
 
 
-def _print_comparison(results_m1, results_m2, results_m2_2, results_m3, aec_size: int = 128):
+def _print_comparison(results_m1, results_m2, results_m2_2, results_m3,
+                      aec_size: int = 128, loss_type: str = "focal"):
     """Model 1~3의 모든 case 결과를 콘솔 테이블로 출력하고, 마지막에 best case 요약을 출력."""
+    loss_label = "FocalLoss" if loss_type == "focal" else "BCEWithLogitsLoss"
     n_var = len({r["aec_var"] for r in results_m2})
     sep = "=" * 70
     print(f"\n{sep}")
-    print(f"  AEC {aec_size}pt — MODEL 1 — Test Set Performance  (1 scaling case)")
+    print(f"  AEC {aec_size}pt [{loss_label}] — MODEL 1 — Test Set Performance  (1 scaling case)")
     print(sep)
     print(f"\n  [LR]")
     print(_model_table_str(results_m1, "m1_lr"))
@@ -759,10 +909,12 @@ def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3):
     return "\n".join(lines)
 
 
-def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, aec_size: int = 128):
-    """모든 모델·케이스의 비교 테이블과 통계 검정 결과를 scaling_comparison_aec{N}.md로 저장."""
+def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3,
+                        aec_size: int = 128, loss_type: str = "focal"):
+    """모든 모델·케이스의 비교 테이블과 통계 검정 결과를 scaling_comparison_{loss_type}_aec{N}.md로 저장."""
+    loss_label = "FocalLoss" if loss_type == "focal" else "BCEWithLogitsLoss"
     lines = [
-        f"# Scaling Comparison — Test Set Performance (AEC {aec_size}pt)",
+        f"# Scaling Comparison — Test Set Performance (AEC {aec_size}pt, {loss_label})",
         "",
         "## Best Cases Summary  (by Test overall AUC)",
         "",
@@ -839,7 +991,9 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, aec_si
         return rows
 
     _duo_key = lambda r: (r["aec_var"], r["case"])  # noqa: E731
-    m1_r = results_m1[0]  # M1은 단일 case
+    m1_r      = results_m1[0]  # M1은 단일 case
+    m1_y_te   = m1_r["y_te"]
+    m1_lr_prob = m1_r["lr_prob"]
 
     # ── M1 LR vs M2 CrossAttn ──────────────────────────────────
     lines += [
@@ -928,7 +1082,72 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, aec_si
         lines += _ci_rows("M3", "CrossAttn3", lbl, ts.get("bootstrap_ca3", {}))
     lines.append("")
 
-    md_path = os.path.join(os.path.dirname(RESULTS_DIR), f"scaling_comparison_aec{aec_size}.md")
+    # ── Test Set: DeLong AUC 비교 ──────────────────────────────────────────────
+    lines += [
+        "---",
+        "",
+        "# Test Set — DeLong AUC Comparison",
+        "",
+        "> DeLong (1988) 검정 — 동일 test set에서 두 모델의 ROC AUC를 쌍별 비교.",
+        "> excl_extreme 변형은 M1 test set과 샘플 크기가 달라 M1 vs M2/M3 비교에서 제외.",
+        "> \\*\\*\\* p<0.001 · \\*\\* p<0.01 · \\* p<0.05 · † p<0.10 · ns p≥0.10",
+        "",
+    ]
+    _DL_HDR = "| Comparison | AUC A | AUC B | Δ AUC | z-stat | p-val | sig |"
+    _DL_SEP = "|-----------|------:|------:|------:|-------:|------:|-----|"
+
+    def _dl_row(name_a, name_b, y_true, prob_a, prob_b):
+        if len(y_true) == 0:
+            return None
+        auc_a, auc_b, z, p = delong_test(y_true, prob_a, prob_b)
+        delta = auc_b - auc_a
+        sig = ("***" if p < 0.001 else "**" if p < 0.01 else
+               "*"   if p < 0.05  else "†"  if p < 0.10 else "ns")
+        return (f"| {name_a} vs {name_b} "
+                f"| {auc_a:.4f} | {auc_b:.4f} | {delta:+.4f} "
+                f"| {z:.3f} | {p:.3e} | {sig} |")
+
+    r2_2_dict_dl = {(r["aec_var"], r["case"]): r for r in results_m2_2}
+    r3_dict_dl   = {(r["aec_var"], r["case"]): r for r in results_m3}
+
+    for section_title, pairs in [
+        ("## M1 LR vs M2 CrossAttn", [
+            (f"M1-LR", f"M2-{r['aec_var']}", m1_y_te, m1_lr_prob, r["ca_prob_te"], r["y_true_te"])
+            for r in results_m2
+        ]),
+        ("## M1 LR vs M3 CrossAttn3", [
+            (f"M1-LR", f"M3-{r['aec_var']}", m1_y_te, m1_lr_prob, r["ca3_prob_te"], r["y_true_te"])
+            for r in results_m3
+        ]),
+        ("## M2 Matched vs M2_2 Unmatched", [
+            (f"M2-{r['aec_var']}", f"M2_2-{r['aec_var']}",
+             r["y_true_te"], r["ca_prob_te"],
+             r2_2_dict_dl[(r["aec_var"], r["case"])]["ca_prob_te"],
+             r["y_true_te"])
+            for r in results_m2
+            if (r["aec_var"], r["case"]) in r2_2_dict_dl
+            and len(r["y_true_te"]) == len(r2_2_dict_dl[(r["aec_var"], r["case"])]["y_true_te"])
+        ]),
+        ("## M2 CrossAttn vs M3 CrossAttn3", [
+            (f"M2-{r['aec_var']}", f"M3-{r['aec_var']}",
+             r["y_true_te"], r["ca_prob_te"],
+             r3_dict_dl[(r["aec_var"], r["case"])]["ca3_prob_te"],
+             r["y_true_te"])
+            for r in results_m2
+            if (r["aec_var"], r["case"]) in r3_dict_dl
+            and len(r["y_true_te"]) == len(r3_dict_dl[(r["aec_var"], r["case"])]["y_true_te"])
+        ]),
+    ]:
+        lines += [section_title, "", _DL_HDR, _DL_SEP]
+        for name_a, name_b, y_cmp, prob_a, prob_b, y_check in pairs:
+            if len(y_cmp) != len(y_check):
+                continue
+            row = _dl_row(name_a, name_b, y_cmp, prob_a, prob_b)
+            if row:
+                lines.append(row)
+        lines.append("")
+
+    md_path = os.path.join(os.path.dirname(RESULTS_DIR), f"scaling_comparison_{loss_type}_aec{aec_size}.md")
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     print(f"\n  Comparison saved → {md_path}")
