@@ -38,7 +38,8 @@ from cross_val import (run_cross_validation, run_cross_validation_cross,
                        run_cross_validation_cross3)
 from evaluate import evaluate_test, evaluate_test_cross, evaluate_test_cross3
 from metrics import print_cv_summary
-from visualize import save_all, save_all_cross, plot_test_roc_with_baseline, plot_roc_all_models
+from visualize import (save_all, save_all_cross, plot_test_roc_with_baseline,
+                       plot_roc_all_models, plot_attention_maps)
 
 # ── 모델별 스케일링 케이스 정의 ──────────────────────────────
 # 각 튜플: (결과 디렉토리 이름, scale_clinic, [scale_aec])
@@ -176,10 +177,11 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 print_cv_summary("CrossAttn", ca_cv)
 
                 med_epoch2 = int(np.median(ca_best_epochs2))
-                (ca_pred_te, ca_prob_te, ca_true_te, stats_te2) = evaluate_test_cross(
+                (ca_pred_te, ca_prob_te, ca_true_te, stats_te2,
+                 model_te2, X_clin_te_s2, X_aec_te_s2) = evaluate_test_cross(  # type: ignore[misc]
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v,
                     X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
-                    med_epoch2, scale_clin=sc, scale_aec=sa,
+                    med_epoch2, scale_clin=sc, scale_aec=sa, return_model=True,
                 )
 
                 save_all_cross(
@@ -188,6 +190,12 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                     X_clin_te_v, y2_te_v,
                     ca_pred_te, ca_true_te, sex2_te_v, ca_prob_te,
                     model_label=f"model 2 ({aec_var})", out_dir=out2,
+                )
+
+                plot_attention_maps(
+                    model_te2, X_clin_te_s2, X_aec_te_s2, ca_true_te,
+                    out_dir=out2, aec_var=aec_var,
+                    model_label=f"Model 2 ({aec_var})",
                 )
 
                 results.append({
@@ -256,10 +264,11 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 print_cv_summary("CrossAttn", ca_cv)
 
                 med_epoch2_2 = int(np.median(ca_best_epochs2_2))
-                (ca_pred_te, ca_prob_te, ca_true_te, stats_te2_2) = evaluate_test_cross(
+                (ca_pred_te, ca_prob_te, ca_true_te, stats_te2_2,
+                 model_te2_2, X_clin_te_s2_2, X_aec_te_s2_2) = evaluate_test_cross(  # type: ignore[misc]
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v,
                     X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
-                    med_epoch2_2, scale_clin=sc, scale_aec=sa,
+                    med_epoch2_2, scale_clin=sc, scale_aec=sa, return_model=True,
                 )
 
                 save_all_cross(
@@ -268,6 +277,12 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                     X_clin_te_v, y2_te_v,
                     ca_pred_te, ca_true_te, sex2_te_v, ca_prob_te,
                     model_label=f"model 2_2 ({aec_var}, unmatched)", out_dir=out2_2,
+                )
+
+                plot_attention_maps(
+                    model_te2_2, X_clin_te_s2_2, X_aec_te_s2_2, ca_true_te,
+                    out_dir=out2_2, aec_var=aec_var,
+                    model_label=f"Model 2_2 Unmatched ({aec_var})",
                 )
 
                 results.append({
@@ -336,11 +351,12 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                 print_cv_summary("CrossAttn3", ca3_cv)
 
                 med_epoch3 = int(np.median(ca3_best_epochs3))
-                (ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te3) = evaluate_test_cross3(
+                (ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te3,
+                 model_te3, X_clin3_te_s, X_aec3_te_s) = evaluate_test_cross3(  # type: ignore[misc]
                     X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v,
                     X_clin3_te_v, X_aec3_te_v, X_mfr3_te_v, y3_te_v,
                     sex3_te_v, med_epoch3, n_mfr,
-                    scale_clin=sc, scale_aec=sa,
+                    scale_clin=sc, scale_aec=sa, return_model=True,
                 )
 
                 save_all_cross(
@@ -349,6 +365,13 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                     X_clin3_te_v, y3_te_v,
                     ca3_pred_te, ca3_true_te, sex3_te_v, ca3_prob_te,
                     model_label=f"model 3 ({aec_var})", out_dir=out3,
+                )
+
+                plot_attention_maps(
+                    model_te3, X_clin3_te_s, X_aec3_te_s, ca3_true_te,
+                    out_dir=out3, aec_var=aec_var,
+                    model_label=f"Model 3 ({aec_var})",
+                    X_mfr_te=X_mfr3_te_v,
                 )
 
                 results.append({

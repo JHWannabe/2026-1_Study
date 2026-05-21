@@ -108,7 +108,8 @@ def evaluate_test(X_cv, y_cv, X_te, y_te, sex_te, scale_X=True):
 def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
                         X_clin_te, X_aec_te, y_te, sex_te,
                         med_epoch,
-                        scale_clin=True, scale_aec=True):
+                        scale_clin=True, scale_aec=True,
+                        return_model=False):
     """
     전체 CV 세트로 ClinAECCrossAttn 최종 모델을 학습하고 test set 예측 결과를 반환.
 
@@ -149,13 +150,16 @@ def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
     ci_ca = print_bootstrap_ci("CrossAttn", ca_true_te, ca_pred_te, ca_prob_te)
 
     stats_te = {"bootstrap_ca": ci_ca}
+    if return_model:
+        return ca_pred_te, ca_prob_te, ca_true_te, stats_te, model_f, X_clin_te_s, X_aec_te_s
     return ca_pred_te, ca_prob_te, ca_true_te, stats_te
 
 
 def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
                           X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
                           sex_te, med_epoch, n_manufacturers,
-                          scale_clin=True, scale_aec=True):
+                          scale_clin=True, scale_aec=True,
+                          return_model=False):
     """
     전체 CV 세트로 ClinAECScanCrossAttn 최종 모델을 학습하고 test set 예측 결과를 반환.
 
@@ -199,4 +203,6 @@ def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
     ci_ca3 = print_bootstrap_ci("CrossAttn3", ca3_true_te, ca3_pred_te, ca3_prob_te)
 
     stats_te = {"bootstrap_ca3": ci_ca3}
+    if return_model:
+        return ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te, model_f, X_clin_te_s, X_aec_te_s
     return ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te
