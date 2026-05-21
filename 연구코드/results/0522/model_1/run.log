@@ -5,6 +5,7 @@
 ############################################################
   [M1] CASE : scale_clinic  (scale_clinic=True)
 ############################################################
+  [M1/scale_clinic] Cross-validating LR ...
 =======================================================
 5-Fold Cross-Validation  [scale_X=True]
 =======================================================
@@ -37,6 +38,7 @@ LR  —  5-Fold CV Summary
   ──────────────────────────────────────────────────────────
   Mean       0.8051     0.3857     0.1800     0.7395     0.3714
   ±Std       0.0322     0.0784     0.0134     0.0307     0.0313
+  [M1/scale_clinic] Evaluating on test set ...
 
 =======================================================
 Final Test Evaluation  (scale_X=True)
@@ -79,6 +81,7 @@ Test Set — Bootstrap CI
   Brier            0.1878         0.1629         0.2143
   Accuracy         0.7167         0.6567         0.7725
   F1               0.3889         0.2752         0.5098
+  [M1/scale_clinic] Saving figures ...
 
 Saved:
   연구코드/results/0522/model_1\scale_clinic/data_distribution.png
@@ -89,3 +92,4 @@ Saved:
   연구코드/results/0522/model_1\scale_clinic/test_roc_by_sex.png
   연구코드/results/0522/model_1\scale_clinic/calibration.png
   연구코드/results/0522/model_1\scale_clinic/results.md
+  [M1/scale_clinic] Done.

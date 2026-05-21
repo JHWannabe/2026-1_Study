@@ -14,7 +14,13 @@ Deep model 학습 epoch:
 스케일링 정책:
   Clinical: _scale_clin_te — Age(col 0)·BMI(col 2)만 표준화, sex_enc(col 1) 제외
   AEC     : _scale_or_copy — 전 컬럼 표준화
+  MFR     : 스케일링 없음 — nn.Embedding index(1-indexed 정수)이므로 표준화 불필요
   CV 세트 전체로 scaler를 fit 후 test set에 transform만 적용 (누수 방지).
+
+return_model 옵션:
+  evaluate_test_cross / evaluate_test_cross3 에서 return_model=True 를 전달하면
+  (pred, prob, true, stats, model, X_clin_te_s, X_aec_te_s) 7-tuple 을 반환한다.
+  스케일된 test 배열을 함께 반환해 호출 측에서 attention map 시각화에 바로 사용할 수 있다.
 """
 import numpy as np
 from sklearn.linear_model import LogisticRegression
@@ -113,7 +119,8 @@ def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
     """
     전체 CV 세트로 ClinAECCrossAttn 최종 모델을 학습하고 test set 예측 결과를 반환.
 
-    Returns: ca_pred_te, ca_prob_te, ca_true_te, stats_te
+    return_model=False (기본): ca_pred_te, ca_prob_te, ca_true_te, stats_te
+    return_model=True        : 위 4개 + model, X_clin_te_s, X_aec_te_s (attention map용)
     """
     print(f"\n{'='*55}")
     print(f"CrossAttn Test Evaluation  (scale_clin={scale_clin}, scale_aec={scale_aec})")
@@ -163,8 +170,9 @@ def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
     """
     전체 CV 세트로 ClinAECScanCrossAttn 최종 모델을 학습하고 test set 예측 결과를 반환.
 
-    ManufacturerModelName은 Embedding으로 처리하므로 스케일링하지 않는다.
-    Returns: ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te
+    ManufacturerModelName은 nn.Embedding index(1-indexed 정수)이므로 스케일링하지 않는다.
+    return_model=False (기본): ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te
+    return_model=True        : 위 4개 + model, X_clin_te_s, X_aec_te_s (attention map용)
     """
     print(f"\n{'='*65}")
     print(f"CrossAttn3 Test Evaluation  (scale_clin={scale_clin}, scale_aec={scale_aec})")

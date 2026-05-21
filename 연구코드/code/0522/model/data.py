@@ -18,7 +18,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-from config import DATA_PATH, AEC_SHEET, AEC_LEN, SEED, TEST_SIZE, SMI_THRESH_M, SMI_THRESH_F, AEC_SHUFFLE_SEED, MIN_MFR_RATIO
+from config import DATA_PATH, AEC_SHEET, AEC_LEN, SEED, TEST_SIZE, SMI_THRESH_M, SMI_THRESH_F, AEC_SHUFFLE_SEED
 
 
 def _make_label(row):
@@ -165,10 +165,6 @@ def load_data_with_aec_meta(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
     aec_cols = [c for c in df_aec.columns if c != "PatientID"][:aec_len]
 
     df = pd.merge(df_meta, df_aec[["PatientID"] + aec_cols], on="PatientID", how="inner").reset_index(drop=True)
-
-    mfr_freq = df["ManufacturerModelName"].value_counts(normalize=True)
-    valid_mfr = mfr_freq[mfr_freq >= MIN_MFR_RATIO].index
-    df = df[df["ManufacturerModelName"].isin(valid_mfr)].reset_index(drop=True)
 
     df["label"]   = df.apply(_make_label, axis=1)
     df["sex_enc"] = (df["PatientSex"] == "M").astype(int)

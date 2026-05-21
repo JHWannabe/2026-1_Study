@@ -2,10 +2,13 @@
 시각화 및 Markdown 보고서 생성 유틸리티.
 
 Model 1 (Clinic Only, LR):
-  save_all()       — 7종 PNG + results.md 를 out_dir에 일괄 저장
+  save_all()            — 7종 PNG + results.md 를 out_dir에 일괄 저장
 
 Model 2/2_2/3 (Clinic + AEC / Scanner):
-  save_all_cross() — 8종 PNG + results.md 를 out_dir에 일괄 저장
+  save_all_cross()      — 8종 PNG + results.md 를 out_dir에 일괄 저장
+  plot_attention_maps() — CrossAttn 모델의 Clinical→AEC attention 시각화
+                          attention_map_c2a.png : 클래스별 토큰 평균 bar + AEC 신호 오버레이
+                          attention_heatmap.png : 샘플별 heatmap (Sarco→Normal 순 정렬)
 
 출력 경로 관리:
   _dir1, _dir2 전역 변수를 save_all/save_all_cross 호출 시 갱신한다.

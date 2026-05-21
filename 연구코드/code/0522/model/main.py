@@ -12,8 +12,14 @@ Model 1/2/2_2/3 는 ProcessPoolExecutor 로 병렬 실행되며,
 결과는 scaling_comparison.md 와 각 모델 디렉토리 run.log 에 저장된다.
 
 스케일링 원칙:
-  - Clinic(Age·BMI)과 AEC 모두 StandardScaler 적용
-  - sex_enc(이진값)와 label(y, 0/1)에는 StandardScaler를 적용하지 않는다
+  - Clinic(Age·BMI)만 StandardScaler 적용 (AEC는 적용하지 않음)
+  - AEC 행 방향 정규화는 "norm" variant sensitivity로만 비교
+  - sex_enc(이진값), label(y, 0/1), MFR index에는 StandardScaler를 적용하지 않는다
+
+Attention Map 시각화:
+  Model 2/2_2/3의 CrossAttn 최종 모델로 test set에서 attention weight를 추출한다.
+  clinical→AEC 방향(clinical_to_aec / cs_to_aec)의 attention을 AEC 토큰 위치별로
+  클래스 분리 bar chart와 샘플별 heatmap으로 각 케이스 디렉토리에 저장한다.
 """
 
 import os
@@ -42,24 +48,24 @@ from visualize import (save_all, save_all_cross, plot_test_roc_with_baseline,
                        plot_roc_all_models, plot_attention_maps)
 
 # ── 모델별 스케일링 케이스 정의 ──────────────────────────────
-# 각 튜플: (결과 디렉토리 이름, scale_clinic, [scale_aec])
-# Clinic(Age·BMI)과 AEC 모두 StandardScaler 적용 (sex_enc·label 제외)
+# 각 튜플: (결과 디렉토리 이름, scale_clinic)
+# AEC는 열 방향 StandardScaler를 적용하지 않음 — 행 방향 정규화는 "norm" variant로만 비교
 
 # Model 1: (case_name, scale_clinic)
 CASES_M1 = [
     ("scale_clinic", True),          # Age·BMI 표준화
 ]
 
-# Model 2/2_2: (case_name, scale_clinic, scale_aec)
+# Model 2/2_2: (case_name, scale_clinic)
 CASES_M2 = [
-    ("scale_both", True, True),      # Clinic + AEC 모두 표준화
+    ("scale_clinic", True),          # Clinic만 표준화 (AEC는 raw 값 유지)
 ]
 
 CASES_M2_2 = CASES_M2[:]   # Unmatched 음성 대조군은 M2와 동일 조건
 
-# Model 3: kVp 제거로 scale_scan 없음 — (case_name, scale_clinic, scale_aec)
+# Model 3: (case_name, scale_clinic)
 CASES_M3 = [
-    ("scale_both", True, True),      # Clinic + AEC 모두 표준화
+    ("scale_clinic", True),          # Clinic만 표준화 (AEC는 raw 값 유지)
 ]
 
 
@@ -103,20 +109,24 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
             out1 = os.path.join(RESULTS_MODEL_1_DIR, case_name)
             os.makedirs(out1, exist_ok=True)
 
+            print(f"  [M1/{case_name}] Cross-validating LR ...", flush=True)
             (lr_cv, lr_roc_folds) = run_cross_validation(X_cv, y_cv, scale_X=sc)
 
             print_cv_summary("LR", lr_cv)
 
+            print(f"  [M1/{case_name}] Evaluating on test set ...", flush=True)
             (lr_pred, lr_prob, stats_te) = evaluate_test(
                 X_cv, y_cv, X_te, y_te, sex_te, scale_X=sc
             )
 
+            print(f"  [M1/{case_name}] Saving figures ...", flush=True)
             save_all(
                 lr_roc_folds, lr_cv,
                 X_cv, y_cv, sex_cv,
                 X_te, y_te, lr_pred, lr_prob,
                 sex_te, out_dir=out1,
             )
+            print(f"  [M1/{case_name}] Done.", flush=True)
 
             results.append({
                 "case":         case_name,
@@ -139,7 +149,8 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
 def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 X_clin_te, X_aec_te, y2_te, sex2_te,
                 aec_size: int = 128, aec_variants: list | None = None):
-    """Model 2(Clinic+AEC Matched): AEC 변형별로 CrossAttn을 실행하고 결과 리스트를 반환. 로그는 run.log에 저장."""
+    """Model 2(Clinic+AEC Matched): AEC 변형별로 CrossAttn을 실행하고 결과 리스트를 반환.
+    평가 후 attention_map_c2a.png / attention_heatmap.png를 케이스 디렉토리에 저장. 로그는 run.log에 저장."""
     if aec_variants is None:
         aec_variants = AEC_VARIANTS
     buf = io.StringIO()
@@ -161,29 +172,32 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
             y2_te_v     = y2_te[mask_te]     if mask_te is not None else y2_te
             sex2_te_v   = sex2_te[mask_te]   if mask_te is not None else sex2_te
 
-            for case_name, sc, sa in CASES_M2:
+            for case_name, sc in CASES_M2:
                 print(f"\n{'#'*60}")
-                print(f"  [M2 {aec_var}] CASE : {case_name}  (scale_clinic={sc}, scale_aec={sa})")
+                print(f"  [M2 {aec_var}] CASE : {case_name}  (scale_clinic={sc})")
                 print(f"{'#'*60}")
 
                 out2 = os.path.join(RESULTS_MODEL_2_DIR, f"aec{aec_size}", aec_var, case_name)
                 os.makedirs(out2, exist_ok=True)
 
+                print(f"  [M2/{aec_var}/{case_name}] Cross-validating CrossAttn ...", flush=True)
                 (ca_cv, ca_roc_folds,
                  ca_histories, ca_best_epochs2) = run_cross_validation_cross(
-                    X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_clin=sc, scale_aec=sa,
+                    X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_clin=sc, scale_aec=False,
                 )
 
                 print_cv_summary("CrossAttn", ca_cv)
 
                 med_epoch2 = int(np.median(ca_best_epochs2))
+                print(f"  [M2/{aec_var}/{case_name}] Evaluating on test set (med_epoch={med_epoch2}) ...", flush=True)
                 (ca_pred_te, ca_prob_te, ca_true_te, stats_te2,
                  model_te2, X_clin_te_s2, X_aec_te_s2) = evaluate_test_cross(  # type: ignore[misc]
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v,
                     X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
-                    med_epoch2, scale_clin=sc, scale_aec=sa, return_model=True,
+                    med_epoch2, scale_clin=sc, scale_aec=False, return_model=True,
                 )
 
+                print(f"  [M2/{aec_var}/{case_name}] Saving figures ...", flush=True)
                 save_all_cross(
                     ca_cv, ca_roc_folds, ca_histories, med_epoch2,
                     X_clin_cv_v, y2_cv_v, sex2_cv_v,
@@ -192,17 +206,18 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                     model_label=f"model 2 ({aec_var})", out_dir=out2,
                 )
 
+                print(f"  [M2/{aec_var}/{case_name}] Plotting attention maps ...", flush=True)
                 plot_attention_maps(
                     model_te2, X_clin_te_s2, X_aec_te_s2, ca_true_te,
                     out_dir=out2, aec_var=aec_var,
                     model_label=f"Model 2 ({aec_var})",
                 )
+                print(f"  [M2/{aec_var}/{case_name}] Done.", flush=True)
 
                 results.append({
                     "aec_var":      aec_var,
                     "case":         case_name,
                     "scale_clinic": sc,
-                    "scale_aec":    sa,
                     "m2_ca":        _metrics(ca_true_te, ca_pred_te, ca_prob_te),
                     "ca_cv_folds":  ca_cv,
                     "test_stats":   stats_te2,
@@ -227,6 +242,7 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
     Model 2_2: Model 2와 동일한 ClinAECCrossAttn 구조를 사용하되
     Clinic-AEC가 서로 다른 환자 데이터로 섞인 상태(Unmatching)로 학습/평가.
     Model 2 > Model 2_2 이면 Clinic-AEC 대응이 실질적인 예측력을 가진다는 증거.
+    평가 후 attention_map_c2a.png / attention_heatmap.png를 케이스 디렉토리에 저장.
     """
     if aec_variants is None:
         aec_variants = AEC_VARIANTS
@@ -248,29 +264,32 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
             y2_te_v     = y2_te[mask_te]     if mask_te is not None else y2_te
             sex2_te_v   = sex2_te[mask_te]   if mask_te is not None else sex2_te
 
-            for case_name, sc, sa in CASES_M2_2:
+            for case_name, sc in CASES_M2_2:
                 print(f"\n{'#'*60}")
-                print(f"  [M2_2 {aec_var}] CASE : {case_name}  (scale_clinic={sc}, scale_aec={sa})")
+                print(f"  [M2_2 {aec_var}] CASE : {case_name}  (scale_clinic={sc})")
                 print(f"{'#'*60}")
 
                 out2_2 = os.path.join(RESULTS_MODEL_2_2_DIR, f"aec{aec_size}", aec_var, case_name)
                 os.makedirs(out2_2, exist_ok=True)
 
+                print(f"  [M2_2/{aec_var}/{case_name}] Cross-validating CrossAttn ...", flush=True)
                 (ca_cv, ca_roc_folds,
                  ca_histories, ca_best_epochs2_2) = run_cross_validation_cross(
-                    X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_clin=sc, scale_aec=sa,
+                    X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_clin=sc, scale_aec=False,
                 )
 
                 print_cv_summary("CrossAttn", ca_cv)
 
                 med_epoch2_2 = int(np.median(ca_best_epochs2_2))
+                print(f"  [M2_2/{aec_var}/{case_name}] Evaluating on test set (med_epoch={med_epoch2_2}) ...", flush=True)
                 (ca_pred_te, ca_prob_te, ca_true_te, stats_te2_2,
                  model_te2_2, X_clin_te_s2_2, X_aec_te_s2_2) = evaluate_test_cross(  # type: ignore[misc]
                     X_clin_cv_v, X_aec_cv_v, y2_cv_v,
                     X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
-                    med_epoch2_2, scale_clin=sc, scale_aec=sa, return_model=True,
+                    med_epoch2_2, scale_clin=sc, scale_aec=False, return_model=True,
                 )
 
+                print(f"  [M2_2/{aec_var}/{case_name}] Saving figures ...", flush=True)
                 save_all_cross(
                     ca_cv, ca_roc_folds, ca_histories, med_epoch2_2,
                     X_clin_cv_v, y2_cv_v, sex2_cv_v,
@@ -279,17 +298,18 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                     model_label=f"model 2_2 ({aec_var}, unmatched)", out_dir=out2_2,
                 )
 
+                print(f"  [M2_2/{aec_var}/{case_name}] Plotting attention maps ...", flush=True)
                 plot_attention_maps(
                     model_te2_2, X_clin_te_s2_2, X_aec_te_s2_2, ca_true_te,
                     out_dir=out2_2, aec_var=aec_var,
                     model_label=f"Model 2_2 Unmatched ({aec_var})",
                 )
+                print(f"  [M2_2/{aec_var}/{case_name}] Done.", flush=True)
 
                 results.append({
                     "aec_var":      aec_var,
                     "case":         case_name,
                     "scale_clinic": sc,
-                    "scale_aec":    sa,
                     "m2_2_ca":      _metrics(ca_true_te, ca_pred_te, ca_prob_te),
                     "ca_cv_folds":  ca_cv,
                     "test_stats":   stats_te2_2,
@@ -310,7 +330,8 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
 def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                 X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
                 aec_size: int = 128, aec_variants: list | None = None):
-    """Model 3(Clinic+Scanner+AEC): AEC 변형별로 CrossAttn3를 실행하고 결과 리스트를 반환. 로그는 run.log에 저장."""
+    """Model 3(Clinic+Scanner+AEC): AEC 변형별로 CrossAttn3를 실행하고 결과 리스트를 반환.
+    평가 후 attention_map_c2a.png / attention_heatmap.png를 케이스 디렉토리에 저장. 로그는 run.log에 저장."""
     if aec_variants is None:
         aec_variants = AEC_VARIANTS
     buf = io.StringIO()
@@ -333,32 +354,34 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
             y3_te_v      = y3_te[mask_te]       if mask_te is not None else y3_te
             sex3_te_v    = sex3_te[mask_te]     if mask_te is not None else sex3_te
 
-            for case_name, sc, sa in CASES_M3:
+            for case_name, sc in CASES_M3:
                 print(f"\n{'#'*60}")
-                print(f"  [M3 {aec_var}] CASE : {case_name}"
-                      f"  (scale_clinic={sc}, scale_aec={sa})")
+                print(f"  [M3 {aec_var}] CASE : {case_name}  (scale_clinic={sc})")
                 print(f"{'#'*60}")
 
                 out3 = os.path.join(RESULTS_MODEL_3_DIR, f"aec{aec_size}", aec_var, case_name)
                 os.makedirs(out3, exist_ok=True)
 
+                print(f"  [M3/{aec_var}/{case_name}] Cross-validating CrossAttn3 ...", flush=True)
                 (ca3_cv, ca3_roc_folds,
                  ca3_histories, ca3_best_epochs3) = run_cross_validation_cross3(
                     X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v, n_mfr,
-                    scale_clin=sc, scale_aec=sa,
+                    scale_clin=sc, scale_aec=False,
                 )
 
                 print_cv_summary("CrossAttn3", ca3_cv)
 
                 med_epoch3 = int(np.median(ca3_best_epochs3))
+                print(f"  [M3/{aec_var}/{case_name}] Evaluating on test set (med_epoch={med_epoch3}) ...", flush=True)
                 (ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te3,
                  model_te3, X_clin3_te_s, X_aec3_te_s) = evaluate_test_cross3(  # type: ignore[misc]
                     X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v,
                     X_clin3_te_v, X_aec3_te_v, X_mfr3_te_v, y3_te_v,
                     sex3_te_v, med_epoch3, n_mfr,
-                    scale_clin=sc, scale_aec=sa, return_model=True,
+                    scale_clin=sc, scale_aec=False, return_model=True,
                 )
 
+                print(f"  [M3/{aec_var}/{case_name}] Saving figures ...", flush=True)
                 save_all_cross(
                     ca3_cv, ca3_roc_folds, ca3_histories, med_epoch3,
                     X_clin3_cv_v, y3_cv_v, sex3_cv_v,
@@ -367,18 +390,19 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                     model_label=f"model 3 ({aec_var})", out_dir=out3,
                 )
 
+                print(f"  [M3/{aec_var}/{case_name}] Plotting attention maps ...", flush=True)
                 plot_attention_maps(
                     model_te3, X_clin3_te_s, X_aec3_te_s, ca3_true_te,
                     out_dir=out3, aec_var=aec_var,
                     model_label=f"Model 3 ({aec_var})",
                     X_mfr_te=X_mfr3_te_v,
                 )
+                print(f"  [M3/{aec_var}/{case_name}] Done.", flush=True)
 
                 results.append({
                     "aec_var":       aec_var,
                     "case":          case_name,
                     "scale_clinic":  sc,
-                    "scale_aec":     sa,
                     "m3_ca3":        _metrics(ca3_true_te, ca3_pred_te, ca3_prob_te),
                     "ca3_cv_folds":  ca3_cv,
                     "test_stats":    stats_te3,
@@ -482,14 +506,18 @@ def run_all_cases():
     describe_dataset()
 
     # ── Model 1: AEC 미사용, 1회만 실행 ──────────────────────
+    print("\n[Data] Loading Model 1 data ...")
     X, y, sex = load_data()
     X_cv, y_cv, sex_cv, X_te, y_te, sex_te = split_data(X, y, sex)
+    print("[Data] Model 1 data ready.")
     print("=== Model 1 dataset ==="); print_stats(y, sex)
 
+    print("\n[Model 1] Starting ...")
     with ProcessPoolExecutor(max_workers=1) as executor:
         results_m1 = executor.submit(
             _run_model1, X_cv, y_cv, sex_cv, X_te, y_te, sex_te,
         ).result()
+    print("[Model 1] Finished.\n")
 
     # ── Model 2/2_2/3: AEC 크기별 반복 실행 ─────────────────
     for aec_size in AEC_SIZES:
@@ -500,14 +528,17 @@ def run_all_cases():
         print(f"  AEC SIZE : {aec_size} points  (sheet={aec_sheet})")
         print(f"{'='*60}\n")
 
+        print(f"[Data] Loading aec{aec_size} datasets ...")
         X_clin,  X_aec,  y2,  sex2  = load_data_with_aec(aec_len=aec_size, aec_sheet=aec_sheet)
         X_clin_u, X_aec_u, y2u, sex2u = load_data_with_aec_unmatched(aec_len=aec_size, aec_sheet=aec_sheet)
         X_clin3, X_aec3, X_scan_mfr, y3, sex3, n_mfr = load_data_with_aec_meta(aec_len=aec_size, aec_sheet=aec_sheet)
+        print(f"[Data] aec{aec_size} datasets loaded.")
 
         print(f"=== Model 2   dataset (aec{aec_size}) ==="); print_stats(y2,  sex2)
         print(f"=== Model 2_2 dataset (aec{aec_size}) ==="); print_stats(y2u, sex2u)
         print(f"=== Model 3   dataset (aec{aec_size}) ==="); print_stats(y3,  sex3)
 
+        print(f"[Data] Splitting aec{aec_size} datasets ...")
         X_clin_cv,  X_aec_cv,  y2_cv,  sex2_cv, \
         X_clin_te,  X_aec_te,  y2_te,  sex2_te  = split_data_dual(X_clin,   X_aec,   y2,  sex2)
         X_clin_ucv, X_aec_ucv, y2u_cv, sex2u_cv, \
@@ -516,6 +547,7 @@ def run_all_cases():
          X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te) = split_data_quad(
             X_clin3, X_aec3, X_scan_mfr, y3, sex3,
         )
+        print(f"[Data] aec{aec_size} splits ready.")
 
         print(f"\n  Launching Model 2, 2_2, 3 in parallel (aec{aec_size}) ...\n")
 
@@ -544,9 +576,13 @@ def run_all_cases():
 
         print(f"  [aec{aec_size}] All models done.\n")
 
+        print(f"[aec{aec_size}] Plotting comparison ROC curves ...")
         _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, aec_size)
+        print(f"[aec{aec_size}] Printing comparison table ...")
         _print_comparison(results_m1, results_m2, results_m2_2, results_m3, aec_size)
+        print(f"[aec{aec_size}] Saving comparison markdown ...")
         _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, aec_size)
+        print(f"[aec{aec_size}] All done.\n")
 
 
 # ── 출력 헬퍼 ────────────────────────────────────────────────

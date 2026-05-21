@@ -12,7 +12,7 @@ import torch
 DATA_PATH = "연구코드/data/강남/강남_merged_features.xlsx"
 AEC_LEN   = 128              # AEC 기본 시퀀스 길이 (default, 함수 파라미터로 오버라이드 가능)
 AEC_SHEET = "aec_128"           # AEC_LEN에 따라 시트 자동 선택
-AEC_SIZES = [128, 256]          # 비교할 AEC 보간 해상도 목록
+AEC_SIZES = [256, 128]          # 비교할 AEC 보간 해상도 목록
 
 # AEC 민감도 분석 변환 목록 — data.aec_variant() 참고
 # 해상도(len*)·시간 범위(crop*)·정규화(norm)·이상치 제외(excl_extreme)를 비교한다
