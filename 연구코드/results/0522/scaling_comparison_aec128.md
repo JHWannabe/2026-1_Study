@@ -6,10 +6,10 @@
 
 | Model | Sub-model | Best Case | AUC | AUPRC | Brier | Acc | F1 |
 |-------|-----------|-----------|------: | ------: | ------: | ------: | ------:|
-| M1 | LR | scale_clinic | 0.7223 | 0.2458 | 0.1633 | 0.7768 | 0.3500 |
-| M2 | CrossAttn | excl_extreme/scale_both | 0.7205 | 0.3372 | 0.1493 | 0.7847 | 0.3662 |
-| M2_2 | CrossAttn | len128/scale_both | 0.6983 | 0.1939 | 0.1849 | 0.7039 | 0.3030 |
-| M3 | CrossAttn3 | excl_extreme/scale_both | 0.7149 | 0.3065 | 0.1742 | 0.7368 | 0.3373 |
+| M1 | LR | scale_clinic | 0.8119 | 0.4103 | 0.1878 | 0.7167 | 0.3889 |
+| M2 | CrossAttn | excl_extreme/scale_both | 0.8223 | 0.3961 | 0.2589 | 0.6077 | 0.3279 |
+| M2_2 | CrossAttn | crop60/scale_both | 0.8229 | 0.4278 | 0.1361 | 0.7811 | 0.3855 |
+| M3 | CrossAttn3 | norm/scale_both | 0.8329 | 0.4338 | 0.2288 | 0.6824 | 0.3621 |
 
 ---
 
@@ -19,7 +19,7 @@
 
 | Case | AUC | AUPRC | Brier | Acc | F1 |
 |------|------: | ------: | ------: | ------: | ------:|
-| **scale_clinic** | 0.7223 | 0.2458 | 0.1633 | 0.7768 | 0.3500 |
+| **scale_clinic** | 0.8119 | 0.4103 | 0.1878 | 0.7167 | 0.3889 |
 
 ---
 
@@ -29,11 +29,11 @@
 
 | Case | AUC | AUPRC | Brier | Acc | F1 |
 |------|------: | ------: | ------: | ------: | ------:|
-| len128/scale_both | 0.6896 | 0.2479 | 0.1784 | 0.7382 | 0.3146 |
-| crop80/scale_both | 0.6794 | 0.2995 | 0.1990 | 0.7167 | 0.3125 |
-| crop60/scale_both | 0.6871 | 0.3192 | 0.1877 | 0.7210 | 0.3011 |
-| norm/scale_both | 0.6804 | 0.2180 | 0.1836 | 0.7210 | 0.2697 |
-| **excl_extreme/scale_both** | 0.7205 | 0.3372 | 0.1493 | 0.7847 | 0.3662 |
+| len128/scale_both | 0.8073 | 0.4147 | 0.1923 | 0.7167 | 0.3654 |
+| crop80/scale_both | 0.8142 | 0.4009 | 0.2676 | 0.5837 | 0.3121 |
+| crop60/scale_both | 0.8035 | 0.3821 | 0.2048 | 0.6738 | 0.3448 |
+| norm/scale_both | 0.8044 | 0.3875 | 0.2422 | 0.6180 | 0.3407 |
+| **excl_extreme/scale_both** | 0.8223 | 0.3961 | 0.2589 | 0.6077 | 0.3279 |
 
 ---
 
@@ -46,11 +46,11 @@
 
 | Case | AUC | AUPRC | Brier | Acc | F1 |
 |------|------: | ------: | ------: | ------: | ------:|
-| **len128/scale_both** | 0.6983 | 0.1939 | 0.1849 | 0.7039 | 0.3030 |
-| crop80/scale_both | 0.6929 | 0.2118 | 0.1816 | 0.7382 | 0.2824 |
-| crop60/scale_both | 0.6885 | 0.2125 | 0.2090 | 0.6695 | 0.2667 |
-| norm/scale_both | 0.6635 | 0.2158 | 0.1674 | 0.7811 | 0.3014 |
-| excl_extreme/scale_both | 0.6925 | 0.2091 | 0.2056 | 0.6507 | 0.2474 |
+| len128/scale_both | 0.7754 | 0.3095 | 0.1701 | 0.7382 | 0.3838 |
+| crop80/scale_both | 0.8073 | 0.3985 | 0.2005 | 0.6481 | 0.3279 |
+| **crop60/scale_both** | 0.8229 | 0.4278 | 0.1361 | 0.7811 | 0.3855 |
+| norm/scale_both | 0.8198 | 0.3463 | 0.1654 | 0.7768 | 0.4348 |
+| excl_extreme/scale_both | 0.7910 | 0.2751 | 0.2496 | 0.6029 | 0.3252 |
 
 ---
 
@@ -60,11 +60,11 @@
 
 | Case | AUC | AUPRC | Brier | Acc | F1 |
 |------|------: | ------: | ------: | ------: | ------:|
-| len128/scale_both | 0.6773 | 0.2978 | 0.1781 | 0.7382 | 0.2989 |
-| crop80/scale_both | 0.6937 | 0.3190 | 0.2070 | 0.6824 | 0.3019 |
-| crop60/scale_both | 0.6940 | 0.3102 | 0.1597 | 0.7639 | 0.3038 |
-| norm/scale_both | 0.6971 | 0.2715 | 0.1784 | 0.7425 | 0.3182 |
-| **excl_extreme/scale_both** | 0.7149 | 0.3065 | 0.1742 | 0.7368 | 0.3373 |
+| len128/scale_both | 0.8156 | 0.4169 | 0.1823 | 0.7382 | 0.3960 |
+| crop80/scale_both | 0.7862 | 0.3661 | 0.1923 | 0.7167 | 0.3400 |
+| crop60/scale_both | 0.7821 | 0.3833 | 0.1655 | 0.7382 | 0.3441 |
+| **norm/scale_both** | 0.8329 | 0.4338 | 0.2288 | 0.6824 | 0.3621 |
+| excl_extreme/scale_both | 0.8264 | 0.4025 | 0.1934 | 0.6986 | 0.3226 |
 
 ---
 
@@ -85,51 +85,51 @@
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC † | 0.8378 | 0.8652 | +0.0274 | -2.599 | 6.01e-02 | 1.25e-01 |
-| AUPRC  | 0.4431 | 0.4572 | +0.0140 | -0.629 | 5.64e-01 | 4.38e-01 |
-| Brier  | 0.1696 | 0.1700 | +0.0004 | -0.047 | 9.65e-01 | 1.00e+00 |
-| Accuracy  | 0.7481 | 0.7351 | -0.0130 | 0.459 | 6.70e-01 | 8.75e-01 |
-| F1  | 0.3985 | 0.4211 | +0.0226 | -1.242 | 2.82e-01 | 4.38e-01 |
+| AUC-ROC  | 0.8051 | 0.8256 | +0.0206 | -1.810 | 1.45e-01 | 1.88e-01 |
+| AUPRC  | 0.3857 | 0.4273 | +0.0416 | -0.955 | 3.93e-01 | 4.38e-01 |
+| Brier  | 0.1800 | 0.1758 | -0.0042 | 0.431 | 6.89e-01 | 6.25e-01 |
+| Accuracy  | 0.7395 | 0.7180 | -0.0215 | 2.077 | 1.06e-01 | 1.88e-01 |
+| F1  | 0.3714 | 0.3825 | +0.0111 | -1.256 | 2.78e-01 | 4.38e-01 |
 
 ### crop80/scale_both  (M1-LR vs M2-CrossAttn)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8378 | 0.8556 | +0.0179 | -1.840 | 1.40e-01 | 1.88e-01 |
-| AUPRC  | 0.4431 | 0.4230 | -0.0202 | 0.816 | 4.60e-01 | 4.38e-01 |
-| Brier  | 0.1696 | 0.1737 | +0.0041 | -0.934 | 4.03e-01 | 8.12e-01 |
-| Accuracy  | 0.7481 | 0.7223 | -0.0259 | 1.797 | 1.47e-01 | 1.88e-01 |
-| F1  | 0.3985 | 0.3902 | -0.0083 | 0.449 | 6.77e-01 | 8.12e-01 |
+| AUC-ROC  | 0.8051 | 0.8178 | +0.0127 | -1.142 | 3.17e-01 | 3.12e-01 |
+| AUPRC  | 0.3857 | 0.4271 | +0.0414 | -1.145 | 3.16e-01 | 3.12e-01 |
+| Brier  | 0.1800 | 0.1867 | +0.0067 | -0.445 | 6.79e-01 | 8.12e-01 |
+| Accuracy  | 0.7395 | 0.7104 | -0.0291 | 0.991 | 3.78e-01 | 6.25e-01 |
+| F1  | 0.3714 | 0.3848 | +0.0134 | -0.618 | 5.70e-01 | 4.38e-01 |
 
 ### crop60/scale_both  (M1-LR vs M2-CrossAttn)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC † | 0.8378 | 0.8624 | +0.0246 | -2.501 | 6.67e-02 | 1.25e-01 |
-| AUPRC  | 0.4431 | 0.4334 | -0.0097 | 0.369 | 7.31e-01 | 8.12e-01 |
-| Brier  | 0.1696 | 0.1822 | +0.0126 | -0.770 | 4.84e-01 | 8.12e-01 |
-| Accuracy  | 0.7481 | 0.7114 | -0.0367 | 1.055 | 3.51e-01 | 6.25e-01 |
-| F1  | 0.3985 | 0.3955 | -0.0030 | 0.116 | 9.13e-01 | 1.00e+00 |
+| AUC-ROC  | 0.8051 | 0.8140 | +0.0089 | -0.713 | 5.15e-01 | 6.25e-01 |
+| AUPRC  | 0.3857 | 0.3804 | -0.0053 | 0.170 | 8.74e-01 | 1.00e+00 |
+| Brier  | 0.1800 | 0.1911 | +0.0111 | -0.693 | 5.26e-01 | 8.12e-01 |
+| Accuracy  | 0.7395 | 0.7007 | -0.0388 | 1.130 | 3.22e-01 | 3.75e-01 |
+| F1  | 0.3714 | 0.3690 | -0.0024 | 0.081 | 9.40e-01 | 8.12e-01 |
 
 ### norm/scale_both  (M1-LR vs M2-CrossAttn)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8378 | 0.8593 | +0.0215 | -1.836 | 1.40e-01 | 1.88e-01 |
-| AUPRC  | 0.4431 | 0.4177 | -0.0254 | 1.871 | 1.35e-01 | 1.88e-01 |
-| Brier  | 0.1696 | 0.1844 | +0.0148 | -0.905 | 4.17e-01 | 6.25e-01 |
-| Accuracy  | 0.7481 | 0.7028 | -0.0453 | 1.364 | 2.44e-01 | 4.38e-01 |
-| F1  | 0.3985 | 0.3930 | -0.0055 | 0.258 | 8.09e-01 | 1.00e+00 |
+| AUC-ROC  | 0.8051 | 0.8244 | +0.0193 | -1.275 | 2.71e-01 | 4.38e-01 |
+| AUPRC  | 0.3857 | 0.3807 | -0.0049 | 0.158 | 8.82e-01 | 1.00e+00 |
+| Brier  | 0.1800 | 0.1983 | +0.0183 | -1.083 | 3.40e-01 | 3.12e-01 |
+| Accuracy  | 0.7395 | 0.6857 | -0.0537 | 1.446 | 2.22e-01 | 3.12e-01 |
+| F1  | 0.3714 | 0.3548 | -0.0166 | 0.679 | 5.34e-01 | 6.25e-01 |
 
 ### excl_extreme/scale_both  (M1-LR vs M2-CrossAttn)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8378 | 0.8547 | +0.0170 | -1.187 | 3.01e-01 | 3.12e-01 |
-| AUPRC  | 0.4431 | 0.4195 | -0.0236 | 0.423 | 6.94e-01 | 8.12e-01 |
-| Brier  | 0.1696 | 0.1881 | +0.0184 | -1.387 | 2.38e-01 | 3.12e-01 |
-| Accuracy † | 0.7481 | 0.6934 | -0.0547 | 2.593 | 6.05e-02 | 1.25e-01 |
-| F1 † | 0.3985 | 0.3667 | -0.0318 | 2.519 | 6.54e-02 | 1.25e-01 |
+| AUC-ROC  | 0.8051 | 0.8197 | +0.0146 | -0.675 | 5.37e-01 | 6.25e-01 |
+| AUPRC  | 0.3857 | 0.3745 | -0.0112 | 0.343 | 7.49e-01 | 1.00e+00 |
+| Brier † | 0.1800 | 0.2059 | +0.0259 | -2.298 | 8.31e-02 | 1.25e-01 |
+| Accuracy  | 0.7395 | 0.6982 | -0.0413 | 1.735 | 1.58e-01 | 1.25e-01 |
+| F1  | 0.3714 | 0.3621 | -0.0093 | 0.325 | 7.62e-01 | 1.00e+00 |
 
 ## M2 (CrossAttn) vs M3 (CrossAttn3)
 
@@ -139,51 +139,51 @@
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8652 | 0.8491 | -0.0160 | 1.810 | 1.44e-01 | 1.88e-01 |
-| AUPRC † | 0.4572 | 0.4100 | -0.0472 | 2.395 | 7.48e-02 | 1.25e-01 |
-| Brier  | 0.1700 | 0.1583 | -0.0117 | 1.062 | 3.48e-01 | 4.38e-01 |
-| Accuracy  | 0.7351 | 0.7599 | +0.0248 | -1.986 | 1.18e-01 | 1.88e-01 |
-| F1  | 0.4211 | 0.4102 | -0.0109 | 0.743 | 4.99e-01 | 6.25e-01 |
+| AUC-ROC  | 0.8256 | 0.8051 | -0.0206 | 1.976 | 1.19e-01 | 6.25e-02 |
+| AUPRC  | 0.4273 | 0.3755 | -0.0518 | 1.573 | 1.91e-01 | 3.12e-01 |
+| Brier  | 0.1758 | 0.1746 | -0.0012 | 0.088 | 9.34e-01 | 1.00e+00 |
+| Accuracy  | 0.7180 | 0.7276 | +0.0096 | -0.365 | 7.33e-01 | 8.75e-01 |
+| F1  | 0.3825 | 0.3661 | -0.0164 | 1.715 | 1.62e-01 | 3.12e-01 |
 
 #### Case: crop80/scale_both  (M2-CrossAttn vs M3-CrossAttn3)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8556 | 0.8498 | -0.0059 | 1.028 | 3.62e-01 | 4.38e-01 |
-| AUPRC  | 0.4230 | 0.3979 | -0.0251 | 1.264 | 2.75e-01 | 4.38e-01 |
-| Brier  | 0.1737 | 0.1556 | -0.0181 | 1.407 | 2.32e-01 | 4.38e-01 |
-| Accuracy † | 0.7223 | 0.7686 | +0.0463 | -2.162 | 9.67e-02 | 1.25e-01 |
-| F1  | 0.3902 | 0.4089 | +0.0187 | -0.935 | 4.03e-01 | 4.38e-01 |
+| AUC-ROC  | 0.8178 | 0.8127 | -0.0051 | 0.809 | 4.64e-01 | 6.25e-01 |
+| AUPRC  | 0.4271 | 0.3850 | -0.0422 | 1.409 | 2.32e-01 | 4.38e-01 |
+| Brier  | 0.1867 | 0.2064 | +0.0197 | -1.622 | 1.80e-01 | 3.12e-01 |
+| Accuracy  | 0.7104 | 0.6878 | -0.0225 | 0.891 | 4.23e-01 | 6.25e-01 |
+| F1  | 0.3848 | 0.3744 | -0.0104 | 0.573 | 5.97e-01 | 6.25e-01 |
 
 #### Case: crop60/scale_both  (M2-CrossAttn vs M3-CrossAttn3)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC † | 0.8624 | 0.8418 | -0.0206 | 2.698 | 5.42e-02 | 1.25e-01 |
-| AUPRC  | 0.4334 | 0.4234 | -0.0100 | 0.344 | 7.48e-01 | 1.00e+00 |
-| Brier  | 0.1822 | 0.1526 | -0.0296 | 1.628 | 1.79e-01 | 1.88e-01 |
-| Accuracy  | 0.7114 | 0.7697 | +0.0582 | -1.579 | 1.89e-01 | 1.88e-01 |
-| F1  | 0.3955 | 0.4090 | +0.0134 | -0.455 | 6.73e-01 | 4.38e-01 |
+| AUC-ROC  | 0.8140 | 0.8114 | -0.0026 | 0.626 | 5.65e-01 | 1.00e+00 |
+| AUPRC  | 0.3804 | 0.3804 | -0.0000 | 0.002 | 9.99e-01 | 8.12e-01 |
+| Brier  | 0.1911 | 0.1751 | -0.0160 | 0.747 | 4.97e-01 | 6.25e-01 |
+| Accuracy  | 0.7007 | 0.7373 | +0.0367 | -0.892 | 4.23e-01 | 5.00e-01 |
+| F1  | 0.3690 | 0.3854 | +0.0164 | -0.755 | 4.92e-01 | 6.25e-01 |
 
 #### Case: norm/scale_both  (M2-CrossAttn vs M3-CrossAttn3)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8593 | 0.8590 | -0.0002 | 0.038 | 9.72e-01 | 1.00e+00 |
-| AUPRC  | 0.4177 | 0.4129 | -0.0048 | 0.419 | 6.97e-01 | 8.12e-01 |
-| Brier  | 0.1844 | 0.1607 | -0.0237 | 1.228 | 2.87e-01 | 3.12e-01 |
-| Accuracy  | 0.7028 | 0.7536 | +0.0507 | -1.253 | 2.79e-01 | 3.75e-01 |
-| F1  | 0.3930 | 0.4238 | +0.0308 | -1.542 | 1.98e-01 | 3.12e-01 |
+| AUC-ROC  | 0.8244 | 0.8119 | -0.0125 | 1.310 | 2.60e-01 | 3.12e-01 |
+| AUPRC  | 0.3807 | 0.3962 | +0.0155 | -0.678 | 5.35e-01 | 8.12e-01 |
+| Brier  | 0.1983 | 0.1982 | -0.0001 | 0.005 | 9.97e-01 | 1.00e+00 |
+| Accuracy  | 0.6857 | 0.7007 | +0.0150 | -0.362 | 7.36e-01 | 8.12e-01 |
+| F1  | 0.3548 | 0.3627 | +0.0079 | -0.375 | 7.27e-01 | 8.12e-01 |
 
 #### Case: excl_extreme/scale_both  (M2-CrossAttn vs M3-CrossAttn3)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8547 | 0.8466 | -0.0081 | 1.596 | 1.86e-01 | 3.12e-01 |
-| AUPRC  | 0.4195 | 0.4217 | +0.0022 | -0.060 | 9.55e-01 | 1.00e+00 |
-| Brier  | 0.1881 | 0.1748 | -0.0133 | 0.566 | 6.02e-01 | 6.25e-01 |
-| Accuracy  | 0.6934 | 0.7257 | +0.0323 | -0.724 | 5.09e-01 | 6.25e-01 |
-| F1  | 0.3667 | 0.3725 | +0.0058 | -0.189 | 8.60e-01 | 1.00e+00 |
+| AUC-ROC  | 0.8197 | 0.8159 | -0.0038 | 0.395 | 7.13e-01 | 1.00e+00 |
+| AUPRC † | 0.3745 | 0.4060 | +0.0315 | -2.235 | 8.91e-02 | 1.25e-01 |
+| Brier  | 0.2059 | 0.1815 | -0.0243 | 1.455 | 2.19e-01 | 3.12e-01 |
+| Accuracy  | 0.6982 | 0.7210 | +0.0228 | -0.716 | 5.13e-01 | 8.12e-01 |
+| F1  | 0.3621 | 0.3816 | +0.0195 | -0.800 | 4.69e-01 | 4.38e-01 |
 
 ## M1 (LR) vs M3 (CrossAttn3)
 
@@ -193,51 +193,51 @@
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8378 | 0.8491 | +0.0114 | -1.710 | 1.63e-01 | 1.25e-01 |
-| AUPRC  | 0.4431 | 0.4100 | -0.0332 | 1.659 | 1.72e-01 | 3.12e-01 |
-| Brier  | 0.1696 | 0.1583 | -0.0113 | 0.898 | 4.20e-01 | 6.25e-01 |
-| Accuracy  | 0.7481 | 0.7599 | +0.0118 | -0.542 | 6.16e-01 | 6.25e-01 |
-| F1  | 0.3985 | 0.4102 | +0.0117 | -0.804 | 4.67e-01 | 4.38e-01 |
+| AUC-ROC  | 0.8051 | 0.8051 | +0.0000 | -0.000 | 1.00e+00 | 1.00e+00 |
+| AUPRC  | 0.3857 | 0.3755 | -0.0102 | 0.426 | 6.92e-01 | 1.00e+00 |
+| Brier  | 0.1800 | 0.1746 | -0.0054 | 0.683 | 5.32e-01 | 6.25e-01 |
+| Accuracy  | 0.7395 | 0.7276 | -0.0119 | 0.600 | 5.81e-01 | 7.50e-01 |
+| F1  | 0.3714 | 0.3661 | -0.0053 | 0.387 | 7.18e-01 | 1.00e+00 |
 
 ### crop80/scale_both  (M1-LR vs M3-CrossAttn3)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8378 | 0.8498 | +0.0120 | -1.722 | 1.60e-01 | 1.88e-01 |
-| AUPRC  | 0.4431 | 0.3979 | -0.0452 | 1.263 | 2.75e-01 | 3.12e-01 |
-| Brier  | 0.1696 | 0.1556 | -0.0141 | 1.044 | 3.55e-01 | 3.12e-01 |
-| Accuracy  | 0.7481 | 0.7686 | +0.0204 | -1.080 | 3.41e-01 | 4.38e-01 |
-| F1  | 0.3985 | 0.4089 | +0.0104 | -0.567 | 6.01e-01 | 4.38e-01 |
+| AUC-ROC  | 0.8051 | 0.8127 | +0.0076 | -0.658 | 5.47e-01 | 8.12e-01 |
+| AUPRC  | 0.3857 | 0.3850 | -0.0007 | 0.020 | 9.85e-01 | 1.00e+00 |
+| Brier  | 0.1800 | 0.2064 | +0.0264 | -1.734 | 1.58e-01 | 3.12e-01 |
+| Accuracy  | 0.7395 | 0.6878 | -0.0516 | 1.336 | 2.52e-01 | 3.12e-01 |
+| F1  | 0.3714 | 0.3744 | +0.0031 | -0.098 | 9.27e-01 | 6.25e-01 |
 
 ### crop60/scale_both  (M1-LR vs M3-CrossAttn3)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8378 | 0.8418 | +0.0041 | -0.451 | 6.75e-01 | 1.00e+00 |
-| AUPRC  | 0.4431 | 0.4234 | -0.0198 | 0.569 | 6.00e-01 | 8.12e-01 |
-| Brier † | 0.1696 | 0.1526 | -0.0170 | 2.543 | 6.38e-02 | 1.25e-01 |
-| Accuracy  | 0.7481 | 0.7697 | +0.0215 | -0.935 | 4.03e-01 | 6.25e-01 |
-| F1  | 0.3985 | 0.4090 | +0.0104 | -0.847 | 4.45e-01 | 4.38e-01 |
+| AUC-ROC  | 0.8051 | 0.8114 | +0.0063 | -0.435 | 6.86e-01 | 8.12e-01 |
+| AUPRC  | 0.3857 | 0.3804 | -0.0053 | 0.128 | 9.04e-01 | 8.12e-01 |
+| Brier  | 0.1800 | 0.1751 | -0.0049 | 0.403 | 7.07e-01 | 8.12e-01 |
+| Accuracy  | 0.7395 | 0.7373 | -0.0021 | 0.101 | 9.24e-01 | 8.75e-01 |
+| F1  | 0.3714 | 0.3854 | +0.0141 | -0.960 | 3.91e-01 | 3.12e-01 |
 
 ### norm/scale_both  (M1-LR vs M3-CrossAttn3)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC † | 0.8378 | 0.8590 | +0.0213 | -2.681 | 5.52e-02 | 1.25e-01 |
-| AUPRC  | 0.4431 | 0.4129 | -0.0303 | 1.541 | 1.98e-01 | 3.12e-01 |
-| Brier  | 0.1696 | 0.1607 | -0.0089 | 0.512 | 6.35e-01 | 8.12e-01 |
-| Accuracy  | 0.7481 | 0.7536 | +0.0054 | -0.148 | 8.89e-01 | 1.00e+00 |
-| F1  | 0.3985 | 0.4238 | +0.0253 | -0.892 | 4.23e-01 | 4.38e-01 |
+| AUC-ROC  | 0.8051 | 0.8119 | +0.0069 | -0.538 | 6.19e-01 | 6.25e-01 |
+| AUPRC  | 0.3857 | 0.3962 | +0.0105 | -0.606 | 5.77e-01 | 6.25e-01 |
+| Brier  | 0.1800 | 0.1982 | +0.0182 | -1.578 | 1.90e-01 | 3.12e-01 |
+| Accuracy  | 0.7395 | 0.7007 | -0.0388 | 1.817 | 1.43e-01 | 1.25e-01 |
+| F1  | 0.3714 | 0.3627 | -0.0087 | 0.975 | 3.85e-01 | 4.38e-01 |
 
 ### excl_extreme/scale_both  (M1-LR vs M3-CrossAttn3)
 
 | Metric | Mean A | Mean B | Δ Mean | t-stat | t p-val | W p-val |
 |--------|-------:|-------:|-------:|-------:|--------:|--------:|
-| AUC-ROC  | 0.8378 | 0.8466 | +0.0089 | -0.839 | 4.48e-01 | 6.25e-01 |
-| AUPRC  | 0.4431 | 0.4217 | -0.0215 | 0.944 | 3.99e-01 | 3.12e-01 |
-| Brier  | 0.1696 | 0.1748 | +0.0052 | -0.233 | 8.27e-01 | 6.25e-01 |
-| Accuracy  | 0.7481 | 0.7257 | -0.0224 | 0.421 | 6.95e-01 | 6.25e-01 |
-| F1  | 0.3985 | 0.3725 | -0.0260 | 0.702 | 5.21e-01 | 4.38e-01 |
+| AUC-ROC  | 0.8051 | 0.8159 | +0.0108 | -0.732 | 5.05e-01 | 6.25e-01 |
+| AUPRC  | 0.3857 | 0.4060 | +0.0203 | -0.595 | 5.84e-01 | 6.25e-01 |
+| Brier  | 0.1800 | 0.1815 | +0.0016 | -0.066 | 9.51e-01 | 1.00e+00 |
+| Accuracy  | 0.7395 | 0.7210 | -0.0185 | 0.387 | 7.19e-01 | 6.25e-01 |
+| F1  | 0.3714 | 0.3816 | +0.0102 | -0.277 | 7.96e-01 | 1.00e+00 |
 
 ---
 
@@ -247,84 +247,84 @@
 
 | Model | Sub | Case | Metric | Estimate | CI Lower | CI Upper |
 |-------|-----|------|--------|-------:|---------:|---------:|
-| M1 | LR | scale_clinic | AUC-ROC | 0.7223 | 0.5979 | 0.8260 |
-| M1 | LR | scale_clinic | AUPRC | 0.2458 | 0.1433 | 0.4183 |
-| M1 | LR | scale_clinic | Brier | 0.1633 | 0.1369 | 0.1926 |
-| M1 | LR | scale_clinic | Accuracy | 0.7768 | 0.7210 | 0.8283 |
-| M1 | LR | scale_clinic | F1 | 0.3500 | 0.2051 | 0.4750 |
-| M2 | CrossAttn | len128/scale_both | AUC-ROC | 0.6896 | 0.5652 | 0.8005 |
-| M2 | CrossAttn | len128/scale_both | AUPRC | 0.2479 | 0.1303 | 0.4324 |
-| M2 | CrossAttn | len128/scale_both | Brier | 0.1784 | 0.1473 | 0.2135 |
-| M2 | CrossAttn | len128/scale_both | Accuracy | 0.7382 | 0.6781 | 0.7897 |
-| M2 | CrossAttn | len128/scale_both | F1 | 0.3146 | 0.1818 | 0.4330 |
-| M2 | CrossAttn | crop80/scale_both | AUC-ROC | 0.6794 | 0.5554 | 0.7852 |
-| M2 | CrossAttn | crop80/scale_both | AUPRC | 0.2995 | 0.1399 | 0.4763 |
-| M2 | CrossAttn | crop80/scale_both | Brier | 0.1990 | 0.1667 | 0.2354 |
-| M2 | CrossAttn | crop80/scale_both | Accuracy | 0.7167 | 0.6567 | 0.7725 |
-| M2 | CrossAttn | crop80/scale_both | F1 | 0.3125 | 0.1882 | 0.4237 |
-| M2 | CrossAttn | crop60/scale_both | AUC-ROC | 0.6871 | 0.5535 | 0.7993 |
-| M2 | CrossAttn | crop60/scale_both | AUPRC | 0.3192 | 0.1497 | 0.5025 |
-| M2 | CrossAttn | crop60/scale_both | Brier | 0.1877 | 0.1539 | 0.2251 |
-| M2 | CrossAttn | crop60/scale_both | Accuracy | 0.7210 | 0.6609 | 0.7768 |
-| M2 | CrossAttn | crop60/scale_both | F1 | 0.3011 | 0.1628 | 0.4130 |
-| M2 | CrossAttn | norm/scale_both | AUC-ROC | 0.6804 | 0.5607 | 0.7853 |
-| M2 | CrossAttn | norm/scale_both | AUPRC | 0.2180 | 0.1193 | 0.3898 |
-| M2 | CrossAttn | norm/scale_both | Brier | 0.1836 | 0.1512 | 0.2200 |
-| M2 | CrossAttn | norm/scale_both | Accuracy | 0.7210 | 0.6609 | 0.7768 |
-| M2 | CrossAttn | norm/scale_both | F1 | 0.2697 | 0.1386 | 0.3838 |
-| M2 | CrossAttn | excl_extreme/scale_both | AUC-ROC | 0.7205 | 0.5852 | 0.8427 |
-| M2 | CrossAttn | excl_extreme/scale_both | AUPRC | 0.3372 | 0.1743 | 0.5324 |
-| M2 | CrossAttn | excl_extreme/scale_both | Brier | 0.1493 | 0.1181 | 0.1823 |
-| M2 | CrossAttn | excl_extreme/scale_both | Accuracy | 0.7847 | 0.7273 | 0.8373 |
-| M2 | CrossAttn | excl_extreme/scale_both | F1 | 0.3662 | 0.2181 | 0.5000 |
-| M2_2 | CrossAttn | len128/scale_both | AUC-ROC | 0.6983 | 0.5834 | 0.7962 |
-| M2_2 | CrossAttn | len128/scale_both | AUPRC | 0.1939 | 0.1199 | 0.3159 |
-| M2_2 | CrossAttn | len128/scale_both | Brier | 0.1849 | 0.1547 | 0.2174 |
-| M2_2 | CrossAttn | len128/scale_both | Accuracy | 0.7039 | 0.6438 | 0.7639 |
-| M2_2 | CrossAttn | len128/scale_both | F1 | 0.3030 | 0.1778 | 0.4138 |
-| M2_2 | CrossAttn | crop80/scale_both | AUC-ROC | 0.6929 | 0.5698 | 0.7943 |
-| M2_2 | CrossAttn | crop80/scale_both | AUPRC | 0.2118 | 0.1212 | 0.3674 |
-| M2_2 | CrossAttn | crop80/scale_both | Brier | 0.1816 | 0.1478 | 0.2185 |
-| M2_2 | CrossAttn | crop80/scale_both | Accuracy | 0.7382 | 0.6781 | 0.7940 |
-| M2_2 | CrossAttn | crop80/scale_both | F1 | 0.2824 | 0.1463 | 0.4000 |
-| M2_2 | CrossAttn | crop60/scale_both | AUC-ROC | 0.6885 | 0.5782 | 0.7809 |
-| M2_2 | CrossAttn | crop60/scale_both | AUPRC | 0.2125 | 0.1200 | 0.3801 |
-| M2_2 | CrossAttn | crop60/scale_both | Brier | 0.2090 | 0.1766 | 0.2436 |
-| M2_2 | CrossAttn | crop60/scale_both | Accuracy | 0.6695 | 0.6052 | 0.7296 |
-| M2_2 | CrossAttn | crop60/scale_both | F1 | 0.2667 | 0.1468 | 0.3704 |
-| M2_2 | CrossAttn | norm/scale_both | AUC-ROC | 0.6635 | 0.5383 | 0.7767 |
-| M2_2 | CrossAttn | norm/scale_both | AUPRC | 0.2158 | 0.1180 | 0.3946 |
-| M2_2 | CrossAttn | norm/scale_both | Brier | 0.1674 | 0.1316 | 0.2058 |
-| M2_2 | CrossAttn | norm/scale_both | Accuracy | 0.7811 | 0.7253 | 0.8369 |
-| M2_2 | CrossAttn | norm/scale_both | F1 | 0.3014 | 0.1519 | 0.4270 |
-| M2_2 | CrossAttn | excl_extreme/scale_both | AUC-ROC | 0.6925 | 0.5754 | 0.7989 |
-| M2_2 | CrossAttn | excl_extreme/scale_both | AUPRC | 0.2091 | 0.1167 | 0.3848 |
-| M2_2 | CrossAttn | excl_extreme/scale_both | Brier | 0.2056 | 0.1722 | 0.2416 |
-| M2_2 | CrossAttn | excl_extreme/scale_both | Accuracy | 0.6507 | 0.5837 | 0.7129 |
-| M2_2 | CrossAttn | excl_extreme/scale_both | F1 | 0.2474 | 0.1235 | 0.3619 |
-| M3 | CrossAttn3 | len128/scale_both | AUC-ROC | 0.6773 | 0.5434 | 0.7947 |
-| M3 | CrossAttn3 | len128/scale_both | AUPRC | 0.2978 | 0.1402 | 0.4725 |
-| M3 | CrossAttn3 | len128/scale_both | Brier | 0.1781 | 0.1428 | 0.2140 |
-| M3 | CrossAttn3 | len128/scale_both | Accuracy | 0.7382 | 0.6781 | 0.7897 |
-| M3 | CrossAttn3 | len128/scale_both | F1 | 0.2989 | 0.1643 | 0.4158 |
-| M3 | CrossAttn3 | crop80/scale_both | AUC-ROC | 0.6937 | 0.5617 | 0.8082 |
-| M3 | CrossAttn3 | crop80/scale_both | AUPRC | 0.3190 | 0.1550 | 0.5017 |
-| M3 | CrossAttn3 | crop80/scale_both | Brier | 0.2070 | 0.1729 | 0.2444 |
-| M3 | CrossAttn3 | crop80/scale_both | Accuracy | 0.6824 | 0.6223 | 0.7382 |
-| M3 | CrossAttn3 | crop80/scale_both | F1 | 0.3019 | 0.1818 | 0.4039 |
-| M3 | CrossAttn3 | crop60/scale_both | AUC-ROC | 0.6940 | 0.5688 | 0.8034 |
-| M3 | CrossAttn3 | crop60/scale_both | AUPRC | 0.3102 | 0.1495 | 0.5039 |
-| M3 | CrossAttn3 | crop60/scale_both | Brier | 0.1597 | 0.1280 | 0.1936 |
-| M3 | CrossAttn3 | crop60/scale_both | Accuracy | 0.7639 | 0.7082 | 0.8155 |
-| M3 | CrossAttn3 | crop60/scale_both | F1 | 0.3038 | 0.1647 | 0.4304 |
-| M3 | CrossAttn3 | norm/scale_both | AUC-ROC | 0.6971 | 0.5704 | 0.8098 |
-| M3 | CrossAttn3 | norm/scale_both | AUPRC | 0.2715 | 0.1480 | 0.4652 |
-| M3 | CrossAttn3 | norm/scale_both | Brier | 0.1784 | 0.1478 | 0.2116 |
-| M3 | CrossAttn3 | norm/scale_both | Accuracy | 0.7425 | 0.6824 | 0.7983 |
-| M3 | CrossAttn3 | norm/scale_both | F1 | 0.3182 | 0.1842 | 0.4390 |
-| M3 | CrossAttn3 | excl_extreme/scale_both | AUC-ROC | 0.7149 | 0.5717 | 0.8429 |
-| M3 | CrossAttn3 | excl_extreme/scale_both | AUPRC | 0.3065 | 0.1664 | 0.5208 |
-| M3 | CrossAttn3 | excl_extreme/scale_both | Brier | 0.1742 | 0.1429 | 0.2078 |
-| M3 | CrossAttn3 | excl_extreme/scale_both | Accuracy | 0.7368 | 0.6746 | 0.7943 |
-| M3 | CrossAttn3 | excl_extreme/scale_both | F1 | 0.3373 | 0.2025 | 0.4634 |
+| M1 | LR | scale_clinic | AUC-ROC | 0.8119 | 0.7251 | 0.8882 |
+| M1 | LR | scale_clinic | AUPRC | 0.4103 | 0.2449 | 0.5885 |
+| M1 | LR | scale_clinic | Brier | 0.1878 | 0.1629 | 0.2143 |
+| M1 | LR | scale_clinic | Accuracy | 0.7167 | 0.6567 | 0.7725 |
+| M1 | LR | scale_clinic | F1 | 0.3889 | 0.2752 | 0.5098 |
+| M2 | CrossAttn | len128/scale_both | AUC-ROC | 0.8073 | 0.7054 | 0.8948 |
+| M2 | CrossAttn | len128/scale_both | AUPRC | 0.4147 | 0.2495 | 0.6238 |
+| M2 | CrossAttn | len128/scale_both | Brier | 0.1923 | 0.1589 | 0.2261 |
+| M2 | CrossAttn | len128/scale_both | Accuracy | 0.7167 | 0.6567 | 0.7768 |
+| M2 | CrossAttn | len128/scale_both | F1 | 0.3654 | 0.2472 | 0.4886 |
+| M2 | CrossAttn | crop80/scale_both | AUC-ROC | 0.8142 | 0.7240 | 0.8936 |
+| M2 | CrossAttn | crop80/scale_both | AUPRC | 0.4009 | 0.2363 | 0.5953 |
+| M2 | CrossAttn | crop80/scale_both | Brier | 0.2676 | 0.2308 | 0.3055 |
+| M2 | CrossAttn | crop80/scale_both | Accuracy | 0.5837 | 0.5193 | 0.6481 |
+| M2 | CrossAttn | crop80/scale_both | F1 | 0.3121 | 0.2170 | 0.4138 |
+| M2 | CrossAttn | crop60/scale_both | AUC-ROC | 0.8035 | 0.7017 | 0.8915 |
+| M2 | CrossAttn | crop60/scale_both | AUPRC | 0.3821 | 0.2286 | 0.5724 |
+| M2 | CrossAttn | crop60/scale_both | Brier | 0.2048 | 0.1754 | 0.2354 |
+| M2 | CrossAttn | crop60/scale_both | Accuracy | 0.6738 | 0.6137 | 0.7339 |
+| M2 | CrossAttn | crop60/scale_both | F1 | 0.3448 | 0.2364 | 0.4615 |
+| M2 | CrossAttn | norm/scale_both | AUC-ROC | 0.8044 | 0.7199 | 0.8765 |
+| M2 | CrossAttn | norm/scale_both | AUPRC | 0.3875 | 0.2168 | 0.5671 |
+| M2 | CrossAttn | norm/scale_both | Brier | 0.2422 | 0.2104 | 0.2768 |
+| M2 | CrossAttn | norm/scale_both | Accuracy | 0.6180 | 0.5536 | 0.6781 |
+| M2 | CrossAttn | norm/scale_both | F1 | 0.3407 | 0.2424 | 0.4463 |
+| M2 | CrossAttn | excl_extreme/scale_both | AUC-ROC | 0.8223 | 0.7319 | 0.9000 |
+| M2 | CrossAttn | excl_extreme/scale_both | AUPRC | 0.3961 | 0.2351 | 0.6018 |
+| M2 | CrossAttn | excl_extreme/scale_both | Brier | 0.2589 | 0.2225 | 0.2970 |
+| M2 | CrossAttn | excl_extreme/scale_both | Accuracy | 0.6077 | 0.5407 | 0.6746 |
+| M2 | CrossAttn | excl_extreme/scale_both | F1 | 0.3279 | 0.2185 | 0.4380 |
+| M2_2 | CrossAttn | len128/scale_both | AUC-ROC | 0.7754 | 0.6798 | 0.8608 |
+| M2_2 | CrossAttn | len128/scale_both | AUPRC | 0.3095 | 0.1779 | 0.4744 |
+| M2_2 | CrossAttn | len128/scale_both | Brier | 0.1701 | 0.1428 | 0.1977 |
+| M2_2 | CrossAttn | len128/scale_both | Accuracy | 0.7382 | 0.6781 | 0.7897 |
+| M2_2 | CrossAttn | len128/scale_both | F1 | 0.3838 | 0.2637 | 0.5051 |
+| M2_2 | CrossAttn | crop80/scale_both | AUC-ROC | 0.8073 | 0.7223 | 0.8846 |
+| M2_2 | CrossAttn | crop80/scale_both | AUPRC | 0.3985 | 0.2308 | 0.5880 |
+| M2_2 | CrossAttn | crop80/scale_both | Brier | 0.2005 | 0.1772 | 0.2244 |
+| M2_2 | CrossAttn | crop80/scale_both | Accuracy | 0.6481 | 0.5880 | 0.7082 |
+| M2_2 | CrossAttn | crop80/scale_both | F1 | 0.3279 | 0.2185 | 0.4366 |
+| M2_2 | CrossAttn | crop60/scale_both | AUC-ROC | 0.8229 | 0.7425 | 0.8943 |
+| M2_2 | CrossAttn | crop60/scale_both | AUPRC | 0.4278 | 0.2546 | 0.6082 |
+| M2_2 | CrossAttn | crop60/scale_both | Brier | 0.1361 | 0.1158 | 0.1566 |
+| M2_2 | CrossAttn | crop60/scale_both | Accuracy | 0.7811 | 0.7253 | 0.8326 |
+| M2_2 | CrossAttn | crop60/scale_both | F1 | 0.3855 | 0.2466 | 0.5149 |
+| M2_2 | CrossAttn | norm/scale_both | AUC-ROC | 0.8198 | 0.7300 | 0.8985 |
+| M2_2 | CrossAttn | norm/scale_both | AUPRC | 0.3463 | 0.2188 | 0.5531 |
+| M2_2 | CrossAttn | norm/scale_both | Brier | 0.1654 | 0.1430 | 0.1883 |
+| M2_2 | CrossAttn | norm/scale_both | Accuracy | 0.7768 | 0.7210 | 0.8241 |
+| M2_2 | CrossAttn | norm/scale_both | F1 | 0.4348 | 0.3077 | 0.5567 |
+| M2_2 | CrossAttn | excl_extreme/scale_both | AUC-ROC | 0.7910 | 0.6961 | 0.8743 |
+| M2_2 | CrossAttn | excl_extreme/scale_both | AUPRC | 0.2751 | 0.1670 | 0.4750 |
+| M2_2 | CrossAttn | excl_extreme/scale_both | Brier | 0.2496 | 0.2129 | 0.2865 |
+| M2_2 | CrossAttn | excl_extreme/scale_both | Accuracy | 0.6029 | 0.5359 | 0.6699 |
+| M2_2 | CrossAttn | excl_extreme/scale_both | F1 | 0.3252 | 0.2170 | 0.4329 |
+| M3 | CrossAttn3 | len128/scale_both | AUC-ROC | 0.8156 | 0.7177 | 0.9015 |
+| M3 | CrossAttn3 | len128/scale_both | AUPRC | 0.4169 | 0.2509 | 0.6123 |
+| M3 | CrossAttn3 | len128/scale_both | Brier | 0.1823 | 0.1532 | 0.2143 |
+| M3 | CrossAttn3 | len128/scale_both | Accuracy | 0.7382 | 0.6781 | 0.7940 |
+| M3 | CrossAttn3 | len128/scale_both | F1 | 0.3960 | 0.2745 | 0.5167 |
+| M3 | CrossAttn3 | crop80/scale_both | AUC-ROC | 0.7862 | 0.6918 | 0.8733 |
+| M3 | CrossAttn3 | crop80/scale_both | AUPRC | 0.3661 | 0.2091 | 0.5536 |
+| M3 | CrossAttn3 | crop80/scale_both | Brier | 0.1923 | 0.1605 | 0.2272 |
+| M3 | CrossAttn3 | crop80/scale_both | Accuracy | 0.7167 | 0.6567 | 0.7725 |
+| M3 | CrossAttn3 | crop80/scale_both | F1 | 0.3400 | 0.2157 | 0.4602 |
+| M3 | CrossAttn3 | crop60/scale_both | AUC-ROC | 0.7821 | 0.6739 | 0.8761 |
+| M3 | CrossAttn3 | crop60/scale_both | AUPRC | 0.3833 | 0.2234 | 0.5747 |
+| M3 | CrossAttn3 | crop60/scale_both | Brier | 0.1655 | 0.1379 | 0.1961 |
+| M3 | CrossAttn3 | crop60/scale_both | Accuracy | 0.7382 | 0.6824 | 0.7940 |
+| M3 | CrossAttn3 | crop60/scale_both | F1 | 0.3441 | 0.2192 | 0.4660 |
+| M3 | CrossAttn3 | norm/scale_both | AUC-ROC | 0.8329 | 0.7499 | 0.9088 |
+| M3 | CrossAttn3 | norm/scale_both | AUPRC | 0.4338 | 0.2589 | 0.6309 |
+| M3 | CrossAttn3 | norm/scale_both | Brier | 0.2288 | 0.1944 | 0.2651 |
+| M3 | CrossAttn3 | norm/scale_both | Accuracy | 0.6824 | 0.6223 | 0.7468 |
+| M3 | CrossAttn3 | norm/scale_both | F1 | 0.3621 | 0.2524 | 0.4783 |
+| M3 | CrossAttn3 | excl_extreme/scale_both | AUC-ROC | 0.8264 | 0.7437 | 0.8966 |
+| M3 | CrossAttn3 | excl_extreme/scale_both | AUPRC | 0.4025 | 0.2234 | 0.6035 |
+| M3 | CrossAttn3 | excl_extreme/scale_both | Brier | 0.1934 | 0.1628 | 0.2279 |
+| M3 | CrossAttn3 | excl_extreme/scale_both | Accuracy | 0.6986 | 0.6364 | 0.7560 |
+| M3 | CrossAttn3 | excl_extreme/scale_both | F1 | 0.3226 | 0.1927 | 0.4425 |
 
