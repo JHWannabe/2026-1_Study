@@ -14,8 +14,10 @@ TotalSegmentator를 이용해 환자별 해부학적 경계를 DICOM Instance Nu
 
 출력:
   - {SITE}_z_bounds.xlsx
-  - data/{SITE}/upper/{PatientID}.png   (T12 상단 슬라이스)
-  - data/{SITE}/bottom/{PatientID}.png  (두덩뼈 하단 슬라이스)
+  - data/{SITE}/ok/upper/{PatientID}.png      (T12 상단 슬라이스 - ok)
+  - data/{SITE}/ok/bottom/{PatientID}.png     (두덩뼈 하단 슬라이스 - ok)
+  - data/{SITE}/missing/upper/{PatientID}.png  (T12 상단 슬라이스 - missing)
+  - data/{SITE}/missing/bottom/{PatientID}.png (두덩뼈 하단 슬라이스 - missing)
 """
 
 import os
@@ -44,12 +46,19 @@ SITE       = "강남"
 DICOM_BASE = rf"D:/영상제공/{SITE}/{SITE}_axial"
 META_PATH  = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\{SITE}_merged_features.xlsx"
 OUT_PATH   = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\{SITE}_z_bounds.xlsx"
-CHECKPOINT = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\.z_bounds_checkpoint.json"
-UPPER_DIR  = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\upper"
-BOTTOM_DIR = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\bottom"
+CHECKPOINT       = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\.z_bounds_checkpoint.json"
+RETRY_CHECKPOINT = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\.z_bounds_retry_checkpoint.json"
+UPPER_DIR         = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\ok\upper"
+BOTTOM_DIR        = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\ok\bottom"
+MISSING_UPPER_DIR = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\missing\upper"
+MISSING_BOTTOM_DIR= rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\missing\bottom"
 
 ROI_SUBSET = ["vertebrae_T12", "hip_left", "hip_right"]
 BATCH_SIZE = 5
+
+# "full"  : 전체 환자 실행 (main)
+# "retry" : seg_status != ok 환자만 재처리 (retry_failed)
+MODE = "retry"
 
 
 # ── 유틸 ─────────────────────────────────────────────────────────────────────
@@ -214,17 +223,19 @@ def save_boundary_previews(
     bottom_dcm: str | None,
     upper_masks: dict | None = None,
     bottom_masks: dict | None = None,
+    upper_dir: str = UPPER_DIR,
+    bottom_dir: str = BOTTOM_DIR,
 ) -> tuple[bool, bool]:
-    """T12 upper / pubis bottom 슬라이스를 각각 upper, bottom 폴더에 저장."""
+    """T12 upper / pubis bottom 슬라이스를 각각 upper_dir, bottom_dir 폴더에 저장."""
     upper_ok = bottom_ok = False
     if upper_dcm:
-        out = os.path.join(UPPER_DIR, f"{pid_str}.png")
+        out = os.path.join(upper_dir, f"{pid_str}.png")
         if upper_masks:
             upper_ok = save_slice_png_with_seg(upper_dcm, upper_masks, out)
         else:
             upper_ok = save_slice_png(upper_dcm, out)
     if bottom_dcm:
-        out = os.path.join(BOTTOM_DIR, f"{pid_str}.png")
+        out = os.path.join(bottom_dir, f"{pid_str}.png")
         if bottom_masks:
             bottom_ok = save_slice_png_with_seg(bottom_dcm, bottom_masks, out)
         else:
@@ -339,8 +350,6 @@ def extract_bounds(pid_str: str, tmp_dir: str, folder_map: dict) -> dict:
                 vol = cast(Nifti1Image, nib.load(p)).get_fdata()
                 bottom_masks[side] = vol[:, :, bottom_k].T
 
-        save_boundary_previews(pid_str, upper_dcm, bottom_dcm, upper_masks, bottom_masks)
-
         if t12_found and hip_found:
             if pd.isna(result["t12_slice"]) or pd.isna(result["pubis_slice"]):
                 result["seg_status"] = "instance_number_missing"
@@ -352,6 +361,11 @@ def extract_bounds(pid_str: str, tmp_dir: str, folder_map: dict) -> dict:
             result["seg_status"] = "t12_missing"
         else:
             result["seg_status"] = "both_missing"
+
+        is_ok = result["seg_status"] == "ok"
+        u_dir = UPPER_DIR if is_ok else MISSING_UPPER_DIR
+        b_dir = BOTTOM_DIR if is_ok else MISSING_BOTTOM_DIR
+        save_boundary_previews(pid_str, upper_dcm, bottom_dcm, upper_masks, bottom_masks, u_dir, b_dir)
 
     except Exception as e:
         result["seg_status"] = f"error:{type(e).__name__}:{e}"
@@ -370,7 +384,7 @@ def extract_bounds(pid_str: str, tmp_dir: str, folder_map: dict) -> dict:
 
 def save_checkpoint(processed: int, rows: list):
     def clean(v):
-        if hasattr(v, "item") and isinstance(v, (np.integer, np.int64)):
+        if hasattr(v, "item") and isinstance(v, (np.integer, np.int64)): # type: ignore
             return v.item()
         if hasattr(v, "item") and isinstance(v, (np.floating, np.float64)):
             return v.item()
@@ -435,37 +449,39 @@ def is_already_done(pid_str: str, existing_df: pd.DataFrame | None) -> dict | No
 def main():
     os.makedirs(UPPER_DIR, exist_ok=True)
     os.makedirs(BOTTOM_DIR, exist_ok=True)
+    os.makedirs(MISSING_UPPER_DIR, exist_ok=True)
+    os.makedirs(MISSING_BOTTOM_DIR, exist_ok=True)
 
     folder_map, no_map = build_folder_maps(DICOM_BASE)
     print(f"DICOM 폴더 수: {len(folder_map)}")
     print(f"미리보기 저장: {UPPER_DIR}")
     print(f"              {BOTTOM_DIR}")
 
-    existing_df = pd.read_excel(OUT_PATH) if os.path.exists(OUT_PATH) else None
+    # existing_df = pd.read_excel(OUT_PATH) if os.path.exists(OUT_PATH) else None
 
     # ───────────────── [사전 필터링 단계] ─────────────────
     raw_pids = sorted(list(folder_map.keys()))
-    
-    all_pids = []
-    cached_rows = []
 
-    for pid in raw_pids:
-        cached = is_already_done(pid, existing_df)
-        if cached is not None:
-            # 기존 캐시 데이터에 PatientID 결합하여 누적 리스트에 보관
-            cached["PatientID"] = int(pid)
-            cached_rows.append(cached)
-        else:
-            all_pids.append(pid)
-
-    total = len(all_pids)
-    print(f"총 DICOM 환자: {len(raw_pids)}명 | 기존 완료(missing 포함): {len(cached_rows)}명 | **실제 진행 대상: {total}명**")
+    # all_pids = []
+    # cached_rows = []
+    # for pid in raw_pids:
+    #     cached = is_already_done(pid, existing_df)
+    #     if cached is not None:
+    #         cached["PatientID"] = int(pid)
+    #         cached_rows.append(cached)
+    #     else:
+    #         all_pids.append(pid)
+    all_pids = raw_pids
     # ────────────────────────────────────────────────────────────
 
+    total = len(all_pids)
+    print(f"총 DICOM 환자: {len(raw_pids)}명 | **실제 진행 대상: {total}명**")
+
     start_idx, rows = load_checkpoint()
-    
+
     if start_idx == 0:
-        rows = cached_rows
+        rows = []
+        # rows = cached_rows
     else:
         print(f"체크포인트 감지: 남은 {total}명 중 {start_idx}번째부터 재시작")
 
@@ -499,7 +515,9 @@ def main():
             
     n_upper = len([f for f in os.listdir(UPPER_DIR) if f.endswith(".png")]) if os.path.isdir(UPPER_DIR) else 0
     n_bottom = len([f for f in os.listdir(BOTTOM_DIR) if f.endswith(".png")]) if os.path.isdir(BOTTOM_DIR) else 0
-    print(f"  저장된 PNG: upper={n_upper}, bottom={n_bottom}")
+    n_m_upper = len([f for f in os.listdir(MISSING_UPPER_DIR) if f.endswith(".png")]) if os.path.isdir(MISSING_UPPER_DIR) else 0
+    n_m_bottom = len([f for f in os.listdir(MISSING_BOTTOM_DIR) if f.endswith(".png")]) if os.path.isdir(MISSING_BOTTOM_DIR) else 0
+    print(f"  저장된 PNG: ok/upper={n_upper}, ok/bottom={n_bottom}, missing/upper={n_m_upper}, missing/bottom={n_m_bottom}")
 
 
 def _write_final_output(rows: list, no_map: dict):
@@ -530,6 +548,8 @@ def export_previews_from_bounds():
 
     os.makedirs(UPPER_DIR, exist_ok=True)
     os.makedirs(BOTTOM_DIR, exist_ok=True)
+    os.makedirs(MISSING_UPPER_DIR, exist_ok=True)
+    os.makedirs(MISSING_BOTTOM_DIR, exist_ok=True)
     folder_map, _ = build_folder_maps(DICOM_BASE)
     df = pd.read_excel(OUT_PATH)
 
@@ -563,12 +583,118 @@ def export_previews_from_bounds():
         if pd.notna(row.get("pubis_slice")):
             bottom_dcm = find_dcm_by_instance(dcm_dir, int(row["pubis_slice"]))
 
-        u_ok, b_ok = save_boundary_previews(pid, upper_dcm, bottom_dcm)
+        is_ok = str(row.get("seg_status", "")) == "ok"
+        u_dir = UPPER_DIR if is_ok else MISSING_UPPER_DIR
+        b_dir = BOTTOM_DIR if is_ok else MISSING_BOTTOM_DIR
+        u_ok, b_ok = save_boundary_previews(pid, upper_dcm, bottom_dcm, upper_dir=u_dir, bottom_dir=b_dir)
         if u_ok or b_ok:
             saved += 1
 
-    print(f"PNG 재생성 완료: {saved}명 (upper/bottom 폴더 확인)")
+    print(f"PNG 재생성 완료: {saved}명 (ok/upper·bottom, missing/upper·bottom 폴더 확인)")
+
+
+def retry_failed():
+    """z_bounds.xlsx에서 seg_status != ok 환자만 TotalSegmentator 재처리 후 덮어씀."""
+    if not os.path.exists(OUT_PATH):
+        raise FileNotFoundError(f"z_bounds 파일 없음: {OUT_PATH}")
+
+    os.makedirs(UPPER_DIR, exist_ok=True)
+    os.makedirs(BOTTOM_DIR, exist_ok=True)
+    os.makedirs(MISSING_UPPER_DIR, exist_ok=True)
+    os.makedirs(MISSING_BOTTOM_DIR, exist_ok=True)
+
+    folder_map, no_map = build_folder_maps(DICOM_BASE)
+
+    df_base = pd.read_excel(OUT_PATH)
+    retry_pids = (
+        df_base[df_base["seg_status"].astype(str) == "t12_missing"]["PatientID"]
+        .astype(str)
+        .tolist()
+    )
+    total = len(retry_pids)
+    print(f"재처리 대상: {total}명 (seg_status == 't12_missing')")
+
+    if total == 0:
+        print("재처리할 환자 없음.")
+        return
+
+    # ── 체크포인트 로드 ────────────────────────────────────────────────────────
+    def _save_retry_checkpoint(processed: int, rows: list):
+        def clean(v):
+            if hasattr(v, "item"):
+                return v.item()
+            if isinstance(v, float) and np.isnan(v):
+                return None
+            return v
+        data = {
+            "processed": processed,
+            "rows": [{k: clean(v) for k, v in r.items()} for r in rows],
+        }
+        with open(RETRY_CHECKPOINT, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+
+    if os.path.exists(RETRY_CHECKPOINT):
+        with open(RETRY_CHECKPOINT, "r", encoding="utf-8") as f:
+            cp = json.load(f)
+        start_idx   = cp.get("processed", 0)
+        updated_rows = [
+            {k: (np.nan if v is None else v) for k, v in r.items()}
+            for r in cp.get("rows", [])
+        ]
+        print(f"체크포인트 감지: {total}명 중 {start_idx}번째부터 재시작")
+    else:
+        start_idx    = 0
+        updated_rows = []
+
+    # ── 처리 루프 ─────────────────────────────────────────────────────────────
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        for i in tqdm(range(start_idx, total), desc="실패 재처리", initial=start_idx, total=total):
+            pid    = retry_pids[i]
+            result = extract_bounds(pid, tmp_dir, folder_map)
+            result["PatientID"] = int(pid)
+            updated_rows.append(result)
+
+            if (i + 1) % BATCH_SIZE == 0 or (i + 1) == total:
+                # df_base에 updated_rows 반영 후 저장
+                df_merged = df_base.copy()
+                for row_data in updated_rows:
+                    pid_val = int(row_data["PatientID"])
+                    mask = df_merged["PatientID"].astype(int) == pid_val
+                    if mask.any():
+                        for col, val in row_data.items():
+                            df_merged.loc[mask, col] = val
+                    else:
+                        df_merged = pd.concat(
+                            [df_merged, pd.DataFrame([row_data])], ignore_index=True
+                        )
+
+                _write_final_output(df_merged.to_dict("records"), no_map)
+                _save_retry_checkpoint(i + 1, updated_rows)
+
+                status_counts = (
+                    pd.Series([r["seg_status"] for r in updated_rows])
+                    .value_counts()
+                    .to_dict()
+                )
+                tqdm.write(f"  [{i+1}/{total}] {status_counts}")
+
+    if os.path.exists(RETRY_CHECKPOINT):
+        os.remove(RETRY_CHECKPOINT)
+
+    df_out = pd.read_excel(OUT_PATH)
+    print(f"\n[재처리 완료] {OUT_PATH}")
+    print(f"  shape : {df_out.shape}")
+    print(f"  상태 :\n{df_out['seg_status'].value_counts().to_string()}")
+
+    n_upper   = len([f for f in os.listdir(UPPER_DIR)        if f.endswith(".png")]) if os.path.isdir(UPPER_DIR)        else 0
+    n_bottom  = len([f for f in os.listdir(BOTTOM_DIR)       if f.endswith(".png")]) if os.path.isdir(BOTTOM_DIR)       else 0
+    n_m_upper = len([f for f in os.listdir(MISSING_UPPER_DIR) if f.endswith(".png")]) if os.path.isdir(MISSING_UPPER_DIR) else 0
+    n_m_bottom= len([f for f in os.listdir(MISSING_BOTTOM_DIR)if f.endswith(".png")]) if os.path.isdir(MISSING_BOTTOM_DIR)else 0
+    print(f"  저장된 PNG: ok/upper={n_upper}, ok/bottom={n_bottom}, missing/upper={n_m_upper}, missing/bottom={n_m_bottom}")
 
 
 if __name__ == "__main__":
-    main()
+    if MODE == "retry":
+        retry_failed()
+    else:
+        main()

@@ -10,62 +10,62 @@
 =================================================================
 
 ── Fold 1/5 ──────────────────────────────
-  CA3  — AUC: 0.8556  AUPRC: 0.4581  Brier: 0.1875  Acc: 0.7197  F1: 0.4308  (best ep=10)
+  CA3  — AUC: 0.8217  AUPRC: 0.4070  Brier: 0.1907  Acc: 0.7197  F1: 0.4127  (best ep=2)
 
 ── Fold 2/5 ──────────────────────────────
-  CA3  — AUC: 0.7565  AUPRC: 0.3179  Brier: 0.1876  Acc: 0.6818  F1: 0.2759  (best ep=15)
+  CA3  — AUC: 0.8508  AUPRC: 0.4846  Brier: 0.1034  Acc: 0.8636  F1: 0.4706  (best ep=108)
 
 ── Fold 3/5 ──────────────────────────────
-  CA3  — AUC: 0.8152  AUPRC: 0.3408  Brier: 0.2749  Acc: 0.5379  F1: 0.3297  (best ep=4)
+  CA3  — AUC: 0.7516  AUPRC: 0.3336  Brier: 0.2216  Acc: 0.6136  F1: 0.3200  (best ep=12)
 
 ── Fold 4/5 ──────────────────────────────
-  CA3  — AUC: 0.8179  AUPRC: 0.3889  Brier: 0.1873  Acc: 0.7121  F1: 0.3871  (best ep=15)
+  CA3  — AUC: 0.8082  AUPRC: 0.4723  Brier: 0.1838  Acc: 0.6970  F1: 0.3333  (best ep=7)
 
 ── Fold 5/5 ──────────────────────────────
-  CA3  — AUC: 0.7791  AUPRC: 0.4155  Brier: 0.2009  Acc: 0.6970  F1: 0.3750  (best ep=8)
+  CA3  — AUC: 0.8766  AUPRC: 0.4911  Brier: 0.0966  Acc: 0.8712  F1: 0.5405  (best ep=120)
 
 ===========================================================================
 CrossAttn3  —  5-Fold CV Summary
 ===========================================================================
   Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
   ----------------------------------------------------------
-  1          0.8556     0.4581     0.1875     0.7197     0.4308
-  2          0.7565     0.3179     0.1876     0.6818     0.2759
-  3          0.8152     0.3408     0.2749     0.5379     0.3297
-  4          0.8179     0.3889     0.1873     0.7121     0.3871
-  5          0.7791     0.4155     0.2009     0.6970     0.3750
+  1          0.8217     0.4070     0.1907     0.7197     0.4127
+  2          0.8508     0.4846     0.1034     0.8636     0.4706
+  3          0.7516     0.3336     0.2216     0.6136     0.3200
+  4          0.8082     0.4723     0.1838     0.6970     0.3333
+  5          0.8766     0.4911     0.0966     0.8712     0.5405
   ──────────────────────────────────────────────────────────
-  Mean       0.8048     0.3842     0.2076     0.6697     0.3597
-  ±Std       0.0342     0.0505     0.0340     0.0672     0.0529
+  Mean       0.8218     0.4377     0.1592     0.7530     0.4154
+  ±Std       0.0423     0.0601     0.0500     0.0999     0.0831
 
 =================================================================
 CrossAttn3 Test Evaluation  (scale_clin=True, scale_aec=True)
 =================================================================
-CrossAttn3 — training final model for 10 epochs on full CV set …
+CrossAttn3 — training final model for 12 epochs on full CV set …
 
 CrossAttn3 — Test Set (Overall):
-  AUC: 0.8130  AUPRC: 0.4177  Brier: 0.1997  Acc: 0.6627  F1: 0.3636
+  AUC: 0.7952  AUPRC: 0.3892  Brier: 0.1686  Acc: 0.7048  F1: 0.3951
 
 CrossAttn3 — Test Set (By Sex):
-  [M] n=66  AUC: 0.8026  AUPRC: 0.5313  Brier: 0.2091  Acc: 0.6364  F1: 0.4783
+  [M] n=68  AUC: 0.7672  AUPRC: 0.4309  Brier: 0.1789  Acc: 0.6912  F1: 0.4324
               precision    recall  f1-score   support
 
-      Normal       0.94      0.58      0.72        53
-  Sarcopenia       0.33      0.85      0.48        13
+      Normal       0.95      0.67      0.79        58
+  Sarcopenia       0.30      0.80      0.43        10
 
-    accuracy                           0.64        66
-   macro avg       0.64      0.72      0.60        66
-weighted avg       0.82      0.64      0.67        66
+    accuracy                           0.69        68
+   macro avg       0.62      0.74      0.61        68
+weighted avg       0.85      0.69      0.74        68
 
-  [F] n=100  AUC: 0.7988  AUPRC: 0.2963  Brier: 0.1935  Acc: 0.6800  F1: 0.2381
+  [F] n=98  AUC: 0.8170  AUPRC: 0.4399  Brier: 0.1614  Acc: 0.7143  F1: 0.3636
               precision    recall  f1-score   support
 
-      Normal       0.97      0.68      0.80        93
-  Sarcopenia       0.14      0.71      0.24         7
+      Normal       0.97      0.70      0.82        88
+  Sarcopenia       0.24      0.80      0.36        10
 
-    accuracy                           0.68       100
-   macro avg       0.56      0.70      0.52       100
-weighted avg       0.91      0.68      0.76       100
+    accuracy                           0.71        98
+   macro avg       0.60      0.75      0.59        98
+weighted avg       0.89      0.71      0.77        98
 
 
 ───────────────────────────────────────────────────────
@@ -75,11 +75,11 @@ Test Set — Bootstrap CI
   Bootstrap 95% CI — CrossAttn3  (n_boot=2000)
   Metric         Estimate   95% CI Lower   95% CI Upper
   ----------------------------------------------------
-  AUC-ROC          0.8130         0.7183         0.8923
-  AUPRC            0.4177         0.2364         0.6204
-  Brier            0.1997         0.1612         0.2367
-  Accuracy         0.6627         0.5904         0.7349
-  F1               0.3636         0.2254         0.4898
+  AUC-ROC          0.7952         0.6737         0.8982
+  AUPRC            0.3892         0.2264         0.6140
+  Brier            0.1686         0.1357         0.2033
+  Accuracy         0.7048         0.6325         0.7711
+  F1               0.3951         0.2535         0.5239
 
 Saved (model 3 (len128)):
   연구코드/results/0522_ok/model_3\aec128\len128\scale_both/data_distribution.png
@@ -100,62 +100,62 @@ Saved (model 3 (len128)):
 =================================================================
 
 ── Fold 1/5 ──────────────────────────────
-  CA3  — AUC: 0.8384  AUPRC: 0.3870  Brier: 0.1681  Acc: 0.7348  F1: 0.4262  (best ep=9)
+  CA3  — AUC: 0.8308  AUPRC: 0.4139  Brier: 0.2261  Acc: 0.5909  F1: 0.3721  (best ep=1)
 
 ── Fold 2/5 ──────────────────────────────
-  CA3  — AUC: 0.7861  AUPRC: 0.3174  Brier: 0.1780  Acc: 0.7273  F1: 0.3333  (best ep=14)
+  CA3  — AUC: 0.8664  AUPRC: 0.3846  Brier: 0.1658  Acc: 0.7348  F1: 0.4262  (best ep=19)
 
 ── Fold 3/5 ──────────────────────────────
-  CA3  — AUC: 0.8314  AUPRC: 0.4631  Brier: 0.1927  Acc: 0.7273  F1: 0.4375  (best ep=1)
+  CA3  — AUC: 0.7543  AUPRC: 0.3378  Brier: 0.2360  Acc: 0.6364  F1: 0.3514  (best ep=4)
 
 ── Fold 4/5 ──────────────────────────────
-  CA3  — AUC: 0.8109  AUPRC: 0.3406  Brier: 0.1614  Acc: 0.7424  F1: 0.3704  (best ep=13)
+  CA3  — AUC: 0.7807  AUPRC: 0.4327  Brier: 0.1895  Acc: 0.6818  F1: 0.3438  (best ep=4)
 
 ── Fold 5/5 ──────────────────────────────
-  CA3  — AUC: 0.7786  AUPRC: 0.4422  Brier: 0.1519  Acc: 0.7803  F1: 0.4082  (best ep=16)
+  CA3  — AUC: 0.8820  AUPRC: 0.5255  Brier: 0.1253  Acc: 0.7727  F1: 0.4828  (best ep=12)
 
 ===========================================================================
 CrossAttn3  —  5-Fold CV Summary
 ===========================================================================
   Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
   ----------------------------------------------------------
-  1          0.8384     0.3870     0.1681     0.7348     0.4262
-  2          0.7861     0.3174     0.1780     0.7273     0.3333
-  3          0.8314     0.4631     0.1927     0.7273     0.4375
-  4          0.8109     0.3406     0.1614     0.7424     0.3704
-  5          0.7786     0.4422     0.1519     0.7803     0.4082
+  1          0.8308     0.4139     0.2261     0.5909     0.3721
+  2          0.8664     0.3846     0.1658     0.7348     0.4262
+  3          0.7543     0.3378     0.2360     0.6364     0.3514
+  4          0.7807     0.4327     0.1895     0.6818     0.3438
+  5          0.8820     0.5255     0.1253     0.7727     0.4828
   ──────────────────────────────────────────────────────────
-  Mean       0.8091     0.3901     0.1704     0.7424     0.3951
-  ±Std       0.0237     0.0562     0.0140     0.0198     0.0384
+  Mean       0.8228     0.4189     0.1886     0.6833     0.3952
+  ±Std       0.0488     0.0622     0.0404     0.0654     0.0524
 
 =================================================================
 CrossAttn3 Test Evaluation  (scale_clin=True, scale_aec=True)
 =================================================================
-CrossAttn3 — training final model for 13 epochs on full CV set …
+CrossAttn3 — training final model for 4 epochs on full CV set …
 
 CrossAttn3 — Test Set (Overall):
-  AUC: 0.8072  AUPRC: 0.3906  Brier: 0.2506  Acc: 0.5843  F1: 0.3429
+  AUC: 0.7634  AUPRC: 0.3470  Brier: 0.1812  Acc: 0.7229  F1: 0.3947
 
 CrossAttn3 — Test Set (By Sex):
-  [M] n=66  AUC: 0.7968  AUPRC: 0.5077  Brier: 0.2295  Acc: 0.6212  F1: 0.4681
+  [M] n=68  AUC: 0.7552  AUPRC: 0.4049  Brier: 0.1718  Acc: 0.7500  F1: 0.4516
               precision    recall  f1-score   support
 
-      Normal       0.94      0.57      0.71        53
-  Sarcopenia       0.32      0.85      0.47        13
+      Normal       0.94      0.76      0.84        58
+  Sarcopenia       0.33      0.70      0.45        10
 
-    accuracy                           0.62        66
-   macro avg       0.63      0.71      0.59        66
-weighted avg       0.82      0.62      0.66        66
+    accuracy                           0.75        68
+   macro avg       0.63      0.73      0.64        68
+weighted avg       0.85      0.75      0.78        68
 
-  [F] n=100  AUC: 0.7865  AUPRC: 0.2883  Brier: 0.2645  Acc: 0.5600  F1: 0.2414
+  [F] n=98  AUC: 0.7818  AUPRC: 0.3243  Brier: 0.1877  Acc: 0.7041  F1: 0.3556
               precision    recall  f1-score   support
 
-      Normal       1.00      0.53      0.69        93
-  Sarcopenia       0.14      1.00      0.24         7
+      Normal       0.97      0.69      0.81        88
+  Sarcopenia       0.23      0.80      0.36        10
 
-    accuracy                           0.56       100
-   macro avg       0.57      0.76      0.47       100
-weighted avg       0.94      0.56      0.66       100
+    accuracy                           0.70        98
+   macro avg       0.60      0.75      0.58        98
+weighted avg       0.89      0.70      0.76        98
 
 
 ───────────────────────────────────────────────────────
@@ -165,11 +165,11 @@ Test Set — Bootstrap CI
   Bootstrap 95% CI — CrossAttn3  (n_boot=2000)
   Metric         Estimate   95% CI Lower   95% CI Upper
   ----------------------------------------------------
-  AUC-ROC          0.8072         0.7109         0.8906
-  AUPRC            0.3906         0.2225         0.5987
-  Brier            0.2506         0.2083         0.2924
-  Accuracy         0.5843         0.5119         0.6566
-  F1               0.3429         0.2222         0.4545
+  AUC-ROC          0.7634         0.6437         0.8706
+  AUPRC            0.3470         0.1955         0.5689
+  Brier            0.1812         0.1451         0.2185
+  Accuracy         0.7229         0.6566         0.7892
+  F1               0.3947         0.2500         0.5302
 
 Saved (model 3 (crop80)):
   연구코드/results/0522_ok/model_3\aec128\crop80\scale_both/data_distribution.png
@@ -190,62 +190,62 @@ Saved (model 3 (crop80)):
 =================================================================
 
 ── Fold 1/5 ──────────────────────────────
-  CA3  — AUC: 0.8631  AUPRC: 0.4307  Brier: 0.1722  Acc: 0.7652  F1: 0.4746  (best ep=9)
+  CA3  — AUC: 0.8184  AUPRC: 0.4372  Brier: 0.2234  Acc: 0.6439  F1: 0.3896  (best ep=1)
 
 ── Fold 2/5 ──────────────────────────────
-  CA3  — AUC: 0.7985  AUPRC: 0.3575  Brier: 0.1773  Acc: 0.7424  F1: 0.3462  (best ep=13)
+  CA3  — AUC: 0.8249  AUPRC: 0.2912  Brier: 0.1642  Acc: 0.7273  F1: 0.4375  (best ep=26)
 
 ── Fold 3/5 ──────────────────────────────
-  CA3  — AUC: 0.8341  AUPRC: 0.4655  Brier: 0.2094  Acc: 0.6591  F1: 0.3836  (best ep=9)
+  CA3  — AUC: 0.7748  AUPRC: 0.4324  Brier: 0.1543  Acc: 0.8030  F1: 0.4583  (best ep=73)
 
 ── Fold 4/5 ──────────────────────────────
-  CA3  — AUC: 0.8443  AUPRC: 0.3504  Brier: 0.1579  Acc: 0.7197  F1: 0.4478  (best ep=40)
+  CA3  — AUC: 0.8066  AUPRC: 0.5158  Brier: 0.2110  Acc: 0.6667  F1: 0.3529  (best ep=2)
 
 ── Fold 5/5 ──────────────────────────────
-  CA3  — AUC: 0.7888  AUPRC: 0.3873  Brier: 0.2412  Acc: 0.6288  F1: 0.3288  (best ep=8)
+  CA3  — AUC: 0.8901  AUPRC: 0.5709  Brier: 0.1629  Acc: 0.7273  F1: 0.4545  (best ep=61)
 
 ===========================================================================
 CrossAttn3  —  5-Fold CV Summary
 ===========================================================================
   Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
   ----------------------------------------------------------
-  1          0.8631     0.4307     0.1722     0.7652     0.4746
-  2          0.7985     0.3575     0.1773     0.7424     0.3462
-  3          0.8341     0.4655     0.2094     0.6591     0.3836
-  4          0.8443     0.3504     0.1579     0.7197     0.4478
-  5          0.7888     0.3873     0.2412     0.6288     0.3288
+  1          0.8184     0.4372     0.2234     0.6439     0.3896
+  2          0.8249     0.2912     0.1642     0.7273     0.4375
+  3          0.7748     0.4324     0.1543     0.8030     0.4583
+  4          0.8066     0.5158     0.2110     0.6667     0.3529
+  5          0.8901     0.5709     0.1629     0.7273     0.4545
   ──────────────────────────────────────────────────────────
-  Mean       0.8258     0.3983     0.1916     0.7030     0.3962
-  ±Std       0.0280     0.0439     0.0300     0.0512     0.0566
+  Mean       0.8230     0.4495     0.1832     0.7136     0.4186
+  ±Std       0.0377     0.0945     0.0283     0.0555     0.0409
 
 =================================================================
 CrossAttn3 Test Evaluation  (scale_clin=True, scale_aec=True)
 =================================================================
-CrossAttn3 — training final model for 9 epochs on full CV set …
+CrossAttn3 — training final model for 26 epochs on full CV set …
 
 CrossAttn3 — Test Set (Overall):
-  AUC: 0.8120  AUPRC: 0.4430  Brier: 0.1794  Acc: 0.7108  F1: 0.4146
+  AUC: 0.7726  AUPRC: 0.3652  Brier: 0.1850  Acc: 0.7289  F1: 0.4156
 
 CrossAttn3 — Test Set (By Sex):
-  [M] n=66  AUC: 0.7997  AUPRC: 0.5567  Brier: 0.1974  Acc: 0.6970  F1: 0.5238
+  [M] n=68  AUC: 0.7138  AUPRC: 0.3741  Brier: 0.2233  Acc: 0.6912  F1: 0.4324
               precision    recall  f1-score   support
 
-      Normal       0.95      0.66      0.78        53
-  Sarcopenia       0.38      0.85      0.52        13
+      Normal       0.95      0.67      0.79        58
+  Sarcopenia       0.30      0.80      0.43        10
 
-    accuracy                           0.70        66
-   macro avg       0.66      0.75      0.65        66
-weighted avg       0.83      0.70      0.73        66
+    accuracy                           0.69        68
+   macro avg       0.62      0.74      0.61        68
+weighted avg       0.85      0.69      0.74        68
 
-  [F] n=100  AUC: 0.7834  AUPRC: 0.2762  Brier: 0.1675  Acc: 0.7200  F1: 0.3000
+  [F] n=98  AUC: 0.8136  AUPRC: 0.3950  Brier: 0.1584  Acc: 0.7551  F1: 0.4000
               precision    recall  f1-score   support
 
-      Normal       0.99      0.71      0.82        93
-  Sarcopenia       0.18      0.86      0.30         7
+      Normal       0.97      0.75      0.85        88
+  Sarcopenia       0.27      0.80      0.40        10
 
-    accuracy                           0.72       100
-   macro avg       0.58      0.78      0.56       100
-weighted avg       0.93      0.72      0.79       100
+    accuracy                           0.76        98
+   macro avg       0.62      0.78      0.62        98
+weighted avg       0.90      0.76      0.80        98
 
 
 ───────────────────────────────────────────────────────
@@ -255,11 +255,11 @@ Test Set — Bootstrap CI
   Bootstrap 95% CI — CrossAttn3  (n_boot=2000)
   Metric         Estimate   95% CI Lower   95% CI Upper
   ----------------------------------------------------
-  AUC-ROC          0.8120         0.7072         0.8968
-  AUPRC            0.4430         0.2473         0.6399
-  Brier            0.1794         0.1432         0.2151
-  Accuracy         0.7108         0.6446         0.7771
-  F1               0.4146         0.2750         0.5393
+  AUC-ROC          0.7726         0.6511         0.8793
+  AUPRC            0.3652         0.2054         0.5641
+  Brier            0.1850         0.1466         0.2257
+  Accuracy         0.7289         0.6627         0.7952
+  F1               0.4156         0.2683         0.5527
 
 Saved (model 3 (crop60)):
   연구코드/results/0522_ok/model_3\aec128\crop60\scale_both/data_distribution.png
@@ -280,62 +280,62 @@ Saved (model 3 (crop60)):
 =================================================================
 
 ── Fold 1/5 ──────────────────────────────
-  CA3  — AUC: 0.8755  AUPRC: 0.5202  Brier: 0.1727  Acc: 0.7424  F1: 0.4516  (best ep=21)
+  CA3  — AUC: 0.8238  AUPRC: 0.4367  Brier: 0.2801  Acc: 0.5455  F1: 0.3182  (best ep=5)
 
 ── Fold 2/5 ──────────────────────────────
-  CA3  — AUC: 0.7936  AUPRC: 0.3132  Brier: 0.1908  Acc: 0.6742  F1: 0.3175  (best ep=15)
+  CA3  — AUC: 0.8901  AUPRC: 0.4966  Brier: 0.2114  Acc: 0.6515  F1: 0.3947  (best ep=6)
 
 ── Fold 3/5 ──────────────────────────────
-  CA3  — AUC: 0.7996  AUPRC: 0.3665  Brier: 0.2090  Acc: 0.6818  F1: 0.3824  (best ep=41)
+  CA3  — AUC: 0.8120  AUPRC: 0.3795  Brier: 0.1841  Acc: 0.7803  F1: 0.4314  (best ep=1)
 
 ── Fold 4/5 ──────────────────────────────
-  CA3  — AUC: 0.8728  AUPRC: 0.5098  Brier: 0.2005  Acc: 0.6970  F1: 0.4118  (best ep=2)
+  CA3  — AUC: 0.7721  AUPRC: 0.3879  Brier: 0.1487  Acc: 0.7879  F1: 0.3636  (best ep=32)
 
 ── Fold 5/5 ──────────────────────────────
-  CA3  — AUC: 0.7699  AUPRC: 0.3600  Brier: 0.1665  Acc: 0.7348  F1: 0.4068  (best ep=7)
+  CA3  — AUC: 0.8815  AUPRC: 0.5360  Brier: 0.1139  Acc: 0.7955  F1: 0.5091  (best ep=14)
 
 ===========================================================================
 CrossAttn3  —  5-Fold CV Summary
 ===========================================================================
   Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
   ----------------------------------------------------------
-  1          0.8755     0.5202     0.1727     0.7424     0.4516
-  2          0.7936     0.3132     0.1908     0.6742     0.3175
-  3          0.7996     0.3665     0.2090     0.6818     0.3824
-  4          0.8728     0.5098     0.2005     0.6970     0.4118
-  5          0.7699     0.3600     0.1665     0.7348     0.4068
+  1          0.8238     0.4367     0.2801     0.5455     0.3182
+  2          0.8901     0.4966     0.2114     0.6515     0.3947
+  3          0.8120     0.3795     0.1841     0.7803     0.4314
+  4          0.7721     0.3879     0.1487     0.7879     0.3636
+  5          0.8815     0.5360     0.1139     0.7955     0.5091
   ──────────────────────────────────────────────────────────
-  Mean       0.8223     0.4140     0.1879     0.7061     0.3940
-  ±Std       0.0435     0.0846     0.0161     0.0277     0.0443
+  Mean       0.8359     0.4473     0.1877     0.7121     0.4034
+  ±Std       0.0443     0.0609     0.0567     0.0988     0.0646
 
 =================================================================
 CrossAttn3 Test Evaluation  (scale_clin=True, scale_aec=True)
 =================================================================
-CrossAttn3 — training final model for 15 epochs on full CV set …
+CrossAttn3 — training final model for 6 epochs on full CV set …
 
 CrossAttn3 — Test Set (Overall):
-  AUC: 0.8123  AUPRC: 0.4596  Brier: 0.1656  Acc: 0.7229  F1: 0.4250
+  AUC: 0.8014  AUPRC: 0.4032  Brier: 0.1655  Acc: 0.7048  F1: 0.3797
 
 CrossAttn3 — Test Set (By Sex):
-  [M] n=66  AUC: 0.7881  AUPRC: 0.5540  Brier: 0.1901  Acc: 0.7121  F1: 0.5366
+  [M] n=68  AUC: 0.7862  AUPRC: 0.4210  Brier: 0.1748  Acc: 0.6765  F1: 0.4211
               precision    recall  f1-score   support
 
-      Normal       0.95      0.68      0.79        53
-  Sarcopenia       0.39      0.85      0.54        13
+      Normal       0.95      0.66      0.78        58
+  Sarcopenia       0.29      0.80      0.42        10
 
-    accuracy                           0.71        66
-   macro avg       0.67      0.76      0.66        66
-weighted avg       0.84      0.71      0.74        66
+    accuracy                           0.68        68
+   macro avg       0.62      0.73      0.60        68
+weighted avg       0.85      0.68      0.72        68
 
-  [F] n=100  AUC: 0.8095  AUPRC: 0.3128  Brier: 0.1494  Acc: 0.7300  F1: 0.3077
+  [F] n=98  AUC: 0.8125  AUPRC: 0.4545  Brier: 0.1590  Acc: 0.7245  F1: 0.3415
               precision    recall  f1-score   support
 
-      Normal       0.99      0.72      0.83        93
-  Sarcopenia       0.19      0.86      0.31         7
+      Normal       0.96      0.73      0.83        88
+  Sarcopenia       0.23      0.70      0.34        10
 
-    accuracy                           0.73       100
-   macro avg       0.59      0.79      0.57       100
-weighted avg       0.93      0.73      0.80       100
+    accuracy                           0.72        98
+   macro avg       0.59      0.71      0.58        98
+weighted avg       0.88      0.72      0.78        98
 
 
 ───────────────────────────────────────────────────────
@@ -345,11 +345,11 @@ Test Set — Bootstrap CI
   Bootstrap 95% CI — CrossAttn3  (n_boot=2000)
   Metric         Estimate   95% CI Lower   95% CI Upper
   ----------------------------------------------------
-  AUC-ROC          0.8123         0.6935         0.9038
-  AUPRC            0.4596         0.2574         0.6649
-  Brier            0.1656         0.1344         0.1994
-  Accuracy         0.7229         0.6566         0.7892
-  F1               0.4250         0.2820         0.5517
+  AUC-ROC          0.8014         0.6933         0.8943
+  AUPRC            0.4032         0.2276         0.6045
+  Brier            0.1655         0.1345         0.1982
+  Accuracy         0.7048         0.6325         0.7711
+  F1               0.3797         0.2388         0.5116
 
 Saved (model 3 (norm)):
   연구코드/results/0522_ok/model_3\aec128\norm\scale_both/data_distribution.png
@@ -370,62 +370,62 @@ Saved (model 3 (norm)):
 =================================================================
 
 ── Fold 1/5 ──────────────────────────────
-  CA3  — AUC: 0.7765  AUPRC: 0.4594  Brier: 0.2155  Acc: 0.6723  F1: 0.3390  (best ep=5)
+  CA3  — AUC: 0.8327  AUPRC: 0.3751  Brier: 0.1996  Acc: 0.7311  F1: 0.4286  (best ep=8)
 
 ── Fold 2/5 ──────────────────────────────
-  CA3  — AUC: 0.9014  AUPRC: 0.5706  Brier: 0.1264  Acc: 0.8151  F1: 0.5217  (best ep=9)
+  CA3  — AUC: 0.8367  AUPRC: 0.5381  Brier: 0.0974  Acc: 0.8655  F1: 0.5294  (best ep=111)
 
 ── Fold 3/5 ──────────────────────────────
-  CA3  — AUC: 0.8646  AUPRC: 0.5254  Brier: 0.1585  Acc: 0.7227  F1: 0.4000  (best ep=12)
+  CA3  — AUC: 0.8156  AUPRC: 0.4169  Brier: 0.1708  Acc: 0.7227  F1: 0.4000  (best ep=26)
 
 ── Fold 4/5 ──────────────────────────────
-  CA3  — AUC: 0.6898  AUPRC: 0.2116  Brier: 0.1797  Acc: 0.7815  F1: 0.3158  (best ep=126)
+  CA3  — AUC: 0.7635  AUPRC: 0.2814  Brier: 0.1911  Acc: 0.7059  F1: 0.3396  (best ep=13)
 
 ── Fold 5/5 ──────────────────────────────
-  CA3  — AUC: 0.8601  AUPRC: 0.4202  Brier: 0.2186  Acc: 0.6695  F1: 0.4000  (best ep=1)
+  CA3  — AUC: 0.8201  AUPRC: 0.5152  Brier: 0.1500  Acc: 0.7542  F1: 0.4528  (best ep=5)
 
 ===========================================================================
 CrossAttn3  —  5-Fold CV Summary
 ===========================================================================
   Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
   ----------------------------------------------------------
-  1          0.7765     0.4594     0.2155     0.6723     0.3390
-  2          0.9014     0.5706     0.1264     0.8151     0.5217
-  3          0.8646     0.5254     0.1585     0.7227     0.4000
-  4          0.6898     0.2116     0.1797     0.7815     0.3158
-  5          0.8601     0.4202     0.2186     0.6695     0.4000
+  1          0.8327     0.3751     0.1996     0.7311     0.4286
+  2          0.8367     0.5381     0.0974     0.8655     0.5294
+  3          0.8156     0.4169     0.1708     0.7227     0.4000
+  4          0.7635     0.2814     0.1911     0.7059     0.3396
+  5          0.8201     0.5152     0.1500     0.7542     0.4528
   ──────────────────────────────────────────────────────────
-  Mean       0.8185     0.4374     0.1798     0.7322     0.3953
-  ±Std       0.0762     0.1243     0.0349     0.0582     0.0714
+  Mean       0.8137     0.4254     0.1618     0.7559     0.4301
+  ±Std       0.0263     0.0939     0.0365     0.0570     0.0624
 
 =================================================================
 CrossAttn3 Test Evaluation  (scale_clin=True, scale_aec=True)
 =================================================================
-CrossAttn3 — training final model for 9 epochs on full CV set …
+CrossAttn3 — training final model for 13 epochs on full CV set …
 
 CrossAttn3 — Test Set (Overall):
-  AUC: 0.7881  AUPRC: 0.3681  Brier: 0.1826  Acc: 0.6959  F1: 0.3662
+  AUC: 0.7656  AUPRC: 0.3427  Brier: 0.1675  Acc: 0.7635  F1: 0.3860
 
 CrossAttn3 — Test Set (By Sex):
-  [M] n=57  AUC: 0.8021  AUPRC: 0.5263  Brier: 0.1945  Acc: 0.7193  F1: 0.5000
+  [M] n=56  AUC: 0.8333  AUPRC: 0.4940  Brier: 0.1606  Acc: 0.7857  F1: 0.4545
               precision    recall  f1-score   support
 
-      Normal       0.94      0.70      0.80        47
-  Sarcopenia       0.36      0.80      0.50        10
+      Normal       0.93      0.81      0.87        48
+  Sarcopenia       0.36      0.62      0.45         8
 
-    accuracy                           0.72        57
-   macro avg       0.65      0.75      0.65        57
-weighted avg       0.84      0.72      0.75        57
+    accuracy                           0.79        56
+   macro avg       0.64      0.72      0.66        56
+weighted avg       0.85      0.79      0.81        56
 
-  [F] n=91  AUC: 0.7466  AUPRC: 0.1647  Brier: 0.1751  Acc: 0.6813  F1: 0.2564
+  [F] n=92  AUC: 0.7247  AUPRC: 0.2054  Brier: 0.1717  Acc: 0.7500  F1: 0.3429
               precision    recall  f1-score   support
 
-      Normal       0.97      0.68      0.80        84
-  Sarcopenia       0.16      0.71      0.26         7
+      Normal       0.97      0.75      0.85        84
+  Sarcopenia       0.22      0.75      0.34         8
 
-    accuracy                           0.68        91
-   macro avg       0.56      0.70      0.53        91
-weighted avg       0.90      0.68      0.76        91
+    accuracy                           0.75        92
+   macro avg       0.60      0.75      0.59        92
+weighted avg       0.90      0.75      0.80        92
 
 
 ───────────────────────────────────────────────────────
@@ -435,11 +435,11 @@ Test Set — Bootstrap CI
   Bootstrap 95% CI — CrossAttn3  (n_boot=2000)
   Metric         Estimate   95% CI Lower   95% CI Upper
   ----------------------------------------------------
-  AUC-ROC          0.7881         0.6865         0.8774
-  AUPRC            0.3681         0.1877         0.5782
-  Brier            0.1826         0.1422         0.2225
-  Accuracy         0.6959         0.6216         0.7703
-  F1               0.3662         0.2154         0.5060
+  AUC-ROC          0.7656         0.6284         0.8797
+  AUPRC            0.3427         0.1679         0.5733
+  Brier            0.1675         0.1272         0.2116
+  Accuracy         0.7635         0.6959         0.8311
+  F1               0.3860         0.2105         0.5397
 
 Saved (model 3 (excl_extreme)):
   연구코드/results/0522_ok/model_3\aec128\excl_extreme\scale_both/data_distribution.png
