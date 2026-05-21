@@ -95,6 +95,7 @@ def plot_confusion_matrices(y_te, lr_pred, sex_te):
     for ax, (title, yt, yp) in zip(axes, combos):
         cm = confusion_matrix(yt, yp)
         sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax,
+                    annot_kws={"size": 13},
                     xticklabels=["Normal", "Sarco"],
                     yticklabels=["Normal", "Sarco"], cbar=False)
         ax.set_title(title)
@@ -167,6 +168,7 @@ def plot_confusion_matrices_by_sex(y_te, lr_pred, sex_te):
     for ax, (title, yt, yp) in zip(axes, combos):
         cm = confusion_matrix(yt, yp)
         sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax,
+                    annot_kws={"size": 13},
                     xticklabels=["Normal", "Sarco"],
                     yticklabels=["Normal", "Sarco"], cbar=False)
         ax.set_title(title); ax.set_ylabel("True"); ax.set_xlabel("Pred")
@@ -590,7 +592,7 @@ def plot_cv_metric_cross(ca_cv):
                         patch_artist=True,
                         medianprops=dict(color="black", linewidth=2))
         for patch in bp["boxes"]:
-            patch.set_facecolor("tomato"); patch.set_alpha(0.6)
+            patch.set_facecolor("steelblue"); patch.set_alpha(0.6)
         margin = max((max(ca_vals) - min(ca_vals)) * 0.4, 0.05)
         ax.set_ylim(max(0.0, min(ca_vals) - margin), min(1.0, max(ca_vals) + margin))
         ax.set_title(mname); ax.set_ylabel(mname)
@@ -613,7 +615,7 @@ def plot_training_curves_cross(ca_histories, med_epoch):
         ax_a.fill_between(ep_x, m - s, m + s, color=color, alpha=0.2)
     m, s = auc_arr.mean(0), auc_arr.std(0)
     ax_b.plot(ep_x, m, color="seagreen", label="Val AUC")
-    ax_b.fill_between(ep_x, m - s, m + s, color="mediumpurple", alpha=0.2)
+    ax_b.fill_between(ep_x, m - s, m + s, color="seagreen", alpha=0.2)
     ax_b.axvline(med_epoch, color="gray", linestyle="--", alpha=0.7,
                  label=f"Median best ep={med_epoch}")
     for ax, title, ylabel in [(ax_a, "Loss", "Loss"), (ax_b, "Validation AUC", "AUC-ROC")]:
@@ -627,7 +629,7 @@ def plot_test_roc_cross(ca_true_te, ca_prob_te):
     fig.suptitle("Test Set ROC Curves", fontsize=13, fontweight="bold")
     fpr, tpr, _ = roc_curve(ca_true_te, ca_prob_te)
     auc = roc_auc_score(ca_true_te, ca_prob_te)
-    ax.plot(fpr, tpr, color="tomato", linewidth=2, label=f"CrossAttn (AUC={auc:.3f})")
+    ax.plot(fpr, tpr, color="steelblue", linewidth=2, label=f"CrossAttn (AUC={auc:.3f})")
     ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
     ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
     _save_cross("test_roc_curves.png", fig)
@@ -659,7 +661,7 @@ def plot_test_roc_with_baseline(primary_true, primary_prob, primary_label,
 
 def plot_test_roc_by_sex_cross(ca_true_te, ca_prob_te, sex_te):
     """CrossAttn의 test set 성별 분리 ROC 커브를 test_roc_by_sex.png로 저장."""
-    sex_colors = {"M": "tomato", "F": "steelblue"}
+    sex_colors = {"M": "steelblue", "F": "tomato"}
     sex_labels = {"M": "Male", "F": "Female"}
     fig, ax = plt.subplots(figsize=(7, 6))
     fig.suptitle("Test Set ROC Curves by Sex  [CrossAttn]", fontsize=13, fontweight="bold")
@@ -695,7 +697,8 @@ def plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te):
     ]
     for ax, (title, yt, yp) in zip(axes, combos):
         cm = confusion_matrix(yt, yp)
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Reds", ax=ax,
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax,
+                    annot_kws={"size": 15},
                     xticklabels=["Normal", "Sarco"],
                     yticklabels=["Normal", "Sarco"], cbar=False)
         ax.set_title(title); ax.set_ylabel("True"); ax.set_xlabel("Pred")
@@ -803,7 +806,7 @@ def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,
     plot_test_roc_by_sex_cross(ca_true_te, ca_prob_te, sex_te)
     plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te)
     plot_calibration(
-        [("CrossAttn", ca_true_te, ca_prob_te, "tomato")],
+        [("CrossAttn", ca_true_te, ca_prob_te, "steelblue")],
         out_path=f"{_dir2}/calibration.png",
     )
 

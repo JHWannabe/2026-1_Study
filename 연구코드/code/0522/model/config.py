@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 # ── 데이터 경로 ──────────────────────────────────────────────
-DATA_PATH = "연구코드/data/강남/강남_merged_features.xlsx"
+DATA_PATH = "연구코드/data/강남/강남_merged_features_ok.xlsx"
 AEC_LEN   = 128              # AEC 기본 시퀀스 길이 (default, 함수 파라미터로 오버라이드 가능)
 AEC_SHEET = "aec_128"           # AEC_LEN에 따라 시트 자동 선택
 AEC_SIZES = [128, 256]          # 비교할 AEC 보간 해상도 목록
@@ -25,10 +25,10 @@ AEC_VARIANTS = [
 ]
 
 # ── 실험 재현성 ────────────────────────────────────────────────
-SEED     = 100    # train/test split 및 모델 초기화 seed
+SEED     = 42    # train/test split 및 모델 초기화 seed
 TEST_SIZE = 0.2  # test set 비율
 
-# AEC 셔플 seed를 SEED(100)와 다르게 설정해 Model 2_2 unmatching 실험에서
+# AEC 셔플 seed를 SEED(42)와 다르게 설정해 Model 2_2 unmatching 실험에서
 # 우연히 원본 순서와 일치하는 상황을 방지한다
 AEC_SHUFFLE_SEED = 123
 
@@ -44,7 +44,7 @@ N_HEADS    = 4      # Multi-head Attention head 수
 # ── 기기 및 결과 경로 ─────────────────────────────────────────
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-RESULTS_DIR           = "연구코드/results/0522/"
+RESULTS_DIR           = "연구코드/results/0522_ok/"
 RESULTS_MODEL_1_DIR   = RESULTS_DIR + "model_1"   # M1 Clinic Only
 RESULTS_MODEL_2_DIR   = RESULTS_DIR + "model_2"   # M2 Clinic+AEC (Matched)
 RESULTS_MODEL_2_2_DIR = RESULTS_DIR + "model_2_2" # M2_2 Clinic+AEC (Unmatched)

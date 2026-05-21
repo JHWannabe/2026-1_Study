@@ -64,11 +64,34 @@ def load_data():
     return X, y, sex
 
 
+def _strat_key(y, sex, age=None, bmi=None, n_bins: int = 3):
+    """label × sex × age_bin × bmi_bin 조합 stratification key."""
+    key = y * 2 + (sex == "M").astype(int)
+    if age is not None:
+        age_bin = pd.qcut(age, q=n_bins, labels=False, duplicates="drop").astype(int)
+        key = key * n_bins + age_bin
+    if bmi is not None:
+        bmi_bin = pd.qcut(bmi, q=n_bins, labels=False, duplicates="drop").astype(int)
+        key = key * n_bins + bmi_bin
+    return key
+
+
+def _safe_strat_key(y, sex, age, bmi):
+    """strata 최소 크기 < 2이면 bin 수를 줄여 재시도. 최종 fallback은 label × sex."""
+    for n_bins in (3, 2):
+        key = _strat_key(y, sex, age=age, bmi=bmi, n_bins=n_bins)
+        if pd.Series(key).value_counts().min() >= 2:
+            return key
+    key = _strat_key(y, sex)
+    return key if pd.Series(key).value_counts().min() >= 2 else y
+
+
 def split_data(X, y, sex):
-    """y 기준 stratified train/test split. (X_cv, y_cv, sex_cv, X_te, y_te, sex_te) 반환."""
+    """label × sex × age × bmi stratified train/test split. (X_cv, y_cv, sex_cv, X_te, y_te, sex_te) 반환."""
     idx = np.arange(len(y))
     cv_idx, te_idx = train_test_split(
-        idx, test_size=TEST_SIZE, random_state=SEED, stratify=y.tolist()
+        idx, test_size=TEST_SIZE, random_state=SEED,
+        stratify=_safe_strat_key(y, sex, age=X[:, 0], bmi=X[:, 2]),
     )
     return (
         X[cv_idx], y[cv_idx], sex[cv_idx],
@@ -112,10 +135,11 @@ def load_data_with_aec_unmatched(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SH
 
 
 def split_data_dual(X_clin, X_aec, y, sex):
-    """Clinic + AEC 배열을 stratified split. CV/test 8개 배열을 반환."""
+    """Clinic + AEC 배열을 label × sex × age × bmi stratified split. CV/test 8개 배열을 반환."""
     idx = np.arange(len(y))
     cv_idx, te_idx = train_test_split(
-        idx, test_size=TEST_SIZE, random_state=SEED, stratify=y.tolist()
+        idx, test_size=TEST_SIZE, random_state=SEED,
+        stratify=_safe_strat_key(y, sex, age=X_clin[:, 0], bmi=X_clin[:, 2]),
     )
     return (
         X_clin[cv_idx], X_aec[cv_idx], y[cv_idx], sex[cv_idx],
@@ -164,10 +188,11 @@ def load_data_with_aec_meta(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
 
 
 def split_data_quad(X_clin, X_aec, X_scan_mfr, y, sex):
-    """Clinic + AEC + Scanner(mfr) 배열을 stratified split. CV/test 10개 배열을 반환."""
+    """Clinic + AEC + Scanner(mfr) 배열을 label × sex × age × bmi stratified split. CV/test 10개 배열을 반환."""
     idx = np.arange(len(y))
     cv_idx, te_idx = train_test_split(
-        idx, test_size=TEST_SIZE, random_state=SEED, stratify=y.tolist()
+        idx, test_size=TEST_SIZE, random_state=SEED,
+        stratify=_safe_strat_key(y, sex, age=X_clin[:, 0], bmi=X_clin[:, 2]),
     )
     return (
         X_clin[cv_idx], X_aec[cv_idx], X_scan_mfr[cv_idx], y[cv_idx], sex[cv_idx],
