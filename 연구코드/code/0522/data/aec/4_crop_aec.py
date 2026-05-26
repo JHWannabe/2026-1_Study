@@ -1,13 +1,13 @@
 """
-DICOM 파일에서 직접 AEC(XRayTubeCurrent) 값을 읽어 T12~두덩뼈 구간으로 crop한 뒤
+DICOM 파일에서 직접 AEC(XRayTubeCurrent) 값을 읽어 Liver upper~두덩뼈 구간으로 crop한 뒤
 128/256포인트로 선형 보간한다.
 
 배경:
   - DICOM 정렬: ImagePositionPatient z좌표 오름차순 (caudal=낮은z=낮은idx → cranial=높은z=높은idx)
-  - z_bounds의 t12_slice / pubis_slice: DICOM Instance Number (cranial-to-caudal 취득)
+  - z_bounds의 liver_upper_slice / pubis_slice: DICOM Instance Number (cranial-to-caudal 취득)
   - 변환식: z_sorted_idx = inst_max - instance + 1
       inst_max = 해당 환자의 최대 Instance Number (DCM에서 직접 읽음)
-      T12 (cranial) → 높은 z_sorted_idx
+      Liver upper (cranial) → 높은 z_sorted_idx
       두덩뼈 (caudal) → 낮은 z_sorted_idx
 
 출력: 강남_aec_cropped.xlsx
@@ -17,6 +17,7 @@ DICOM 파일에서 직접 AEC(XRayTubeCurrent) 값을 읽어 T12~두덩뼈 구�
 """
 
 import os
+import json
 import pandas as pd
 import numpy as np
 import pydicom
@@ -24,16 +25,49 @@ from tqdm import tqdm
 
 SITE       = "강남"
 DICOM_BASE = rf"D:\영상제공\{SITE}\{SITE}_axial"
-DATA_BASE  = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}"
+DATA_BASE  = rf"C:\Users\jhjun\OneDrive\Desktop\대학원\연구코드\data\{SITE}"
 
-Z_BOUNDS_PATH    = rf"{DATA_BASE}\aec\{SITE}_z_bounds.xlsx"
-Z_BOUNDS_OK_PATH = rf"{DATA_BASE}\aec\{SITE}_z_bounds_ok.xlsx"
-OUT_PATH         = rf"{DATA_BASE}\aec\{SITE}_aec_cropped.xlsx"
-OUT_OK_PATH      = rf"{DATA_BASE}\aec\{SITE}_aec_cropped_ok.xlsx"
+Z_BOUNDS_PATH    = rf"{DATA_BASE}\aec\liver_pubis\{SITE}_z_bounds.xlsx"
+Z_BOUNDS_OK_PATH = rf"{DATA_BASE}\aec\liver_pubis\{SITE}_z_bounds_ok.xlsx"
+OUT_PATH         = rf"{DATA_BASE}\aec\liver_pubis\{SITE}_aec_cropped.xlsx"
+OUT_OK_PATH      = rf"{DATA_BASE}\aec\liver_pubis\{SITE}_aec_cropped_ok.xlsx"
 
 INTERP_SIZES = [128, 256]
 BATCH_SIZE   = 20
 
+CHECKPOINT = rf"{DATA_BASE}\aec\liver_pubis\.crop_aec_checkpoint.json"
+
+
+# ── 체크포인트 ────────────────────────────────────────────────────────────────
+
+def save_checkpoint(processed: int, results: list, n_skip: int) -> None:
+    def clean(v):
+        if isinstance(v, (np.integer,)):
+            return int(v)
+        if isinstance(v, (np.floating,)):
+            return None if np.isnan(v) else float(v)
+        if isinstance(v, float) and np.isnan(v):
+            return None
+        return v
+
+    data = {
+        "processed": processed,
+        "n_skip":    n_skip,
+        "results":   [{k: clean(v) for k, v in r.items()} for r in results],
+    }
+    with open(CHECKPOINT, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
+def load_checkpoint() -> tuple[int, list, int]:
+    if not os.path.exists(CHECKPOINT):
+        return 0, [], 0
+    with open(CHECKPOINT, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("processed", 0), data.get("results", []), data.get("n_skip", 0)
+
+
+# ── 유틸 ─────────────────────────────────────────────────────────────────────
 
 def build_folder_map(dicom_base: str) -> dict[int, str]:
     """PatientID(int) → DICOM 시리즈 폴더 경로."""
@@ -152,19 +186,27 @@ def crop_and_interp():
     folder_map = build_folder_map(DICOM_BASE)
     print(f"DCM 폴더 인식 : {len(folder_map)}개\n")
 
-    results: list[dict] = []
-    n_skip = 0
+    start_idx, results, n_skip = load_checkpoint()
+    total = len(z_bounds)
 
-    for i, (_, zrow) in enumerate(
-        tqdm(z_bounds.iterrows(), total=len(z_bounds), desc="crop"), start=1
-    ):
-        pid = int(zrow["PatientID"])
-        if pd.isna(zrow["t12_slice"]) or pd.isna(zrow["pubis_slice"]):
-            tqdm.write(f"  [SKIP] {pid}: t12_slice 또는 pubis_slice 누락")
+    if start_idx > 0:
+        print(f"체크포인트 감지: {total}명 중 {start_idx}번째부터 재시작 "
+              f"(기존 성공 {len(results)}명, 스킵 {n_skip}명)")
+    else:
+        results = []
+        n_skip  = 0
+
+    for idx in tqdm(range(start_idx, total), desc="crop", initial=start_idx, total=total):
+        zrow = z_bounds.iloc[idx]
+        i    = idx + 1  # 1-based (출력용)
+        pid  = int(zrow["PatientID"])
+
+        if pd.isna(zrow["liver_upper_slice"]) or pd.isna(zrow["pubis_slice"]):
+            tqdm.write(f"  [SKIP] {pid}: liver_upper_slice 또는 pubis_slice 누락")
             n_skip += 1
             continue
-        t12_inst = int(zrow["t12_slice"])
-        pub_inst = int(zrow["pubis_slice"])
+        liver_upper_inst = int(zrow["liver_upper_slice"])
+        pub_inst         = int(zrow["pubis_slice"])
 
         if pid not in folder_map:
             tqdm.write(f"  [SKIP] {pid}: DCM 폴더 없음")
@@ -183,11 +225,11 @@ def crop_and_interp():
         inst_max = int(df["inst"].max())
 
         # DICOM Instance → z-오름차순 1-based 인덱스 (cranial-to-caudal 취득)
-        pub_idx = inst_max - pub_inst + 1   # 두덩뼈 (caudal → 낮은 idx)
-        t12_idx = inst_max - t12_inst + 1   # T12    (cranial → 높은 idx)
+        pub_idx         = inst_max - pub_inst + 1          # 두덩뼈 (caudal → 낮은 idx)
+        liver_upper_idx = inst_max - liver_upper_inst + 1  # Liver upper (cranial → 높은 idx)
 
-        lo = max(1, min(pub_idx, t12_idx))
-        hi = min(len(df), max(pub_idx, t12_idx))
+        lo = max(1, min(pub_idx, liver_upper_idx))
+        hi = min(len(df), max(pub_idx, liver_upper_idx))
 
         region = df.iloc[lo - 1 : hi]       # 0-based slice (lo~hi 포함)
         vals   = region["aec"].tolist()
@@ -214,15 +256,19 @@ def crop_and_interp():
             | {f"aec_{j + 1}": v for j, v in enumerate(vals)}
         )
 
-        if i % BATCH_SIZE == 0:
+        if i % BATCH_SIZE == 0 or i == total:
             save_cropped(results, OUT_PATH)
-            tqdm.write(f"  [저장] {i}/{len(z_bounds)}명 처리 완료 (성공 {len(results)}, 스킵 {n_skip})")
+            save_checkpoint(i, results, n_skip)
+            tqdm.write(f"  [저장] {i}/{total}명 처리 완료 (성공 {len(results)}, 스킵 {n_skip})")
 
     if not results:
         print("[오류] crop된 데이터가 없습니다.")
         return
 
     save_cropped(results, OUT_PATH)
+
+    if os.path.exists(CHECKPOINT):
+        os.remove(CHECKPOINT)
 
     print(f"\n[crop 완료] {len(results)}명 저장 → {OUT_PATH}")
     if n_skip:

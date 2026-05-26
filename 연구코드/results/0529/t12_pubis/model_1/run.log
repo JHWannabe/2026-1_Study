@@ -1,0 +1,91 @@
+============================================================
+  MODEL 1 — Clinic Only
+============================================================
+  [M1] Cross-validating LR ...
+=======================================================
+5-Fold Cross-Validation  [scale_X=True]
+=======================================================
+
+── Fold 1/5 ──────────────────────────────
+  LR — AUC: 0.8104  AUPRC: 0.3595  Brier: 0.1594  Acc: 0.8478  F1: 0.5333  (thresh=0.586)
+
+── Fold 2/5 ──────────────────────────────
+  LR — AUC: 0.7871  AUPRC: 0.3857  Brier: 0.1846  Acc: 0.6594  F1: 0.3896  (thresh=0.395)
+
+── Fold 3/5 ──────────────────────────────
+  LR — AUC: 0.8316  AUPRC: 0.4110  Brier: 0.1667  Acc: 0.7372  F1: 0.4375  (thresh=0.463)
+
+── Fold 4/5 ──────────────────────────────
+  LR — AUC: 0.7996  AUPRC: 0.4566  Brier: 0.1991  Acc: 0.8029  F1: 0.4490  (thresh=0.601)
+
+── Fold 5/5 ──────────────────────────────
+  LR — AUC: 0.8280  AUPRC: 0.3106  Brier: 0.1998  Acc: 0.7299  F1: 0.4478  (thresh=0.494)
+
+===========================================================================
+LR  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8104     0.3595     0.1594     0.8478     0.5333
+  2          0.7871     0.3857     0.1846     0.6594     0.3896
+  3          0.8316     0.4110     0.1667     0.7372     0.4375
+  4          0.7996     0.4566     0.1991     0.8029     0.4490
+  5          0.8280     0.3106     0.1998     0.7299     0.4478
+  ──────────────────────────────────────────────────────────
+  Mean       0.8113     0.3847     0.1819     0.7555     0.4514
+  ±Std       0.0168     0.0490     0.0165     0.0648     0.0464
+  [M1] Evaluating on test set (thresh=0.494) ...
+
+=======================================================
+Final Test Evaluation  (scale_X=True, threshold=0.494)
+=======================================================
+
+Logistic Regression — Test Set (Overall):
+  AUC: 0.8325  AUPRC: 0.5008  Brier: 0.1804  Acc: 0.6977  F1: 0.3953
+
+Logistic Regression — Test Set (By Sex):
+  [M] n=71  AUC: 0.8818  AUPRC: 0.6710  Brier: 0.2238  Acc: 0.5915  F1: 0.4314
+              precision    recall  f1-score   support
+
+      Normal       1.00      0.52      0.68        60
+  Sarcopenia       0.28      1.00      0.43        11
+
+    accuracy                           0.59        71
+   macro avg       0.64      0.76      0.56        71
+weighted avg       0.89      0.59      0.64        71
+
+  [F] n=101  AUC: 0.7923  AUPRC: 0.3197  Brier: 0.1499  Acc: 0.7723  F1: 0.3429
+              precision    recall  f1-score   support
+
+      Normal       0.95      0.79      0.86        91
+  Sarcopenia       0.24      0.60      0.34        10
+
+    accuracy                           0.77       101
+   macro avg       0.59      0.70      0.60       101
+weighted avg       0.88      0.77      0.81       101
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — LR  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.8325         0.7386         0.9091
+  AUPRC            0.5008         0.2965         0.6937
+  Brier            0.1804         0.1527         0.2118
+  Accuracy         0.6977         0.6279         0.7674
+  F1               0.3953         0.2535         0.5228
+  [M1] Saving figures ...
+
+Saved:
+  연구코드/results/0529/ok/model_1/data_distribution.png
+  연구코드/results/0529/ok/model_1/cv_roc_curves.png
+  연구코드/results/0529/ok/model_1/cv_metric_distribution.png
+  연구코드/results/0529/ok/model_1/confusion_matrices.png
+  연구코드/results/0529/ok/model_1/test_roc_curves.png
+  연구코드/results/0529/ok/model_1/test_roc_by_sex.png
+  연구코드/results/0529/ok/model_1/calibration.png
+  연구코드/results/0529/ok/model_1/results.md
+  [M1] Done.

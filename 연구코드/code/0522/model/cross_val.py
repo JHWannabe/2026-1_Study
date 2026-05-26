@@ -25,17 +25,12 @@ from models import (build_cross_attn, make_dual_loaders, train_cross_epoch, eval
 from metrics import group_metrics
 
 
-def _maybe_scale(sc, X_tr, X_val, do_scale):
-    """do_scale=True이면 sc로 fit_transform/transform, False이면 복사본 반환."""
-    if do_scale:
-        return sc.fit_transform(X_tr), sc.transform(X_val)
-    return X_tr.copy(), X_val.copy()
+def _maybe_scale(sc, X_tr, X_val):
+    return sc.fit_transform(X_tr), sc.transform(X_val)
 
 
-def _maybe_scale_clin(X_tr, X_val, do_scale):
+def _maybe_scale_clin(X_tr, X_val):
     """Clinical 스케일링: do_scale=True이면 Age(col 0)·BMI(col 2)만 표준화. sex_enc(col 1)은 그대로."""
-    if not do_scale:
-        return X_tr.copy(), X_val.copy()
     sc = StandardScaler()
     X_tr_s  = X_tr.copy()
     X_val_s = X_val.copy()
@@ -73,7 +68,7 @@ def run_cross_validation(X_cv, y_cv, scale_X=True):
         X_ftr,  y_ftr  = X_cv[tr_i],  y_cv[tr_i]
         X_fval, y_fval = X_cv[val_i], y_cv[val_i]
 
-        Xtr_s, Xval_s = _maybe_scale_clin(X_ftr, X_fval, scale_X)
+        Xtr_s, Xval_s = _maybe_scale_clin(X_ftr, X_fval)
 
         lr_f     = LogisticRegression(max_iter=1000, random_state=SEED, class_weight="balanced")
         lr_f.fit(Xtr_s, y_ftr)
@@ -96,9 +91,10 @@ def run_cross_validation(X_cv, y_cv, scale_X=True):
 
 
 def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
-                               scale_clin=True, scale_aec=True, use_focal: bool = True):
+                               scale_clin=True):
     """
     ClinAECCrossAttn에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC·학습 이력·최적 임계값을 반환.
+    AEC는 항상 StandardScaler로 표준화한다.
 
     Returns: ca_cv, ca_roc_folds, ca_histories, ca_best_epochs, ca_best_thresholds
     """
@@ -107,7 +103,7 @@ def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
     ca_cv, ca_roc_folds, ca_histories, ca_best_epochs, ca_best_thresholds = [], [], [], [], []
 
     print("=" * 55)
-    print(f"{N_FOLDS}-Fold CV  [CrossAttn | scale_clin={scale_clin}, scale_aec={scale_aec}]")
+    print(f"{N_FOLDS}-Fold CV  [CrossAttn | scale_clin={scale_clin}, scale_aec=True]")
     print("=" * 55)
 
     for fold, (tr_i, val_i) in enumerate(skf.split(X_clin_cv, y_cv), 1):
@@ -117,12 +113,12 @@ def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
         X_aec_tr,   X_aec_val   = X_aec_cv[tr_i],   X_aec_cv[val_i]
         y_tr,       y_val        = y_cv[tr_i],        y_cv[val_i]
 
-        X_clin_tr, X_clin_val = _maybe_scale_clin(X_clin_tr, X_clin_val, scale_clin)
-        X_aec_tr,  X_aec_val  = _maybe_scale(StandardScaler(), X_aec_tr,  X_aec_val,  scale_aec)
+        X_clin_tr, X_clin_val = _maybe_scale_clin(X_clin_tr, X_clin_val)
+        X_aec_tr,  X_aec_val  = _maybe_scale(StandardScaler(), X_aec_tr,  X_aec_val)
 
         # ── CrossAttn ─────────────────────────────────────────
         tr_dl, val_dl = make_dual_loaders(X_clin_tr, X_aec_tr, y_tr, X_clin_val, X_aec_val, y_val)
-        model, crit, opt, sched = build_cross_attn(y_tr, use_focal=use_focal)
+        model, crit, opt, sched = build_cross_attn(y_tr)
 
         best_auc, best_epoch = 0.0, 0
         best_state: dict = {}
@@ -165,18 +161,18 @@ def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
 
 def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv,
                                  y_cv, n_manufacturers,
-                                 scale_clin=True, scale_aec=True, use_focal: bool = True):
+                                 scale_clin=True):
     """
     ClinAECScanCrossAttn에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC·학습 이력·최적 임계값을 반환.
+    AEC는 항상 StandardScaler로 표준화한다. ManufacturerModelName은 Embedding으로 처리하므로 스케일링하지 않는다.
 
-    ManufacturerModelName은 Embedding으로 처리하므로 스케일링하지 않는다.
     Returns: ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs, ca3_best_thresholds
     """
     skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
     ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs, ca3_best_thresholds = [], [], [], [], []
 
     print("=" * 65)
-    print(f"{N_FOLDS}-Fold CV  [CrossAttn3 | scale_clin={scale_clin}, scale_aec={scale_aec}]")
+    print(f"{N_FOLDS}-Fold CV  [CrossAttn3 | scale_clin={scale_clin}, scale_aec=True]")
     print("=" * 65)
 
     for fold, (tr_i, val_i) in enumerate(skf.split(X_clin_cv, y_cv), 1):
@@ -187,15 +183,15 @@ def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv,
         X_mfr_tr,   X_mfr_val   = X_scan_mfr_cv[tr_i], X_scan_mfr_cv[val_i]
         y_tr,       y_val        = y_cv[tr_i],           y_cv[val_i]
 
-        X_clin_tr, X_clin_val = _maybe_scale_clin(X_clin_tr, X_clin_val, scale_clin)
-        X_aec_tr,  X_aec_val  = _maybe_scale(StandardScaler(), X_aec_tr,  X_aec_val,  scale_aec)
+        X_clin_tr, X_clin_val = _maybe_scale_clin(X_clin_tr, X_clin_val)
+        X_aec_tr,  X_aec_val  = _maybe_scale(StandardScaler(), X_aec_tr,  X_aec_val)
 
         # ── CrossAttn3 ────────────────────────────────────────
         tr_dl, val_dl = make_quad_loaders(
             X_clin_tr, X_aec_tr, X_mfr_tr, y_tr,
             X_clin_val, X_aec_val, X_mfr_val, y_val,
         )
-        model, crit, opt, sched = build_cross_attn3(y_tr, n_manufacturers, use_focal=use_focal)
+        model, crit, opt, sched = build_cross_attn3(y_tr, n_manufacturers)
 
         best_auc, best_epoch = 0.0, 0
         best_state: dict = {}

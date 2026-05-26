@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 # ── 데이터 경로 ──────────────────────────────────────────────
-DATA_PATH = "연구코드/data/강남/강남_merged_features.xlsx"
+DATA_PATH = "연구코드/data/강남/강남_liver_merged_features_ok.xlsx"
 AEC_LEN   = 128              # AEC 기본 시퀀스 길이 (default, 함수 파라미터로 오버라이드 가능)
 AEC_SHEET = "aec_128"           # AEC_LEN에 따라 시트 자동 선택
 AEC_SIZES = [128, 256]          # 비교할 AEC 보간 해상도 목록
@@ -44,7 +44,7 @@ N_HEADS    = 4      # Multi-head Attention head 수
 # ── 기기 및 결과 경로 ─────────────────────────────────────────
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-RESULTS_DIR           = "연구코드/results/ok+missing/"
+RESULTS_DIR           = "연구코드/results/0529/liver_pubis/"
 RESULTS_MODEL_1_DIR   = RESULTS_DIR + "model_1"   # M1 Clinic Only
 RESULTS_MODEL_2_DIR   = RESULTS_DIR + "model_2"   # M2 Clinic+AEC (Matched)
 RESULTS_MODEL_2_2_DIR = RESULTS_DIR + "model_2_2" # M2_2 Clinic+AEC (Unmatched)

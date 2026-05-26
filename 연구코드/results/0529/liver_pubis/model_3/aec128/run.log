@@ -1,0 +1,498 @@
+============================================================
+  MODEL 3 — Clinic + Scanner + AEC (aec128)  (5 AEC variants)
+============================================================
+
+############################################################
+  [M3 norm]  (scale_clinic=True, scale_aec=True)
+############################################################
+  [M3/norm] Cross-validating CrossAttn3 ...
+=================================================================
+5-Fold CV  [CrossAttn3 | scale_clin=True, scale_aec=True]
+=================================================================
+
+── Fold 1/5 ──────────────────────────────
+  CA3  — AUC: 0.8470  AUPRC: 0.4511  Brier: 0.1288  Acc: 0.7527  F1: 0.4390  (best ep=2, thresh=0.364)
+
+── Fold 2/5 ──────────────────────────────
+  CA3  — AUC: 0.7943  AUPRC: 0.4038  Brier: 0.1907  Acc: 0.6882  F1: 0.3830  (best ep=3, thresh=0.446)
+
+── Fold 3/5 ──────────────────────────────
+  CA3  — AUC: 0.8316  AUPRC: 0.4440  Brier: 0.1482  Acc: 0.8172  F1: 0.4688  (best ep=20, thresh=0.582)
+
+── Fold 4/5 ──────────────────────────────
+  CA3  — AUC: 0.8057  AUPRC: 0.2978  Brier: 0.1662  Acc: 0.7151  F1: 0.3765  (best ep=8, thresh=0.470)
+
+── Fold 5/5 ──────────────────────────────
+  CA3  — AUC: 0.8049  AUPRC: 0.3863  Brier: 0.1523  Acc: 0.7688  F1: 0.4267  (best ep=24, thresh=0.543)
+
+===========================================================================
+CrossAttn3  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8470     0.4511     0.1288     0.7527     0.4390
+  2          0.7943     0.4038     0.1907     0.6882     0.3830
+  3          0.8316     0.4440     0.1482     0.8172     0.4688
+  4          0.8057     0.2978     0.1662     0.7151     0.3765
+  5          0.8049     0.3863     0.1523     0.7688     0.4267
+  ──────────────────────────────────────────────────────────
+  Mean       0.8167     0.3966     0.1572     0.7484     0.4188
+  ±Std       0.0195     0.0550     0.0206     0.0445     0.0348
+  [M3/norm] Evaluating on test set (med_epoch=8, thresh=0.470) ...
+
+=================================================================
+CrossAttn3 Test Evaluation  (scale_clin=True, scale_aec=True, threshold=0.470)
+=================================================================
+CrossAttn3 — training final model for 8 epochs on full CV set …
+
+CrossAttn3 — Test Set (Overall):
+  AUC: 0.8042  AUPRC: 0.3970  Brier: 0.2506  Acc: 0.5880  F1: 0.3043
+
+CrossAttn3 — Test Set (By Sex):
+  [M] n=85  AUC: 0.8159  AUPRC: 0.5088  Brier: 0.2577  Acc: 0.6235  F1: 0.4286
+              precision    recall  f1-score   support
+
+      Normal       0.95      0.58      0.72        71
+  Sarcopenia       0.29      0.86      0.43        14
+
+    accuracy                           0.62        85
+   macro avg       0.62      0.72      0.57        85
+weighted avg       0.84      0.62      0.67        85
+
+  [F] n=148  AUC: 0.7651  AUPRC: 0.3171  Brier: 0.2465  Acc: 0.5676  F1: 0.2195
+              precision    recall  f1-score   support
+
+      Normal       0.97      0.55      0.70       137
+  Sarcopenia       0.13      0.82      0.22        11
+
+    accuracy                           0.57       148
+   macro avg       0.55      0.68      0.46       148
+weighted avg       0.91      0.57      0.67       148
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — CrossAttn3  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.8042         0.7162         0.8879
+  AUPRC            0.3970         0.2306         0.5933
+  Brier            0.2506         0.2174         0.2851
+  Accuracy         0.5880         0.5236         0.6524
+  F1               0.3043         0.2097         0.4028
+  [M3/norm] Saving figures ...
+
+Saved (model 3 (norm)):
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/data_distribution.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/cv_roc_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/cv_metric_distribution.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/training_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/test_roc_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/test_roc_by_sex.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/confusion_matrices.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/calibration.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/results.md
+  [M3/norm] Plotting attention maps ...
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/attention_map_c2a.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/attention_heatmap_c2a.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/attention_map_a2c.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\norm/attention_heatmap_a2c.png
+  [M3/norm] Done.
+
+############################################################
+  [M3 excl_extreme]  (scale_clinic=True, scale_aec=True)
+############################################################
+  [M3/excl_extreme] Cross-validating CrossAttn3 ...
+=================================================================
+5-Fold CV  [CrossAttn3 | scale_clin=True, scale_aec=True]
+=================================================================
+
+── Fold 1/5 ──────────────────────────────
+  CA3  — AUC: 0.7756  AUPRC: 0.4094  Brier: 0.2036  Acc: 0.7440  F1: 0.3944  (best ep=21, thresh=0.481)
+
+── Fold 2/5 ──────────────────────────────
+  CA3  — AUC: 0.7933  AUPRC: 0.4018  Brier: 0.1807  Acc: 0.8084  F1: 0.4483  (best ep=10, thresh=0.686)
+
+── Fold 3/5 ──────────────────────────────
+  CA3  — AUC: 0.8949  AUPRC: 0.5036  Brier: 0.1171  Acc: 0.7665  F1: 0.4658  (best ep=4, thresh=0.371)
+
+── Fold 4/5 ──────────────────────────────
+  CA3  — AUC: 0.8427  AUPRC: 0.3068  Brier: 0.1459  Acc: 0.7904  F1: 0.4615  (best ep=13, thresh=0.468)
+
+── Fold 5/5 ──────────────────────────────
+  CA3  — AUC: 0.8486  AUPRC: 0.4774  Brier: 0.1435  Acc: 0.8144  F1: 0.4746  (best ep=48, thresh=0.570)
+
+===========================================================================
+CrossAttn3  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.7756     0.4094     0.2036     0.7440     0.3944
+  2          0.7933     0.4018     0.1807     0.8084     0.4483
+  3          0.8949     0.5036     0.1171     0.7665     0.4658
+  4          0.8427     0.3068     0.1459     0.7904     0.4615
+  5          0.8486     0.4774     0.1435     0.8144     0.4746
+  ──────────────────────────────────────────────────────────
+  Mean       0.8310     0.4198     0.1582     0.7847     0.4489
+  ±Std       0.0425     0.0686     0.0304     0.0263     0.0286
+  [M3/excl_extreme] Evaluating on test set (med_epoch=13, thresh=0.481) ...
+
+=================================================================
+CrossAttn3 Test Evaluation  (scale_clin=True, scale_aec=True, threshold=0.481)
+=================================================================
+CrossAttn3 — training final model for 13 epochs on full CV set …
+
+CrossAttn3 — Test Set (Overall):
+  AUC: 0.8119  AUPRC: 0.4300  Brier: 0.1805  Acc: 0.6890  F1: 0.3434
+
+CrossAttn3 — Test Set (By Sex):
+  [M] n=72  AUC: 0.8420  AUPRC: 0.5744  Brier: 0.1888  Acc: 0.7083  F1: 0.4878
+              precision    recall  f1-score   support
+
+      Normal       0.98      0.67      0.80        61
+  Sarcopenia       0.33      0.91      0.49        11
+
+    accuracy                           0.71        72
+   macro avg       0.65      0.79      0.64        72
+weighted avg       0.88      0.71      0.75        72
+
+  [F] n=137  AUC: 0.7641  AUPRC: 0.2981  Brier: 0.1761  Acc: 0.6788  F1: 0.2414
+              precision    recall  f1-score   support
+
+      Normal       0.96      0.68      0.80       126
+  Sarcopenia       0.15      0.64      0.24        11
+
+    accuracy                           0.68       137
+   macro avg       0.55      0.66      0.52       137
+weighted avg       0.89      0.68      0.75       137
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — CrossAttn3  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.8119         0.7095         0.8961
+  AUPRC            0.4300         0.2410         0.6243
+  Brier            0.1805         0.1538         0.2104
+  Accuracy         0.6890         0.6268         0.7464
+  F1               0.3434         0.2200         0.4572
+  [M3/excl_extreme] Saving figures ...
+
+Saved (model 3 (excl_extreme)):
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/data_distribution.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/cv_roc_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/cv_metric_distribution.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/training_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/test_roc_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/test_roc_by_sex.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/confusion_matrices.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/calibration.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/results.md
+  [M3/excl_extreme] Plotting attention maps ...
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/attention_map_c2a.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/attention_heatmap_c2a.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/attention_map_a2c.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\excl_extreme/attention_heatmap_a2c.png
+  [M3/excl_extreme] Done.
+
+############################################################
+  [M3 len128]  (scale_clinic=True, scale_aec=True)
+############################################################
+  [M3/len128] Cross-validating CrossAttn3 ...
+=================================================================
+5-Fold CV  [CrossAttn3 | scale_clin=True, scale_aec=True]
+=================================================================
+
+── Fold 1/5 ──────────────────────────────
+  CA3  — AUC: 0.8455  AUPRC: 0.3801  Brier: 0.1314  Acc: 0.7849  F1: 0.4595  (best ep=3, thresh=0.389)
+
+── Fold 2/5 ──────────────────────────────
+  CA3  — AUC: 0.7804  AUPRC: 0.3813  Brier: 0.1720  Acc: 0.7312  F1: 0.3750  (best ep=5, thresh=0.447)
+
+── Fold 3/5 ──────────────────────────────
+  CA3  — AUC: 0.8229  AUPRC: 0.4040  Brier: 0.1801  Acc: 0.6774  F1: 0.3750  (best ep=22, thresh=0.339)
+
+── Fold 4/5 ──────────────────────────────
+  CA3  — AUC: 0.8759  AUPRC: 0.4008  Brier: 0.1444  Acc: 0.8333  F1: 0.5373  (best ep=11, thresh=0.532)
+
+── Fold 5/5 ──────────────────────────────
+  CA3  — AUC: 0.7784  AUPRC: 0.3416  Brier: 0.1620  Acc: 0.8226  F1: 0.4762  (best ep=8, thresh=0.620)
+
+===========================================================================
+CrossAttn3  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8455     0.3801     0.1314     0.7849     0.4595
+  2          0.7804     0.3813     0.1720     0.7312     0.3750
+  3          0.8229     0.4040     0.1801     0.6774     0.3750
+  4          0.8759     0.4008     0.1444     0.8333     0.5373
+  5          0.7784     0.3416     0.1620     0.8226     0.4762
+  ──────────────────────────────────────────────────────────
+  Mean       0.8206     0.3816     0.1580     0.7699     0.4446
+  ±Std       0.0376     0.0222     0.0178     0.0584     0.0625
+  [M3/len128] Evaluating on test set (med_epoch=8, thresh=0.447) ...
+
+=================================================================
+CrossAttn3 Test Evaluation  (scale_clin=True, scale_aec=True, threshold=0.447)
+=================================================================
+CrossAttn3 — training final model for 8 epochs on full CV set …
+
+CrossAttn3 — Test Set (Overall):
+  AUC: 0.8246  AUPRC: 0.4136  Brier: 0.2177  Acc: 0.6180  F1: 0.3206
+
+CrossAttn3 — Test Set (By Sex):
+  [M] n=85  AUC: 0.8119  AUPRC: 0.5165  Brier: 0.2388  Acc: 0.6353  F1: 0.4561
+              precision    recall  f1-score   support
+
+      Normal       0.98      0.58      0.73        71
+  Sarcopenia       0.30      0.93      0.46        14
+
+    accuracy                           0.64        85
+   macro avg       0.64      0.75      0.59        85
+weighted avg       0.87      0.64      0.68        85
+
+  [F] n=148  AUC: 0.8029  AUPRC: 0.3122  Brier: 0.2056  Acc: 0.6081  F1: 0.2162
+              precision    recall  f1-score   support
+
+      Normal       0.96      0.60      0.74       137
+  Sarcopenia       0.13      0.73      0.22        11
+
+    accuracy                           0.61       148
+   macro avg       0.55      0.66      0.48       148
+weighted avg       0.90      0.61      0.70       148
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — CrossAttn3  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.8246         0.7348         0.9049
+  AUPRC            0.4136         0.2505         0.6098
+  Brier            0.2177         0.1860         0.2506
+  Accuracy         0.6180         0.5536         0.6781
+  F1               0.3206         0.2206         0.4219
+  [M3/len128] Saving figures ...
+
+Saved (model 3 (len128)):
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/data_distribution.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/cv_roc_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/cv_metric_distribution.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/training_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/test_roc_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/test_roc_by_sex.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/confusion_matrices.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/calibration.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/results.md
+  [M3/len128] Plotting attention maps ...
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/attention_map_c2a.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/attention_heatmap_c2a.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/attention_map_a2c.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\len128/attention_heatmap_a2c.png
+  [M3/len128] Done.
+
+############################################################
+  [M3 crop80]  (scale_clinic=True, scale_aec=True)
+############################################################
+  [M3/crop80] Cross-validating CrossAttn3 ...
+=================================================================
+5-Fold CV  [CrossAttn3 | scale_clin=True, scale_aec=True]
+=================================================================
+
+── Fold 1/5 ──────────────────────────────
+  CA3  — AUC: 0.8373  AUPRC: 0.3660  Brier: 0.1592  Acc: 0.8226  F1: 0.4923  (best ep=7, thresh=0.619)
+
+── Fold 2/5 ──────────────────────────────
+  CA3  — AUC: 0.8015  AUPRC: 0.4282  Brier: 0.2454  Acc: 0.6935  F1: 0.3596  (best ep=10, thresh=0.581)
+
+── Fold 3/5 ──────────────────────────────
+  CA3  — AUC: 0.8346  AUPRC: 0.5080  Brier: 0.1481  Acc: 0.7796  F1: 0.4225  (best ep=97, thresh=0.402)
+
+── Fold 4/5 ──────────────────────────────
+  CA3  — AUC: 0.8696  AUPRC: 0.3890  Brier: 0.1817  Acc: 0.7688  F1: 0.4691  (best ep=51, thresh=0.507)
+
+── Fold 5/5 ──────────────────────────────
+  CA3  — AUC: 0.7800  AUPRC: 0.2966  Brier: 0.1846  Acc: 0.7849  F1: 0.4444  (best ep=12, thresh=0.560)
+
+===========================================================================
+CrossAttn3  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8373     0.3660     0.1592     0.8226     0.4923
+  2          0.8015     0.4282     0.2454     0.6935     0.3596
+  3          0.8346     0.5080     0.1481     0.7796     0.4225
+  4          0.8696     0.3890     0.1817     0.7688     0.4691
+  5          0.7800     0.2966     0.1846     0.7849     0.4444
+  ──────────────────────────────────────────────────────────
+  Mean       0.8246     0.3975     0.1838     0.7699     0.4376
+  ±Std       0.0310     0.0699     0.0337     0.0423     0.0455
+  [M3/crop80] Evaluating on test set (med_epoch=12, thresh=0.560) ...
+
+=================================================================
+CrossAttn3 Test Evaluation  (scale_clin=True, scale_aec=True, threshold=0.560)
+=================================================================
+CrossAttn3 — training final model for 12 epochs on full CV set …
+
+CrossAttn3 — Test Set (Overall):
+  AUC: 0.7935  AUPRC: 0.3747  Brier: 0.1685  Acc: 0.7725  F1: 0.3908
+
+CrossAttn3 — Test Set (By Sex):
+  [M] n=85  AUC: 0.7978  AUPRC: 0.4664  Brier: 0.2128  Acc: 0.7176  F1: 0.4545
+              precision    recall  f1-score   support
+
+      Normal       0.93      0.72      0.81        71
+  Sarcopenia       0.33      0.71      0.45        14
+
+    accuracy                           0.72        85
+   macro avg       0.63      0.72      0.63        85
+weighted avg       0.83      0.72      0.75        85
+
+  [F] n=148  AUC: 0.7697  AUPRC: 0.3228  Brier: 0.1431  Acc: 0.8041  F1: 0.3256
+              precision    recall  f1-score   support
+
+      Normal       0.97      0.82      0.89       137
+  Sarcopenia       0.22      0.64      0.33        11
+
+    accuracy                           0.80       148
+   macro avg       0.59      0.73      0.61       148
+weighted avg       0.91      0.80      0.84       148
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — CrossAttn3  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.7935         0.6947         0.8814
+  AUPRC            0.3747         0.2194         0.5670
+  Brier            0.1685         0.1386         0.1985
+  Accuracy         0.7725         0.7210         0.8283
+  F1               0.3908         0.2609         0.5193
+  [M3/crop80] Saving figures ...
+
+Saved (model 3 (crop80)):
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/data_distribution.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/cv_roc_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/cv_metric_distribution.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/training_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/test_roc_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/test_roc_by_sex.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/confusion_matrices.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/calibration.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/results.md
+  [M3/crop80] Plotting attention maps ...
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/attention_map_c2a.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/attention_heatmap_c2a.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/attention_map_a2c.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop80/attention_heatmap_a2c.png
+  [M3/crop80] Done.
+
+############################################################
+  [M3 crop60]  (scale_clinic=True, scale_aec=True)
+############################################################
+  [M3/crop60] Cross-validating CrossAttn3 ...
+=================================================================
+5-Fold CV  [CrossAttn3 | scale_clin=True, scale_aec=True]
+=================================================================
+
+── Fold 1/5 ──────────────────────────────
+  CA3  — AUC: 0.8292  AUPRC: 0.3634  Brier: 0.1661  Acc: 0.8011  F1: 0.4478  (best ep=2, thresh=0.554)
+
+── Fold 2/5 ──────────────────────────────
+  CA3  — AUC: 0.7919  AUPRC: 0.4033  Brier: 0.2237  Acc: 0.6667  F1: 0.3542  (best ep=6, thresh=0.444)
+
+── Fold 3/5 ──────────────────────────────
+  CA3  — AUC: 0.8313  AUPRC: 0.3751  Brier: 0.1747  Acc: 0.6828  F1: 0.3789  (best ep=70, thresh=0.292)
+
+── Fold 4/5 ──────────────────────────────
+  CA3  — AUC: 0.8738  AUPRC: 0.4015  Brier: 0.1945  Acc: 0.7796  F1: 0.4810  (best ep=4, thresh=0.594)
+
+── Fold 5/5 ──────────────────────────────
+  CA3  — AUC: 0.7756  AUPRC: 0.3774  Brier: 0.2128  Acc: 0.8387  F1: 0.4828  (best ep=18, thresh=0.692)
+
+===========================================================================
+CrossAttn3  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8292     0.3634     0.1661     0.8011     0.4478
+  2          0.7919     0.4033     0.2237     0.6667     0.3542
+  3          0.8313     0.3751     0.1747     0.6828     0.3789
+  4          0.8738     0.4015     0.1945     0.7796     0.4810
+  5          0.7756     0.3774     0.2128     0.8387     0.4828
+  ──────────────────────────────────────────────────────────
+  Mean       0.8204     0.3842     0.1944     0.7538     0.4289
+  ±Std       0.0343     0.0156     0.0219     0.0674     0.0530
+  [M3/crop60] Evaluating on test set (med_epoch=6, thresh=0.554) ...
+
+=================================================================
+CrossAttn3 Test Evaluation  (scale_clin=True, scale_aec=True, threshold=0.554)
+=================================================================
+CrossAttn3 — training final model for 6 epochs on full CV set …
+
+CrossAttn3 — Test Set (Overall):
+  AUC: 0.8106  AUPRC: 0.3950  Brier: 0.1766  Acc: 0.7339  F1: 0.3673
+
+CrossAttn3 — Test Set (By Sex):
+  [M] n=85  AUC: 0.8109  AUPRC: 0.4982  Brier: 0.1769  Acc: 0.7294  F1: 0.4651
+              precision    recall  f1-score   support
+
+      Normal       0.93      0.73      0.82        71
+  Sarcopenia       0.34      0.71      0.47        14
+
+    accuracy                           0.73        85
+   macro avg       0.64      0.72      0.64        85
+weighted avg       0.83      0.73      0.76        85
+
+  [F] n=148  AUC: 0.7983  AUPRC: 0.3198  Brier: 0.1764  Acc: 0.7365  F1: 0.2909
+              precision    recall  f1-score   support
+
+      Normal       0.97      0.74      0.84       137
+  Sarcopenia       0.18      0.73      0.29        11
+
+    accuracy                           0.74       148
+   macro avg       0.58      0.73      0.56       148
+weighted avg       0.91      0.74      0.80       148
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — CrossAttn3  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.8106         0.7214         0.8915
+  AUPRC            0.3950         0.2309         0.5921
+  Brier            0.1766         0.1510         0.2038
+  Accuracy         0.7339         0.6781         0.7897
+  F1               0.3673         0.2472         0.4874
+  [M3/crop60] Saving figures ...
+
+Saved (model 3 (crop60)):
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/data_distribution.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/cv_roc_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/cv_metric_distribution.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/training_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/test_roc_curves.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/test_roc_by_sex.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/confusion_matrices.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/calibration.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/results.md
+  [M3/crop60] Plotting attention maps ...
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/attention_map_c2a.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/attention_heatmap_c2a.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/attention_map_a2c.png
+  연구코드/results/0529/liver_pubis/model_3\aec128\crop60/attention_heatmap_a2c.png
+  [M3/crop60] Done.

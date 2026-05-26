@@ -1,22 +1,22 @@
 """
 TotalSegmentator를 이용해 환자별 해부학적 경계를 DICOM Instance Number로 추출한다.
 
-  t12_slice  : T12 상단 슬라이스의 DICOM Instance Number
-  pubis_slice: 두덩뼈 하단 슬라이스의 DICOM Instance Number
-  n_slices   : 스캔 전체 슬라이스 수
-  slices     : 해부학적 클리핑 구간(T12 상단~두덩뼈 하단) 슬라이스 수
-  z_t12      : T12 상단 슬라이스의 DICOM z 좌표
-  z_pubis    : 두덩뼈 하단 슬라이스의 DICOM z 좌표
+  liver_upper_slice: Liver 상단 슬라이스의 DICOM Instance Number
+  pubis_slice      : 두덩뼈 하단 슬라이스의 DICOM Instance Number
+  n_slices         : 스캔 전체 슬라이스 수
+  slices           : 해부학적 클리핑 구간(Liver 상단~두덩뼈 하단) 슬라이스 수
+  z_liver_upper    : Liver 상단 슬라이스의 DICOM z 좌표
+  z_pubis          : 두덩뼈 하단 슬라이스의 DICOM z 좌표
 
 사용 구조:
-  - 상단: vertebrae_T12 cranial end
+  - 상단: liver cranial end
   - 하단: hip_left + hip_right caudal end
 
 출력:
   - {SITE}_z_bounds.xlsx
-  - data/{SITE}/ok/upper/{PatientID}.png      (T12 상단 슬라이스 - ok)
+  - data/{SITE}/ok/upper/{PatientID}.png      (Liver 상단 슬라이스 - ok)
   - data/{SITE}/ok/bottom/{PatientID}.png     (두덩뼈 하단 슬라이스 - ok)
-  - data/{SITE}/missing/upper/{PatientID}.png  (T12 상단 슬라이스 - missing)
+  - data/{SITE}/missing/upper/{PatientID}.png  (Liver 상단 슬라이스 - missing)
   - data/{SITE}/missing/bottom/{PatientID}.png (두덩뼈 하단 슬라이스 - missing)
 """
 
@@ -44,21 +44,21 @@ from totalsegmentator.python_api import totalsegmentator
 # ── 설정 ─────────────────────────────────────────────────────────────────────
 SITE       = "강남"
 DICOM_BASE = rf"D:/영상제공/{SITE}/{SITE}_axial"
-META_PATH  = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\{SITE}_merged_features.xlsx"
-OUT_PATH   = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\{SITE}_z_bounds.xlsx"
-CHECKPOINT       = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\.z_bounds_checkpoint.json"
-RETRY_CHECKPOINT = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\.z_bounds_retry_checkpoint.json"
-UPPER_DIR         = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\ok\upper"
-BOTTOM_DIR        = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\ok\bottom"
-MISSING_UPPER_DIR = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\missing\upper"
-MISSING_BOTTOM_DIR= rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\aec\missing\bottom"
+META_PATH  = rf"C:\Users\jhjun\OneDrive\Desktop\대학원\연구코드\data\{SITE}\aec\liver_pubis\{SITE}_merged_features.xlsx"
+OUT_PATH   = rf"C:\Users\jhjun\OneDrive\Desktop\대학원\연구코드\data\{SITE}\aec\liver_pubis\{SITE}_z_bounds.xlsx"
+CHECKPOINT       = rf"연구코드\data\.z_bounds_checkpoint.json"
+RETRY_CHECKPOINT = rf"연구코드\data\.z_bounds_retry_checkpoint.json"
+UPPER_DIR         = rf"C:\Users\jhjun\OneDrive\Desktop\대학원\연구코드\data\{SITE}\aec\liver_pubis\ok\upper"
+BOTTOM_DIR        = rf"C:\Users\jhjun\OneDrive\Desktop\대학원\연구코드\data\{SITE}\aec\liver_pubis\ok\bottom"
+MISSING_UPPER_DIR = rf"C:\Users\jhjun\OneDrive\Desktop\대학원\연구코드\data\{SITE}\aec\liver_pubis\missing\upper"
+MISSING_BOTTOM_DIR= rf"C:\Users\jhjun\OneDrive\Desktop\대학원\연구코드\data\{SITE}\aec\liver_pubis\missing\bottom"
 
-ROI_SUBSET = ["vertebrae_T12", "hip_left", "hip_right"]
+ROI_SUBSET = ["liver", "hip_left", "hip_right"]
 BATCH_SIZE = 5
 
 # "full"  : 전체 환자 실행 (main)
 # "retry" : seg_status != ok 환자만 재처리 (retry_failed)
-MODE = "retry"
+MODE = "full"
 
 
 # ── 유틸 ─────────────────────────────────────────────────────────────────────
@@ -88,13 +88,13 @@ def dicom_to_nifti_with_mapping(dcm_dir: str, out_path: str) -> list | None:
         series_ids = reader.GetGDCMSeriesIDs(dcm_dir)
         if not series_ids:
             return None
-        
+
         dicom_names = reader.GetGDCMSeriesFileNames(dcm_dir, series_ids[0])
         reader.SetFileNames(dicom_names)
-        
+
         image = reader.Execute()
         sitk.WriteImage(image, out_path)
-        
+
         return list(dicom_names)
     except Exception:
         return None
@@ -161,9 +161,9 @@ def save_slice_png(dcm_path: str, out_path: str) -> bool:
 
 
 _SEG_COLORS = {
-    "vertebrae_T12": (1.0, 0.25, 0.25),  # 빨강
-    "hip_left":      (0.2,  0.45, 1.0),  # 파랑
-    "hip_right":     (0.2,  0.75, 1.0),  # 하늘
+    "liver":    (1.0, 0.25, 0.25),  # 빨강
+    "hip_left": (0.2,  0.45, 1.0),  # 파랑
+    "hip_right":(0.2,  0.75, 1.0),  # 하늘
 }
 
 
@@ -226,7 +226,7 @@ def save_boundary_previews(
     upper_dir: str = UPPER_DIR,
     bottom_dir: str = BOTTOM_DIR,
 ) -> tuple[bool, bool]:
-    """T12 upper / pubis bottom 슬라이스를 각각 upper_dir, bottom_dir 폴더에 저장."""
+    """Liver upper / pubis bottom 슬라이스를 각각 upper_dir, bottom_dir 폴더에 저장."""
     upper_ok = bottom_ok = False
     if upper_dcm:
         out = os.path.join(upper_dir, f"{pid_str}.png")
@@ -246,14 +246,14 @@ def save_boundary_previews(
 def extract_bounds(pid_str: str, tmp_dir: str, folder_map: dict) -> dict:
     """환자 1명의 해부학적 경계면의 실제 DICOM Instance Number를 추출한다."""
     result = {
-        "t12_slice":  np.nan,
-        "pubis_slice": np.nan,
-        "slices":     np.nan,
-        "n_slices":   np.nan,
-        "z_t12":      np.nan,
-        "z_pubis":    np.nan,
-        "z_range":    np.nan,
-        "seg_status": "failed",
+        "liver_upper_slice": np.nan,
+        "pubis_slice":       np.nan,
+        "slices":            np.nan,
+        "n_slices":          np.nan,
+        "z_liver_upper":     np.nan,
+        "z_pubis":           np.nan,
+        "z_range":           np.nan,
+        "seg_status":        "failed",
     }
 
     if pid_str not in folder_map:
@@ -290,21 +290,21 @@ def extract_bounds(pid_str: str, tmp_dir: str, folder_map: dict) -> dict:
             result["seg_status"] = "invalid_volume_match"
             return result
 
-        t12_k = get_k_indices(os.path.join(seg_dir, "vertebrae_T12.nii.gz"))
-        
+        liver_k = get_k_indices(os.path.join(seg_dir, "liver.nii.gz"))
+
         hip_k = np.array([], dtype=int)
         for side in ("hip_left", "hip_right"):
             p = os.path.join(seg_dir, f"{side}.nii.gz")
             if os.path.exists(p):
                 hip_k = np.concatenate([hip_k, get_k_indices(p)]).astype(int)
 
-        t12_found = len(t12_k) > 0
-        hip_found = len(hip_k) > 0
+        liver_found = len(liver_k) > 0
+        hip_found   = len(hip_k) > 0
 
-        if t12_found and hip_found:
-            cranial_is_higher_k = np.median(t12_k) > np.median(hip_k)
-        elif t12_found:
-            cranial_is_higher_k = np.median(t12_k) > (n_k / 2)
+        if liver_found and hip_found:
+            cranial_is_higher_k = np.median(liver_k) > np.median(hip_k)
+        elif liver_found:
+            cranial_is_higher_k = np.median(liver_k) > (n_k / 2)
         elif hip_found:
             cranial_is_higher_k = np.median(hip_k) < (n_k / 2)
         else:
@@ -312,15 +312,15 @@ def extract_bounds(pid_str: str, tmp_dir: str, folder_map: dict) -> dict:
 
         upper_dcm = bottom_dcm = None
 
-        if t12_found:
-            apex_k = int(t12_k.max() if cranial_is_higher_k else t12_k.min())
+        if liver_found:
+            apex_k = int(liver_k.max() if cranial_is_higher_k else liver_k.min())
         else:
             apex_k = n_k - 1 if cranial_is_higher_k else 0
         apex_k = max(0, min(apex_k, n_k - 1))
         upper_dcm = dcm_mapping_files[apex_k]
         inst_num  = get_instance_number(upper_dcm)
-        result["z_t12"]    = _read_z(upper_dcm)
-        result["t12_slice"] = inst_num if inst_num is not None else np.nan
+        result["z_liver_upper"]     = _read_z(upper_dcm)
+        result["liver_upper_slice"] = inst_num if inst_num is not None else np.nan
 
         if hip_found:
             bottom_k = int(hip_k.min() if cranial_is_higher_k else hip_k.max())
@@ -334,31 +334,31 @@ def extract_bounds(pid_str: str, tmp_dir: str, folder_map: dict) -> dict:
 
         result["slices"] = abs(apex_k - bottom_k) + 1
 
-        if pd.notna(result["z_t12"]) and pd.notna(result["z_pubis"]):
-            result["z_range"] = round(abs(result["z_t12"] - result["z_pubis"]), 2)
+        if pd.notna(result["z_liver_upper"]) and pd.notna(result["z_pubis"]):
+            result["z_range"] = round(abs(result["z_liver_upper"] - result["z_pubis"]), 2)
 
         # segmentation 마스크 슬라이스 추출 (NIfTI 축: (ncols, nrows, nslices) → .T 로 DICOM 방향 맞춤)
         upper_masks: dict = {}
         bottom_masks: dict = {}
-        t12_path = os.path.join(seg_dir, "vertebrae_T12.nii.gz")
-        if os.path.exists(t12_path):
-            t12_vol = cast(Nifti1Image, nib.load(t12_path)).get_fdata()
-            upper_masks["vertebrae_T12"] = t12_vol[:, :, apex_k].T
+        liver_path = os.path.join(seg_dir, "liver.nii.gz")
+        if os.path.exists(liver_path):
+            liver_vol = cast(Nifti1Image, nib.load(liver_path)).get_fdata()
+            upper_masks["liver"] = liver_vol[:, :, apex_k].T
         for side in ("hip_left", "hip_right"):
             p = os.path.join(seg_dir, f"{side}.nii.gz")
             if os.path.exists(p):
                 vol = cast(Nifti1Image, nib.load(p)).get_fdata()
                 bottom_masks[side] = vol[:, :, bottom_k].T
 
-        if t12_found and hip_found:
-            if pd.isna(result["t12_slice"]) or pd.isna(result["pubis_slice"]):
+        if liver_found and hip_found:
+            if pd.isna(result["liver_upper_slice"]) or pd.isna(result["pubis_slice"]):
                 result["seg_status"] = "instance_number_missing"
             else:
                 result["seg_status"] = "ok"
-        elif t12_found:
+        elif liver_found:
             result["seg_status"] = "hip_missing"
         elif hip_found:
-            result["seg_status"] = "t12_missing"
+            result["seg_status"] = "liver_missing"
         else:
             result["seg_status"] = "both_missing"
 
@@ -414,7 +414,7 @@ def is_already_done(pid_str: str, existing_df: pd.DataFrame | None) -> dict | No
     """엑셀에 기록이 존재하고 실패 상태가 아니면 기존 결과 dict 반환, 아니면 None."""
     if existing_df is None or existing_df.empty:
         return None
-        
+
     try:
         pid_int = int(pid_str)
         row = existing_df[existing_df["PatientID"].astype(int) == pid_int]
@@ -423,16 +423,16 @@ def is_already_done(pid_str: str, existing_df: pd.DataFrame | None) -> dict | No
 
     if row.empty:
         return None
-        
+
     status = str(row["seg_status"].iloc[0])
     # 무시해야 할 실패 상태 목록
     fail_statuses = ["failed", "no_dicom", "no_series", "nifti_fail", "invalid_volume_match"]
     if status in fail_statuses or status.startswith("error:"):
         return None
-        
-    result_cols = ["t12_slice", "pubis_slice", "slices", "n_slices",
-                   "z_t12", "z_pubis", "z_range", "seg_status"]
-                   
+
+    result_cols = ["liver_upper_slice", "pubis_slice", "slices", "n_slices",
+                   "z_liver_upper", "z_pubis", "z_range", "seg_status"]
+
     cached_dict = {}
     for c in result_cols:
         if c in row.columns:
@@ -442,7 +442,7 @@ def is_already_done(pid_str: str, existing_df: pd.DataFrame | None) -> dict | No
             if isinstance(val, float) and np.isnan(val):
                 val = None
             cached_dict[c] = val
-            
+
     return cached_dict
 
 
@@ -457,20 +457,20 @@ def main():
     print(f"미리보기 저장: {UPPER_DIR}")
     print(f"              {BOTTOM_DIR}")
 
-    # existing_df = pd.read_excel(OUT_PATH) if os.path.exists(OUT_PATH) else None
+    existing_df = pd.read_excel(OUT_PATH) if os.path.exists(OUT_PATH) else None
 
     # ───────────────── [사전 필터링 단계] ─────────────────
     raw_pids = sorted(list(folder_map.keys()))
 
-    # all_pids = []
-    # cached_rows = []
-    # for pid in raw_pids:
-    #     cached = is_already_done(pid, existing_df)
-    #     if cached is not None:
-    #         cached["PatientID"] = int(pid)
-    #         cached_rows.append(cached)
-    #     else:
-    #         all_pids.append(pid)
+    all_pids = []
+    cached_rows = []
+    for pid in raw_pids:
+        cached = is_already_done(pid, existing_df)
+        if cached is not None:
+            cached["PatientID"] = int(pid)
+            cached_rows.append(cached)
+        else:
+            all_pids.append(pid)
     all_pids = raw_pids
     # ────────────────────────────────────────────────────────────
 
@@ -488,7 +488,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp_dir:
         for i in tqdm(range(start_idx, total), desc="경계 추출", initial=start_idx, total=total):
             pid = all_pids[i]
-            
+
             result = extract_bounds(pid, tmp_dir, folder_map)
             result["PatientID"] = int(pid)
             rows.append(result)
@@ -506,13 +506,13 @@ def main():
     print(f"\n[완료] {OUT_PATH}")
     print(f"  shape : {df_out.shape}")
     print(f"  상태 :\n{df_out['seg_status'].value_counts().to_string()}")
-    
+
     if not df_out.empty:
-        if "t12_slice" in df_out.columns and not df_out["t12_slice"].isna().all():
-            print(f"  t12_slice(Instance)    : median={df_out['t12_slice'].median():.0f}  std={df_out['t12_slice'].std():.1f}")
+        if "liver_upper_slice" in df_out.columns and not df_out["liver_upper_slice"].isna().all():
+            print(f"  liver_upper_slice(Instance): median={df_out['liver_upper_slice'].median():.0f}  std={df_out['liver_upper_slice'].std():.1f}")
         if "pubis_slice" in df_out.columns and not df_out["pubis_slice"].isna().all():
-            print(f"  pubis_slice(Instance)  : median={df_out['pubis_slice'].median():.0f}  std={df_out['pubis_slice'].std():.1f}")
-            
+            print(f"  pubis_slice(Instance)      : median={df_out['pubis_slice'].median():.0f}  std={df_out['pubis_slice'].std():.1f}")
+
     n_upper = len([f for f in os.listdir(UPPER_DIR) if f.endswith(".png")]) if os.path.isdir(UPPER_DIR) else 0
     n_bottom = len([f for f in os.listdir(BOTTOM_DIR) if f.endswith(".png")]) if os.path.isdir(BOTTOM_DIR) else 0
     n_m_upper = len([f for f in os.listdir(MISSING_UPPER_DIR) if f.endswith(".png")]) if os.path.isdir(MISSING_UPPER_DIR) else 0
@@ -524,17 +524,17 @@ def _write_final_output(rows: list, no_map: dict):
     """정렬된 결과를 안전하게 저장하기 위한 보조 함수"""
     df = pd.DataFrame(rows)
     df = df.drop_duplicates(subset=["PatientID"], keep="last")
-    
+
     df["No"] = df["PatientID"].astype(str).map(no_map)
     df = df.sort_values(by="PatientID").reset_index(drop=True)
-    
-    int_cols = ["No", "t12_slice", "pubis_slice", "slices", "n_slices"]
+
+    int_cols = ["No", "liver_upper_slice", "pubis_slice", "slices", "n_slices"]
     for col in int_cols:
         if col in df.columns:
             df[col] = df[col].astype("Int64")
 
     col_order = ["No", "PatientID", "n_slices", "slices",
-                 "t12_slice", "pubis_slice", "z_range", "z_t12", "z_pubis", "seg_status"]
+                 "liver_upper_slice", "pubis_slice", "z_range", "z_liver_upper", "z_pubis", "seg_status"]
     cols = ([c for c in col_order if c in df.columns] +
             [c for c in df.columns if c not in col_order])
     df = df[cols]
@@ -578,8 +578,8 @@ def export_previews_from_bounds():
         dcm_dir = os.path.join(patient_folder, subfolders[0])
 
         upper_dcm = bottom_dcm = None
-        if pd.notna(row.get("t12_slice")):
-            upper_dcm = find_dcm_by_instance(dcm_dir, int(row["t12_slice"]))
+        if pd.notna(row.get("liver_upper_slice")):
+            upper_dcm = find_dcm_by_instance(dcm_dir, int(row["liver_upper_slice"]))
         if pd.notna(row.get("pubis_slice")):
             bottom_dcm = find_dcm_by_instance(dcm_dir, int(row["pubis_slice"]))
 
@@ -607,12 +607,12 @@ def retry_failed():
 
     df_base = pd.read_excel(OUT_PATH)
     retry_pids = (
-        df_base[df_base["seg_status"].astype(str) == "t12_missing"]["PatientID"]
+        df_base[df_base["seg_status"].astype(str) == "liver_missing"]["PatientID"]
         .astype(str)
         .tolist()
     )
     total = len(retry_pids)
-    print(f"재처리 대상: {total}명 (seg_status == 't12_missing')")
+    print(f"재처리 대상: {total}명 (seg_status == 'liver_missing')")
 
     if total == 0:
         print("재처리할 환자 없음.")

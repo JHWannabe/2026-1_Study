@@ -795,14 +795,17 @@ def _save_report_md_cross(ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
 def plot_attention_maps(model, X_clin_te_s, X_aec_te_s, y_true_te,
                         out_dir, aec_var, model_label, X_mfr_te=None):
     """
-    CrossAttn 모델의 Clinical→AEC 방향 attention을 시각화.
+    CrossAttn 모델의 양방향(Clinical↔AEC) attention을 시각화.
 
-    두 파일 생성:
-      attention_map_c2a.png  — 클래스별 토큰 평균 bar chart + AEC 신호 오버레이
-      attention_heatmap.png  — 샘플별 attention heatmap (Sarco→Normal 순 정렬)
+    네 파일 생성:
+      attention_map_c2a.png     — Clinical→AEC: 클래스별 토큰 평균 bar + AEC 신호 오버레이
+      attention_heatmap_c2a.png — Clinical→AEC: 샘플별 heatmap (Sarco→Normal 순 정렬)
+      attention_map_a2c.png     — AEC→Clinical: 클래스별 clinical 토큰별 attention bar
+      attention_heatmap_a2c.png — AEC→Clinical: 샘플별 heatmap
 
-    attn["clinical_to_aec"] (M2/M2_2) 또는 attn["cs_to_aec"] (M3) 사용.
-    shape: (B, n_query_tokens, n_aec_tokens) → query 토큰 평균 → (B, n_aec_tokens).
+    keys: "clinical_to_aec"/"aec_to_clinical" (M2/M2_2) 또는 "cs_to_aec"/"aec_to_cs" (M3).
+    c2a shape: (B, n_clin_tokens, n_aec_tokens) → query 평균 → (B, n_aec_tokens)
+    a2c shape: (B, n_aec_tokens, n_clin_tokens) → query 평균 → (B, n_clin_tokens)
     """
     import torch
     from config import DEVICE
@@ -815,20 +818,33 @@ def plot_attention_maps(model, X_clin_te_s, X_aec_te_s, y_true_te,
         if X_mfr_te is not None:
             X_m = torch.tensor(X_mfr_te, dtype=torch.long).to(DEVICE)
             _, attn = model(X_c, X_a, X_m, return_attention=True)
-            c2a_key = "cs_to_aec"
+            c2a_key, a2c_key = "cs_to_aec", "aec_to_cs"
         else:
             _, attn = model(X_c, X_a, return_attention=True)
-            c2a_key = "clinical_to_aec"
+            c2a_key, a2c_key = "clinical_to_aec", "aec_to_clinical"
 
-    # (B, n_query_tokens, n_aec_tokens) → mean over query tokens → (B, n_aec_tokens)
-    attn_c2a = attn[c2a_key].cpu().numpy()
-    attn_aec = attn_c2a.mean(axis=1)
-    n_tokens = attn_aec.shape[1]
-    aec_len  = X_aec_te_s.shape[1]
-    x_tok    = np.arange(n_tokens)
+    # Clinical→AEC: (B, n_clin_tokens, n_aec_tokens) → mean over clin query → (B, n_aec_tokens)
+    attn_c2a = attn[c2a_key].cpu().numpy().mean(axis=1)
+    # AEC→Clinical: (B, n_aec_tokens, n_clin_tokens) → mean over aec query → (B, n_clin_tokens)
+    attn_a2c = attn[a2c_key].cpu().numpy().mean(axis=1)
 
-    # ── Plot 1: 클래스별 mean±std bar chart + mean AEC signal overlay ──
-    cls_info  = [(0, "Normal", "steelblue"), (1, "Sarcopenia", "tomato")]
+    n_aec_tokens  = attn_c2a.shape[1]
+    n_clin_tokens = attn_a2c.shape[1]
+    aec_len = X_aec_te_s.shape[1]
+    x_aec  = np.arange(n_aec_tokens)
+    x_clin = np.arange(n_clin_tokens)
+
+    _clin_label_map = {3: ["Age", "Sex", "BMI"], 4: ["Age", "Sex", "BMI", "Scanner"]}
+    clin_labels = _clin_label_map.get(n_clin_tokens, [f"T{i}" for i in range(n_clin_tokens)])
+
+    cls_info = [(0, "Normal", "steelblue"), (1, "Sarcopenia", "tomato")]
+
+    s_idx   = np.where(y_true_te == 1)[0]
+    n_idx   = np.where(y_true_te == 0)[0]
+    ordered = np.concatenate([s_idx, n_idx])
+    n_samp  = len(ordered)
+
+    # ── Plot 1: Clinical→AEC bar chart + AEC signal overlay ──────
     fig, axes = plt.subplots(2, 1, figsize=(14, 8))
     fig.suptitle(
         f"Attention Map (Clinical → AEC)  ·  {model_label}  [{aec_var}]",
@@ -839,42 +855,33 @@ def plot_attention_maps(model, X_clin_te_s, X_aec_te_s, y_true_te,
         if not mask.any():
             ax.set_visible(False)
             continue
-        mean_a = attn_aec[mask].mean(0)
-        std_a  = attn_aec[mask].std(0)
-        ax.bar(x_tok, mean_a, color=color, alpha=0.75,
+        mean_a = attn_c2a[mask].mean(0)
+        std_a  = attn_c2a[mask].std(0)
+        ax.bar(x_aec, mean_a, color=color, alpha=0.75,
                yerr=std_a, capsize=2, error_kw={"elinewidth": 0.8})
-
-        # 스케일된 평균 AEC 신호를 twin y-axis에 오버레이
         ax2 = ax.twinx()
-        ax2.plot(np.linspace(0, n_tokens - 1, aec_len),
+        ax2.plot(np.linspace(0, n_aec_tokens - 1, aec_len),
                  X_aec_te_s[mask].mean(0),
                  color="black", alpha=0.30, linewidth=1.0, label="Mean AEC")
         ax2.set_ylabel("Mean AEC (scaled)", color="dimgray", fontsize=8)
         ax2.tick_params(axis="y", labelcolor="dimgray", labelsize=7)
-
         ax.set_title(f"{cls_name}  (n={mask.sum()})")
         ax.set_xlabel("AEC Token Index  (left = scan start,  right = scan end)")
         ax.set_ylabel("Mean Attention Weight")
-        ax.set_xlim(-0.5, n_tokens - 0.5)
+        ax.set_xlim(-0.5, n_aec_tokens - 0.5)
 
     fig.tight_layout()
     path1 = f"{out_dir}/attention_map_c2a.png"
     fig.savefig(path1, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    # ── Plot 2: 샘플별 heatmap (Sarco → Normal 순) ────────────────
-    s_idx   = np.where(y_true_te == 1)[0]
-    n_idx   = np.where(y_true_te == 0)[0]
-    ordered = np.concatenate([s_idx, n_idx])
-    hmap    = attn_aec[ordered]
-    n_samp  = len(ordered)
-
+    # ── Plot 2: Clinical→AEC heatmap (Sarco → Normal 순) ─────────
+    hmap_c2a = attn_c2a[ordered]
     figH = max(5, n_samp * 0.20)
     fig, ax = plt.subplots(figsize=(14, figH))
-    im = ax.imshow(hmap, aspect="auto", cmap="YlOrRd", interpolation="nearest",
-                   vmin=0, vmax=hmap.max())
+    im = ax.imshow(hmap_c2a, aspect="auto", cmap="YlOrRd", interpolation="nearest",
+                   vmin=0, vmax=hmap_c2a.max())
     plt.colorbar(im, ax=ax, shrink=0.6, label="Attention Weight")
-
     if len(s_idx) > 0 and len(n_idx) > 0:
         ax.axhline(len(s_idx) - 0.5, color="white", linewidth=1.5, linestyle="--")
     ax.text(-0.8, len(s_idx) / 2 - 0.5,
@@ -883,25 +890,81 @@ def plot_attention_maps(model, X_clin_te_s, X_aec_te_s, y_true_te,
     ax.text(-0.8, len(s_idx) + len(n_idx) / 2 - 0.5,
             "Normal", va="center", ha="right",
             color="steelblue", fontsize=8, fontweight="bold", clip_on=False)
-
     ax.set_xlabel("AEC Token Index")
     ax.set_ylabel("Sample")
     ax.set_title(
         f"Sample-level Attention Map (Clinical → AEC)  ·  {model_label}  [{aec_var}]",
         fontsize=10, fontweight="bold",
     )
-    tick_step = max(1, n_tokens // 8)
-    ax.set_xticks(x_tok[::tick_step])
-    ax.set_xticklabels(x_tok[::tick_step])
+    tick_step = max(1, n_aec_tokens // 8)
+    ax.set_xticks(x_aec[::tick_step])
+    ax.set_xticklabels(x_aec[::tick_step])
     ax.set_yticks([])
+    fig.tight_layout()
+    path2 = f"{out_dir}/attention_heatmap_c2a.png"
+    fig.savefig(path2, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    # ── Plot 3: AEC→Clinical bar chart ───────────────────────────
+    fig, axes = plt.subplots(2, 1, figsize=(max(6, n_clin_tokens * 1.8 + 2), 8))
+    fig.suptitle(
+        f"Attention Map (AEC → Clinical)  ·  {model_label}  [{aec_var}]",
+        fontsize=11, fontweight="bold",
+    )
+    for ax, (cls_idx, cls_name, color) in zip(axes, cls_info):
+        mask = y_true_te == cls_idx
+        if not mask.any():
+            ax.set_visible(False)
+            continue
+        mean_a = attn_a2c[mask].mean(0)
+        std_a  = attn_a2c[mask].std(0)
+        ax.bar(x_clin, mean_a, color=color, alpha=0.75,
+               yerr=std_a, capsize=3, error_kw={"elinewidth": 0.8})
+        ax.set_title(f"{cls_name}  (n={mask.sum()})")
+        ax.set_xlabel("Clinical Token")
+        ax.set_ylabel("Mean Attention Weight")
+        ax.set_xlim(-0.5, n_clin_tokens - 0.5)
+        ax.set_xticks(x_clin)
+        ax.set_xticklabels(clin_labels, fontsize=10)
 
     fig.tight_layout()
-    path2 = f"{out_dir}/attention_heatmap.png"
-    fig.savefig(path2, dpi=150, bbox_inches="tight")
+    path3 = f"{out_dir}/attention_map_a2c.png"
+    fig.savefig(path3, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    # ── Plot 4: AEC→Clinical heatmap (Sarco → Normal 순) ─────────
+    hmap_a2c = attn_a2c[ordered]
+    figH = max(5, n_samp * 0.20)
+    fig, ax = plt.subplots(figsize=(max(6, n_clin_tokens * 1.8 + 2), figH))
+    im = ax.imshow(hmap_a2c, aspect="auto", cmap="YlOrRd", interpolation="nearest",
+                   vmin=0, vmax=hmap_a2c.max())
+    plt.colorbar(im, ax=ax, shrink=0.6, label="Attention Weight")
+    if len(s_idx) > 0 and len(n_idx) > 0:
+        ax.axhline(len(s_idx) - 0.5, color="white", linewidth=1.5, linestyle="--")
+    ax.text(-0.3, len(s_idx) / 2 - 0.5,
+            "Sarco",  va="center", ha="right",
+            color="tomato",    fontsize=8, fontweight="bold", clip_on=False)
+    ax.text(-0.3, len(s_idx) + len(n_idx) / 2 - 0.5,
+            "Normal", va="center", ha="right",
+            color="steelblue", fontsize=8, fontweight="bold", clip_on=False)
+    ax.set_xlabel("Clinical Token")
+    ax.set_ylabel("Sample")
+    ax.set_title(
+        f"Sample-level Attention Map (AEC → Clinical)  ·  {model_label}  [{aec_var}]",
+        fontsize=10, fontweight="bold",
+    )
+    ax.set_xticks(x_clin)
+    ax.set_xticklabels(clin_labels, fontsize=10)
+    ax.set_yticks([])
+    fig.tight_layout()
+    path4 = f"{out_dir}/attention_heatmap_a2c.png"
+    fig.savefig(path4, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
     print(f"  {path1}")
     print(f"  {path2}")
+    print(f"  {path3}")
+    print(f"  {path4}")
 
 
 def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,

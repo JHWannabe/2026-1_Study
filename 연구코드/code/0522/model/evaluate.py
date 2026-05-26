@@ -115,25 +115,26 @@ def evaluate_test(X_cv, y_cv, X_te, y_te, sex_te, scale_X=True, threshold=0.5):
 def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
                         X_clin_te, X_aec_te, y_te, sex_te,
                         med_epoch,
-                        scale_clin=True, scale_aec=True,
-                        return_model=False, threshold=0.5, use_focal: bool = True):
+                        scale_clin=True,
+                        return_model=False, threshold=0.5):
     """
     전체 CV 세트로 ClinAECCrossAttn 최종 모델을 학습하고 test set 예측 결과를 반환.
+    AEC는 항상 StandardScaler로 표준화한다.
 
     threshold: CV fold별 Youden's J 최적값의 중앙값 (기본 0.5)
     return_model=False (기본): ca_pred_te, ca_prob_te, ca_true_te, stats_te
     return_model=True        : 위 4개 + model, X_clin_te_s, X_aec_te_s (attention map용)
     """
     print(f"\n{'='*55}")
-    print(f"CrossAttn Test Evaluation  (scale_clin={scale_clin}, scale_aec={scale_aec}, threshold={threshold:.3f})")
+    print(f"CrossAttn Test Evaluation  (scale_clin={scale_clin}, scale_aec=True, threshold={threshold:.3f})")
     print(f"{'='*55}")
 
     X_clin_cv_s, X_clin_te_s = _scale_clin_te(X_clin_cv, X_clin_te, scale_clin)
-    X_aec_cv_s,  X_aec_te_s  = _scale_or_copy(X_aec_cv,  X_aec_te,  scale_aec)
+    X_aec_cv_s,  X_aec_te_s  = _scale_or_copy(X_aec_cv,  X_aec_te,  True)
 
     tr_dl, te_dl = make_dual_loaders(X_clin_cv_s, X_aec_cv_s, y_cv,
                                      X_clin_te_s,  X_aec_te_s,  y_te)
-    model_f, crit_f, opt_f, sched_f = build_cross_attn(y_cv, use_focal=use_focal)
+    model_f, crit_f, opt_f, sched_f = build_cross_attn(y_cv)
 
     print(f"CrossAttn — training final model for {med_epoch} epochs on full CV set …")
     for _ in range(1, med_epoch + 1):
@@ -167,10 +168,11 @@ def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
 def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
                           X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
                           sex_te, med_epoch, n_manufacturers,
-                          scale_clin=True, scale_aec=True,
-                          return_model=False, threshold=0.5, use_focal: bool = True):
+                          scale_clin=True,
+                          return_model=False, threshold=0.5):
     """
     전체 CV 세트로 ClinAECScanCrossAttn 최종 모델을 학습하고 test set 예측 결과를 반환.
+    AEC는 항상 StandardScaler로 표준화한다.
 
     threshold: CV fold별 Youden's J 최적값의 중앙값 (기본 0.5)
     ManufacturerModelName은 nn.Embedding index(1-indexed 정수)이므로 스케일링하지 않는다.
@@ -178,17 +180,17 @@ def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
     return_model=True        : 위 4개 + model, X_clin_te_s, X_aec_te_s (attention map용)
     """
     print(f"\n{'='*65}")
-    print(f"CrossAttn3 Test Evaluation  (scale_clin={scale_clin}, scale_aec={scale_aec}, threshold={threshold:.3f})")
+    print(f"CrossAttn3 Test Evaluation  (scale_clin={scale_clin}, scale_aec=True, threshold={threshold:.3f})")
     print(f"{'='*65}")
 
     X_clin_cv_s, X_clin_te_s = _scale_clin_te(X_clin_cv, X_clin_te, scale_clin)
-    X_aec_cv_s,  X_aec_te_s  = _scale_or_copy(X_aec_cv,  X_aec_te,  scale_aec)
+    X_aec_cv_s,  X_aec_te_s  = _scale_or_copy(X_aec_cv,  X_aec_te,  True)
 
     tr_dl, te_dl = make_quad_loaders(
         X_clin_cv_s, X_aec_cv_s, X_scan_mfr_cv, y_cv,
         X_clin_te_s, X_aec_te_s, X_scan_mfr_te, y_te,
     )
-    model_f, crit_f, opt_f, sched_f = build_cross_attn3(y_cv, n_manufacturers, use_focal=use_focal)
+    model_f, crit_f, opt_f, sched_f = build_cross_attn3(y_cv, n_manufacturers)
 
     print(f"CrossAttn3 — training final model for {med_epoch} epochs on full CV set …")
     for _ in range(1, med_epoch + 1):
