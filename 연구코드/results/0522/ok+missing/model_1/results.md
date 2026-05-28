@@ -1,4 +1,4 @@
-# SMI Binary Classification — Results
+﻿# SMI Binary Classification — Results
 
 Generated: 2026-05-22 00:08  |  5-Fold CV  |  Model 1 (Clinic Only, LR)
 
@@ -78,8 +78,8 @@ Generated: 2026-05-22 00:08  |  5-Fold CV  |  Model 1 (Clinic Only, LR)
 
 ## 3. Confusion Matrix (Test Set)
 
-|  | Pred: Normal | Pred: Sarco |
-|--|-------------:|------------:|
+|   | Pred: Normal | Pred: Sarco |
+|---|-------------:|------------:|
 | **True: Normal** | 145 | 63 |
 | **True: Sarco**  | 4 | 21 |
 

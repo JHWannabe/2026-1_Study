@@ -1,4 +1,4 @@
-# SMI Binary Classification — CrossAttn Results
+﻿# SMI Binary Classification — CrossAttn Results
 
 Generated: 2026-05-22 00:03  |  5-Fold CV  |  Median best epoch: 11
 
@@ -80,8 +80,8 @@ CrossAttn best val AUC per fold: Fold1=0.7871, Fold2=0.7953, Fold3=0.7986, Fold4
 
 ## 3. Confusion Matrix (Test Set)
 
-|  | Pred: Normal | Pred: Sarco |
-|--|-------------:|------------:|
+|   | Pred: Normal | Pred: Sarco |
+|---|-------------:|------------:|
 | **True: Normal** | 100 | 51 |
 | **True: Sarco**  | 2 | 19 |
 
