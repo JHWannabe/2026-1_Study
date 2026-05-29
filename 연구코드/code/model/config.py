@@ -44,7 +44,7 @@ N_HEADS    = 4      # Multi-head Attention head 수
 # ── 기기 및 결과 경로 ─────────────────────────────────────────
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-RESULTS_DIR           = "연구코드/results/0529/liver_pubis/"
+RESULTS_DIR           = "연구코드/results/0529/liver_pubis_32/"
 RESULTS_MODEL_1_DIR   = RESULTS_DIR + "model_1"   # M1 Clinic Only
 RESULTS_MODEL_2_DIR   = RESULTS_DIR + "model_2"   # M2 Clinic+AEC (Matched)
 RESULTS_MODEL_2_2_DIR = RESULTS_DIR + "model_2_2" # M2_2 Clinic+AEC (Unmatched)

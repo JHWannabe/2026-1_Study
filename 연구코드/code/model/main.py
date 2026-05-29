@@ -101,6 +101,7 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te):
             X_cv, y_cv, sex_cv,
             X_te, y_te, lr_pred, lr_prob,
             sex_te, out_dir=out1,
+            ci_dict=stats_te.get("bootstrap_lr", {}),
         )
         print(f"  [M1] Done.", flush=True)
 
@@ -182,6 +183,7 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 X_clin_te_v, y2_te_v,
                 ca_pred_te, ca_true_te, sex2_te_v, ca_prob_te,
                 model_label=f"model 2 ({aec_var})", out_dir=out2,
+                ci_dict=stats_te2.get("bootstrap_ca", {}),
             )
             print(f"  [M2/{aec_var}] Plotting attention maps ...", flush=True)
             plot_attention_maps(
@@ -281,6 +283,7 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 X_clin_te_v, y2_te_v,
                 ca_pred_te, ca_true_te, sex2_te_v, ca_prob_te,
                 model_label=f"model 2_2 ({aec_var}, unmatched)", out_dir=out2_2,
+                ci_dict=stats_te2_2.get("bootstrap_ca", {}),
             )
             print(f"  [M2_2/{aec_var}] Plotting attention maps ...", flush=True)
             plot_attention_maps(
@@ -381,6 +384,7 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                 X_clin3_te_v, y3_te_v,
                 ca3_pred_te, ca3_true_te, sex3_te_v, ca3_prob_te,
                 model_label=f"model 3 ({aec_var})", out_dir=out3,
+                ci_dict=stats_te3.get("bootstrap_ca3", {}),
             )
             print(f"  [M3/{aec_var}] Plotting attention maps ...", flush=True)
             plot_attention_maps(

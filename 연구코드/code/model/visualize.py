@@ -373,6 +373,26 @@ def _sex_rows(y_true, y_pred, y_prob, sex_te):
     return "\n".join(rows)
 
 
+def _ci_section(ci_dict):
+    """Bootstrap CI dict → markdown 섹션 행 리스트. ci_dict=None이면 빈 테이블."""
+    labels = [("AUC-ROC", "auc"), ("AUPRC", "auprc"),
+              ("Brier", "brier"), ("Accuracy", "acc"), ("F1", "f1")]
+    lines = [
+        "## 4. Bootstrap 95% CI  (n_boot=2000)",
+        "",
+        "> Estimate: 원본 test set 기준. 95% CI: 2.5th–97.5th percentile.",
+        "",
+        "| Metric | Estimate | CI Lower | CI Upper |",
+        "|--------|--------:|---------:|---------:|",
+    ]
+    if ci_dict:
+        for label, key in labels:
+            if key in ci_dict:
+                est, lo, hi = ci_dict[key]
+                lines.append(f"| {label} | {est:.4f} | {lo:.4f} | {hi:.4f} |")
+    return lines
+
+
 def _cm_block(y_true, y_pred):
     """confusion matrix를 2×2 마크다운 테이블 문자열로 반환."""
     cm = confusion_matrix(y_true, y_pred)
@@ -388,7 +408,7 @@ def _cm_block(y_true, y_pred):
 def save_report_md(lr_cv,
                    X_cv, y_cv, sex_cv,
                    X_te, y_te, lr_pred, lr_prob,
-                   sex_te):
+                   sex_te, ci_dict=None):
     """LR CV 결과와 test set 성능 지표를 results.md 파일로 저장 (Model 1 전용)."""
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -445,7 +465,11 @@ def save_report_md(lr_cv,
         f"",
         f"---",
         f"",
-        f"## 4. Figures",
+        *_ci_section(ci_dict),
+        f"",
+        f"---",
+        f"",
+        f"## 5. Figures",
         f"",
         f"| File | Description |",
         f"|------|-------------|",
@@ -536,7 +560,7 @@ def plot_roc_all_models(aec_var,
 def save_all(lr_roc_folds, lr_cv,
              X_cv, y_cv, sex_cv,
              X_te, y_te, lr_pred, lr_prob,
-             sex_te, out_dir=None):
+             sex_te, out_dir=None, ci_dict=None):
     """Model 1용 시각화 전체(7종 png)와 results.md를 out_dir에 저장."""
     global _dir1
     _dir1 = out_dir or RESULTS_DIR
@@ -563,7 +587,7 @@ def save_all(lr_roc_folds, lr_cv,
     save_report_md(lr_cv,
                    X_cv, y_cv, sex_cv,
                    X_te, y_te, lr_pred, lr_prob,
-                   sex_te)
+                   sex_te, ci_dict=ci_dict)
 
 
 # ── Model 2 : Clinic + AEC Cross-Attention ───────────────────
@@ -715,7 +739,7 @@ def plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te):
 
 def _save_report_md_cross(ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
                            ca_pred_te, ca_prob_te, ca_true_te,
-                           sex_te, ca_histories, med_epoch):
+                           sex_te, ca_histories, med_epoch, ci_dict=None):
     """CrossAttn CV 결과와 test set 성능 지표를 results.md 파일로 저장 (Model 2/2_2/3 공용)."""
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     auc_arr = np.array([h["val_auc"] for h in ca_histories])
@@ -777,7 +801,11 @@ def _save_report_md_cross(ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
         "",
         "---",
         "",
-        "## 4. Figures",
+        *_ci_section(ci_dict),
+        "",
+        "---",
+        "",
+        "## 5. Figures",
         "",
         "| File | Description |",
         "|------|-------------|",
@@ -1245,7 +1273,7 @@ def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,
                    X_clin_cv, y_cv, sex_cv,
                    X_clin_te, y_te,
                    ca_pred_te, ca_true_te, sex_te, ca_prob_te,
-                   model_label="model 2", out_dir=None):
+                   model_label="model 2", out_dir=None, ci_dict=None):
     """Model 2/2_2/3용 시각화 전체(8종 png)와 results.md를 out_dir에 저장."""
     global _dir2
     _dir2 = out_dir or RESULTS_MODEL_2_DIR
@@ -1270,4 +1298,4 @@ def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,
 
     _save_report_md_cross(ca_cv, X_clin_cv, y_cv, sex_cv, X_clin_te, y_te,
                           ca_pred_te, ca_prob_te, ca_true_te,
-                          sex_te, ca_histories, med_epoch)
+                          sex_te, ca_histories, med_epoch, ci_dict=ci_dict)
