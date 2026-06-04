@@ -502,7 +502,7 @@ def plot_calibration(entries, out_path, n_bins=10):
 
     ax_cal.plot([0, 1], [0, 1], "k--", alpha=0.4, label="Perfect calibration")
     for label, y_true, y_prob, color in entries:
-        frac_pos, mean_pred = calibration_curve(y_true, y_prob, n_bins=n_bins, strategy="quantile")
+        frac_pos, mean_pred = calibration_curve(y_true, y_prob, n_bins=n_bins, strategy="uniform")
         brier = brier_score_loss(y_true, y_prob)
         ax_cal.plot(mean_pred, frac_pos, marker="o", color=color, linewidth=2,
                     label=f"{label}  (Brier={brier:.4f})")
@@ -579,7 +579,7 @@ def save_all(lr_roc_folds, lr_cv,
     plot_test_roc_by_sex(y_te, lr_prob, sex_te)
     plot_calibration(
         [("Log. Reg.", y_te, lr_prob, "steelblue")],
-        out_path=f"{_dir1}/calibration.png",
+        out_path=f"{_dir1}/calibration_.png",
     )
 
     print("\nSaved:")
@@ -1374,7 +1374,7 @@ def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,
     plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te)
     plot_calibration(
         [("CrossAttn", ca_true_te, ca_prob_te, "steelblue")],
-        out_path=f"{_dir2}/calibration.png",
+        out_path=f"{_dir2}/calibration_.png",
     )
 
     print(f"\nSaved ({model_label}):")
