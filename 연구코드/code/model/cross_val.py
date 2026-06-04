@@ -29,6 +29,24 @@ def _maybe_scale(sc, X_tr, X_val):
     return sc.fit_transform(X_tr), sc.transform(X_val)
 
 
+def _scale_aec_by_mode(X_tr, X_val, scale_mode: str):
+    """AEC 스케일링 모드에 따라 train/val AEC를 정규화한다.
+
+    scale_mode:
+      "column" — StandardScaler (열 방향, 각 position별 독립 정규화)
+      "global" — Train set 전체 단일 mean/std로 정규화 (Global Z-score)
+      "none"   — 정규화 없이 복사본 반환
+    """
+    if scale_mode == "column":
+        return _maybe_scale(StandardScaler(), X_tr, X_val)
+    if scale_mode == "global":
+        g_mean = float(X_tr.mean())
+        g_std  = max(float(X_tr.std()), 1e-8)
+        return ((X_tr - g_mean) / g_std).astype(np.float32), \
+               ((X_val - g_mean) / g_std).astype(np.float32)
+    return X_tr.copy(), X_val.copy()
+
+
 def _maybe_scale_clin(X_tr, X_val):
     """Clinical 스케일링: do_scale=True이면 Age(col 0)·BMI(col 2)만 표준화. sex_enc(col 1)은 그대로."""
     sc = StandardScaler()
@@ -91,10 +109,10 @@ def run_cross_validation(X_cv, y_cv, scale_X=True):
 
 
 def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
-                               scale_clin=True, scale_aec=True):
+                               scale_clin=True, scale_aec="column"):
     """
     ClinAECCrossAttn에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC·학습 이력·최적 임계값을 반환.
-    AEC는 scale_aec=True(기본)일 때 StandardScaler로 표준화한다.
+    scale_aec: "column" | "global" | "none" — AEC 정규화 모드 (기본: column-wise)
 
     Returns: ca_cv, ca_roc_folds, ca_histories, ca_best_epochs, ca_best_thresholds
     """
@@ -114,8 +132,7 @@ def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
         y_tr,       y_val        = y_cv[tr_i],        y_cv[val_i]
 
         X_clin_tr, X_clin_val = _maybe_scale_clin(X_clin_tr, X_clin_val)
-        if scale_aec:
-            X_aec_tr, X_aec_val = _maybe_scale(StandardScaler(), X_aec_tr, X_aec_val)
+        X_aec_tr, X_aec_val = _scale_aec_by_mode(X_aec_tr, X_aec_val, scale_aec)
 
         # ── CrossAttn ─────────────────────────────────────────
         tr_dl, val_dl = make_dual_loaders(X_clin_tr, X_aec_tr, y_tr, X_clin_val, X_aec_val, y_val)
@@ -162,10 +179,11 @@ def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv,
 
 def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv,
                                  y_cv, n_manufacturers,
-                                 scale_clin=True, scale_aec=True):
+                                 scale_clin=True, scale_aec="column"):
     """
     ClinAECScanCrossAttn에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC·학습 이력·최적 임계값을 반환.
-    AEC는 scale_aec=True(기본)일 때 StandardScaler로 표준화한다. ManufacturerModelName은 Embedding으로 처리하므로 스케일링하지 않는다.
+    scale_aec: "column" | "global" | "none" — AEC 정규화 모드 (기본: column-wise)
+    ManufacturerModelName은 Embedding으로 처리하므로 스케일링하지 않는다.
 
     Returns: ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs, ca3_best_thresholds
     """
@@ -185,8 +203,7 @@ def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv,
         y_tr,       y_val        = y_cv[tr_i],           y_cv[val_i]
 
         X_clin_tr, X_clin_val = _maybe_scale_clin(X_clin_tr, X_clin_val)
-        if scale_aec:
-            X_aec_tr, X_aec_val = _maybe_scale(StandardScaler(), X_aec_tr, X_aec_val)
+        X_aec_tr, X_aec_val = _scale_aec_by_mode(X_aec_tr, X_aec_val, scale_aec)
 
         # ── CrossAttn3 ────────────────────────────────────────
         tr_dl, val_dl = make_quad_loaders(

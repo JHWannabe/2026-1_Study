@@ -11,7 +11,7 @@ build_dataset.py에서 사전 적용되어 merged_features.xlsx에 저장된다.
   Model 3       : load_data_with_aec_meta()
 
 AEC 민감도 분석:
-  aec_variant() — 7가지 변환(해상도·범위·정규화·극단치 제외) 적용
+  aec_variant() — 4가지 변환(raw·std_scaled·norm·std_norm) 적용
 """
 import numpy as np
 import pandas as pd
@@ -19,6 +19,14 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 from config import DATA_PATH, AEC_SHEET, AEC_LEN, SEED, TEST_SIZE, SMI_THRESH_M, SMI_THRESH_F, AEC_SHUFFLE_SEED
+
+
+def _apply_crop(X_aec: np.ndarray, aec_len: int, crop_points: int | None) -> np.ndarray:
+    """중앙 crop_points개 포인트를 추출. None이거나 aec_len 이상이면 그대로 반환."""
+    if crop_points is None or crop_points >= aec_len:
+        return X_aec
+    start = (aec_len - crop_points) // 2
+    return X_aec[:, start:start + crop_points]
 
 
 def _make_label(row):
@@ -99,7 +107,8 @@ def split_data(X, y, sex):
     )
 
 
-def load_data_with_aec(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
+def load_data_with_aec(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
+                       crop_points: int | None = None):
     """Clinic + AEC 결합 데이터 로드. PatientID 기준 inner join."""
     df_meta = _load_filtered_meta()
 
@@ -113,13 +122,14 @@ def load_data_with_aec(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
     df["sex_enc"] = (df["PatientSex"] == "M").astype(int)
 
     X_clin = df[["PatientAge", "sex_enc", "BMI"]].values.astype(np.float32)
-    X_aec  = df[aec_cols].values.astype(np.float32)
+    X_aec  = _apply_crop(df[aec_cols].values.astype(np.float32), aec_len, crop_points)
     y      = df["label"].values.astype(np.int64)
     sex    = df["PatientSex"].values
     return X_clin, X_aec, y, sex
 
 
-def load_data_with_aec_unmatched(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
+def load_data_with_aec_unmatched(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
+                                 crop_points: int | None = None):
     """
     Model 2_2용: load_data_with_aec()와 동일한 데이터를 로드하되
     X_aec 행 순서를 AEC_SHUFFLE_SEED로 무작위 permutation하여
@@ -128,7 +138,8 @@ def load_data_with_aec_unmatched(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SH
     label(y)과 sex는 Clinic 데이터(X_clin) 기준으로 유지.
     AEC_SHUFFLE_SEED != SEED 이므로 우연한 재정렬이 발생하지 않는다.
     """
-    X_clin, X_aec, y, sex = load_data_with_aec(aec_len=aec_len, aec_sheet=aec_sheet)
+    X_clin, X_aec, y, sex = load_data_with_aec(aec_len=aec_len, aec_sheet=aec_sheet,
+                                                crop_points=crop_points)
     rng  = np.random.default_rng(AEC_SHUFFLE_SEED)
     perm = rng.permutation(len(y))
     return X_clin, X_aec[perm], y, sex
@@ -147,14 +158,15 @@ def split_data_dual(X_clin, X_aec, y, sex):
     )
 
 
-def load_data_with_aec_meta(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
+def load_data_with_aec_meta(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
+                            crop_points: int | None = None):
     """
     Clinic (Age, Sex, BMI) + Scanner (kVp, ManufacturerModelName) + AEC 결합.
 
     Returns
     -------
     X_clin      : (N, 3) float  — PatientAge, sex_enc, BMI
-    X_aec       : (N, aec_len) float
+    X_aec       : (N, aec_len or crop_points) float
     X_scan_mfr  : (N,) int64    — ManufacturerModelName (1-indexed 정수 인코딩)
     y, sex, n_manufacturers
     """
@@ -176,7 +188,7 @@ def load_data_with_aec_meta(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
     n_manufacturers = len(le.classes_)
 
     X_clin     = df[["PatientAge", "sex_enc", "BMI"]].values.astype(np.float32)
-    X_aec      = df[aec_cols].values.astype(np.float32)
+    X_aec      = _apply_crop(df[aec_cols].values.astype(np.float32), aec_len, crop_points)
     X_scan_mfr = df["mfr_enc"].values.astype(np.int64)
     y          = df["label"].values.astype(np.int64)
     sex        = df["PatientSex"].values
@@ -203,54 +215,34 @@ def aec_variant(X_aec: np.ndarray, variant: str):
     Parameters
     ----------
     X_aec   : (N, P) float32
-    variant : "len064" | "len128" | "len256" |
-              "crop80" | "crop60" | "norm" | "excl_extreme"
+    variant : "raw" | "std_scaled" | "norm" | "global_zscore"
 
     Returns
     -------
-    X_out : (N', K) float32  — 변환된 AEC
-    mask  : (N,) bool | None — excl_extreme 시 유효 샘플 마스크, 나머지는 None
+    X_out      : (N, P) float32  — 변환된 AEC
+    mask       : None             — 샘플 필터링 없음 (하위 호환용)
+    scale_mode : str              — "none" | "column" | "global"
+                                   호출자가 이 모드에 따라 AEC에 추가 스케일링을 적용한다.
+                                   "column" → StandardScaler (열 방향, train fold에서 fit)
+                                   "global" → Train set 전체의 단일 mean/std로 정규화
+                                   "none"   → 추가 스케일링 없음
     """
-    N, P = X_aec.shape
+    if variant == "raw":
+        return X_aec.copy(), None, "none"
 
-    # ── 해상도 변환 (선형 보간) ───────────────────────────────
-    # 단순 잘라내기(truncation)가 아닌 선형 보간으로 리샘플링해
-    # 원본 곡선 전체 구간을 균등하게 표현한다
-    if variant == "len064":
-        x_old = np.linspace(0, 1, P)
-        x_new = np.linspace(0, 1, 64)
-        return np.array([np.interp(x_new, x_old, row) for row in X_aec], dtype=np.float32), None
-    if variant == "len128":
-        return X_aec.copy(), None   # baseline: 원본 그대로 (AEC_LEN = 128)
-    if variant == "len256":
-        x_old = np.linspace(0, 1, P)
-        x_new = np.linspace(0, 1, 256)
-        return np.array([np.interp(x_new, x_old, row) for row in X_aec], dtype=np.float32), None
+    if variant == "std_scaled":
+        # StandardScaler(열 방향) — cross_val/evaluate에서 train fold 기준으로 적용
+        return X_aec.copy(), None, "column"
 
-    # ── 시간 범위 자르기 ─────────────────────────────────────
-    # 곡선 양끝은 스캐너 특성(램프업/다운)에 영향받으므로 제거 효과를 확인한다
-    if variant == "crop80":
-        s, e = int(0.1 * P), int(0.9 * P)
-        return X_aec[:, s:e], None
-    if variant == "crop60":
-        s, e = int(0.2 * P), int(0.8 * P)
-        return X_aec[:, s:e], None
-
-    # ── 곡선 내 정규화 ───────────────────────────────────────
-    # 스캐너별 절대 선량 수준 차이를 제거하고 곡선 형태만 남긴다
     if variant == "norm":
+        # 행 방향 z-score (환자별 절대 선량 수준 제거, 곡선 형태 보존)
         mu = X_aec.mean(axis=1, keepdims=True)
         sd = X_aec.std(axis=1,  keepdims=True) + 1e-8
-        return ((X_aec - mu) / sd).astype(np.float32), None
+        return ((X_aec - mu) / sd).astype(np.float32), None, "none"
 
-    # ── 극단 샘플 제외 ───────────────────────────────────────
-    # 곡선 면적(합산값)을 scan length proxy로 사용해 상하위 5% 제거
-    # 반환 mask로 X_clin·y·sex 배열도 동기화해야 한다 (main.py 참고)
-    if variant == "excl_extreme":
-        proxy = X_aec.sum(axis=1)
-        lo, hi = np.percentile(proxy, [5, 95])
-        mask = (proxy >= lo) & (proxy <= hi)
-        return X_aec[mask], mask
+    if variant == "global_zscore":
+        # Train set 전체의 단일 mean/std로 정규화 — cross_val/evaluate에서 적용
+        return X_aec.copy(), None, "global"
 
     raise ValueError(f"Unknown AEC variant: {variant!r}")
 

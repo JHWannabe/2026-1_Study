@@ -23,6 +23,9 @@ import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+import matplotlib as mpl
+mpl.rcParams['font.family'] = ['Malgun Gothic', 'DejaVu Sans']
+mpl.rcParams['axes.unicode_minus'] = False
 import seaborn as sns
 from sklearn.metrics import (
     roc_curve, roc_auc_score, confusion_matrix,
@@ -1170,22 +1173,19 @@ def plot_cam_aec(model, X_clin_te_s, X_aec_te_s, y_true_te,
     fig.savefig(path1, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    # ── Figure 2: Figure-13 스타일 — 선 자체를 CAM 값으로 coloring ──────────
-    # 클래스별 모든 샘플을 한 subplot에 겹쳐 그림.
-    # 각 선분의 색 = 해당 위치의 CAM 값 (blue=낮음, red=높음, jet colormap).
-    from matplotlib.collections import LineCollection
-    import matplotlib.colors as mcolors
+    # ── Figure 2: 클래스별 샘플 10개 — 샘플마다 고유색 ──────────────────────
+    _N_LINES   = 10
+    _line_cmap = plt.colormaps["tab10"]
+    _line_colors = [_line_cmap(i) for i in range(_N_LINES)]
+    _rng = np.random.default_rng(42)
 
-    _cmap = plt.colormaps["jet"]
-    _norm = mcolors.Normalize(vmin=0, vmax=100)   # 0~100 % 스케일
+    x_f = x_pts.astype(float)
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 5),
-                             constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(16, 5), constrained_layout=True)
     fig.suptitle(
         f"Class Activation Map — AEC  ·  {model_label}  [{aec_var}]",
         fontsize=12, fontweight="bold",
     )
-    x_f = x_pts.astype(float)
 
     for ax, (cls_idx, cls_name, _) in zip(axes, cls_info):
         mask_idx = np.where(y_true_te == cls_idx)[0]
@@ -1193,38 +1193,29 @@ def plot_cam_aec(model, X_clin_te_s, X_aec_te_s, y_true_te,
             ax.set_visible(False)
             continue
 
-        aec_cls = X_aec_te_s[mask_idx]   # (n_cls, n_aec)
-        cam_cls = cam[mask_idx] * 100     # 0~100 스케일
+        # 클래스당 최대 _N_LINES 개 무작위 선택 (재현성 seed=42)
+        if len(mask_idx) > _N_LINES:
+            sel_idx = _rng.choice(mask_idx, _N_LINES, replace=False)
+            sel_idx = np.sort(sel_idx)
+        else:
+            sel_idx = mask_idx
 
-        for i in range(len(mask_idx)):
-            y_f   = aec_cls[i].astype(float)          # (n_aec,)
-            cam_f = cam_cls[i].astype(float)           # (n_aec,)
+        aec_sel = X_aec_te_s[sel_idx]   # (n_sel, n_aec)
 
-            # 인접 포인트 쌍으로 선분 구성 → (n_aec-1, 2, 2)
-            pts  = np.stack([x_f, y_f], axis=1).reshape(-1, 1, 2)
-            segs = np.concatenate([pts[:-1], pts[1:]], axis=1)
+        for i, color in enumerate(zip(sel_idx, _line_colors)):
+            _, c = color
+            ax.plot(x_f, aec_sel[i].astype(float),
+                    color=c, linewidth=1.2, alpha=0.85, label=f"S{i + 1}")
 
-            # 각 선분의 색 = 두 끝 CAM 값의 평균
-            seg_cam = (cam_f[:-1] + cam_f[1:]) / 2
-
-            lc = LineCollection(list(segs), cmap=_cmap, norm=_norm,
-                                linewidth=0.9, alpha=0.65)
-            lc.set_array(seg_cam)
-            ax.add_collection(lc)
-
-        # y축은 데이터 범위에 맞춰 수동 설정 (add_collection은 autoscale 미적용)
-        pad = (aec_cls.max() - aec_cls.min()) * 0.08 + 0.05
+        pad = (aec_sel.max() - aec_sel.min()) * 0.08 + 0.05
         ax.set_xlim(x_f[0] - 0.5, x_f[-1] + 0.5)
-        ax.set_ylim(aec_cls.min() - pad, aec_cls.max() + pad)
-        ax.set_title(f"{cls_name}  (n={len(mask_idx)})", fontsize=10)
+        ax.set_ylim(aec_sel.min() - pad, aec_sel.max() + pad)
+        ax.set_title(
+            f"{cls_name}  ({len(sel_idx)} of {len(mask_idx)} samples)", fontsize=10
+        )
         ax.set_xlabel("AEC Position  (scan start → scan end)", fontsize=9)
         ax.set_ylabel("Scaled AEC Value", fontsize=9)
-
-    # 공통 컬러바 (0~100) — constrained_layout이 공간을 자동 확보
-    sm = plt.cm.ScalarMappable(cmap=_cmap, norm=_norm)
-    sm.set_array([])
-    fig.colorbar(sm, ax=axes.tolist(), label="CAM Contribution (%)",
-                 shrink=0.80, pad=0.02)
+        ax.legend(fontsize=7, ncol=2, loc="upper right")
 
     path2 = f"{out_dir}/cam_aec_lines.png"
     fig.savefig(path2, dpi=150, bbox_inches="tight")
@@ -1267,6 +1258,102 @@ def plot_cam_aec(model, X_clin_te_s, X_aec_te_s, y_true_te,
     print(f"  {path1}")   # cam_aec_mean.png
     print(f"  {path2}")   # cam_aec_lines.png  (Figure-13 style)
     print(f"  {path3}")   # cam_aec_heatmap.png
+
+
+def plot_individual_aec_normalization(X_aec_raw_cv, X_aec_raw_te, y_te, sex_te,
+                                      out_dir, n_per_class=3, seed=42):
+    """
+    환자 개별 AEC 신호 — 정규화 전후 비교 그래프.
+
+    test set에서 (진단 × 성별) 4그룹별 n_per_class명을 무작위 선택해 4가지 정규화
+    (① Raw / ② Column-wise / ③ Row-wise / ④ Global Z-score)를 나란히 시각화.
+    Column-wise와 Global Z-score는 train(CV) set으로 scaler를 fit한다.
+
+    색상 체계:
+      Blues 계열 (진한→연) = Male,   실선 = Sarcopenia
+      Reds  계열 (진한→연) = Female, 점선 = Normal
+
+    Parameters
+    ----------
+    X_aec_raw_cv : (N_cv, P)  — 정규화 전 원본 AEC (train/CV set)
+    X_aec_raw_te : (N_te, P)  — 정규화 전 원본 AEC (test set)
+    y_te         : (N_te,)    — test set 레이블 (0=Normal, 1=Sarco)
+    sex_te       : (N_te,)    — test set 성별 ("M" / "F")
+    out_dir      : str
+    n_per_class  : int         — 그룹별 표시 환자 수
+    """
+    from sklearn.preprocessing import StandardScaler
+
+    rng   = np.random.default_rng(seed)
+    n_aec = X_aec_raw_te.shape[1]
+    x_pos = np.arange(n_aec)
+
+    sc_col = StandardScaler().fit(X_aec_raw_cv)
+    g_mean = float(X_aec_raw_cv.mean())
+    g_std  = max(float(X_aec_raw_cv.std()), 1e-8)
+
+    def _row_norm(X):
+        mu = X.mean(axis=1, keepdims=True)
+        sd = X.std(axis=1, keepdims=True) + 1e-8
+        return (X - mu) / sd
+
+    transforms = [
+        ("① Raw\n(전처리 없음)",                    lambda X: X),
+        ("② Column-wise\n(StandardScaler, 열 방향)", lambda X: sc_col.transform(X)),
+        ("③ Row-wise\n(환자별 z-score, 행 방향)",     _row_norm),
+        ("④ Global Z-score\n(Train 전체 단일 μ/σ)",  lambda X: (X - g_mean) / g_std),
+    ]
+
+    # ── 4그룹 정의: (y, sex, 레이블, colormap, 선스타일, 색조 범위) ──
+    group_defs = [
+        (1, "M", "Sarco-M",  plt.cm.Blues, "-",  (0.55, 0.95)),
+        (1, "F", "Sarco-F",  plt.cm.Reds,  "-",  (0.55, 0.95)),
+        (0, "M", "Normal-M", plt.cm.Blues, "--", (0.30, 0.55)),
+        (0, "F", "Normal-F", plt.cm.Reds,  "--", (0.30, 0.55)),
+    ]
+
+    sex_arr = np.asarray(sex_te)
+    sel_idx_all, labels_all, colors_all, ls_all = [], [], [], []
+    for y_val, sex_val, grp_lbl, cmap_g, ls, (clo, chi) in group_defs:
+        mask = (y_te == y_val) & (sex_arr == sex_val)
+        pool = np.where(mask)[0]
+        n = min(n_per_class, len(pool))
+        if n == 0:
+            continue
+        chosen = np.sort(rng.choice(pool, n, replace=False))
+        shades = np.linspace(clo, chi, n) if n > 1 else [(clo + chi) / 2]
+        for j, idx in enumerate(chosen):
+            sel_idx_all.append(idx)
+            labels_all.append(f"{grp_lbl} #{j + 1}")
+            colors_all.append(cmap_g(shades[j]))
+            ls_all.append(ls)
+
+    n_plots = len(transforms)
+    fig, axes = plt.subplots(1, n_plots, figsize=(n_plots * 6.5, 5.5), sharey=False)
+    fig.suptitle(
+        "환자 개별 AEC 신호 — 정규화 전후 비교\n"
+        "실선=Sarcopenia  점선=Normal  │  파랑=Male  빨강=Female",
+        fontsize=12, fontweight="bold",
+    )
+
+    for ax, (title, tfm) in zip(axes, transforms):
+        X_tfm = tfm(X_aec_raw_te.astype(np.float64)).astype(np.float32)
+        for idx, lbl, col, ls in zip(sel_idx_all, labels_all, colors_all, ls_all):
+            ax.plot(x_pos, X_tfm[idx], color=col, linewidth=1.4, linestyle=ls,
+                    alpha=0.88, label=lbl)
+        ax.set_title(title, fontsize=10)
+        ax.set_xlabel("AEC Position\n(scan start → scan end)", fontsize=8)
+        ax.set_ylabel("AEC Value", fontsize=8)
+        ax.legend(fontsize=7, ncol=2, loc="best")
+        ax.grid(axis="y", alpha=0.3)
+        ax.set_xlim(-0.5, n_aec - 0.5)
+
+    fig.tight_layout()
+    out_path = f"{out_dir}/aec_individual_normalization_compare.png"
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  {out_path}")
+    return out_path
 
 
 def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,

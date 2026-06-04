@@ -13,16 +13,42 @@ PyTorch 모델 정의 및 학습·평가 유틸리티.
   CrossAttentionBlock   — Pre-norm Cross-Attention + FFN + Dropout
   MfrTokenizer          — ManufacturerModelName 정수 → Embedding 토큰
 
-손실함수: 모든 모델에 BCEWithLogitsLoss(pos_weight) 사용.
+손실함수: 모든 모델에 FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight) 사용.
 build_* 함수는 모델·손실함수·옵티마이저·스케줄러를 묶어 반환한다.
 """
 import numpy as np
+from typing import cast, Optional
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from torch.utils.data import Dataset, DataLoader
 
-from config import DEVICE, LR_RATE, EPOCHS, HIDDEN, N_BLOCKS, N_HEADS, BATCH_SIZE
+from config import DEVICE, LR_RATE, EPOCHS, HIDDEN, N_BLOCKS, N_HEADS, BATCH_SIZE, FOCAL_GAMMA, GRAD_CLIP, N_CA_LAYERS
+
+
+class FocalLossWithLogits(nn.Module):
+    """
+    Binary Focal Loss (logit 입력).
+
+    FL(p_t) = -(1 - p_t)^gamma * log(p_t)
+
+    pos_weight: BCEWithLogitsLoss와 동일하게 양성 클래스 가중치 적용 (클래스 불균형 보정).
+    gamma=0이면 가중 BCE와 동일.
+    """
+
+    def __init__(self, gamma: float = 2.0, pos_weight: torch.Tensor | None = None):
+        super().__init__()
+        self.gamma = gamma
+        self.register_buffer("pos_weight", pos_weight)
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        bce = F.binary_cross_entropy_with_logits(
+            logits, targets, pos_weight=cast(Optional[torch.Tensor], self.pos_weight), reduction="none"
+        )
+        p_t = torch.exp(-bce)
+        return ((1 - p_t) ** self.gamma * bce).mean()
 
 
 class TabularDataset(Dataset):
@@ -81,13 +107,13 @@ class ResNet1D(nn.Module):
 
 
 def build_resnet(y_tr_arr):
-    """ResNet1D 모델·BCEWithLogitsLoss(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+    """ResNet1D 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
     # sarcopenia(양성) 비율이 낮으므로 pos_weight = n_negative/n_positive 로 클래스 불균형 보정
     pos_w = torch.tensor(
         [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
     ).to(DEVICE)
     model = ResNet1D().to(DEVICE)
-    crit  = nn.BCEWithLogitsLoss(pos_weight=pos_w)
+    crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)
     opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
     return model, crit, opt, sched
@@ -109,6 +135,8 @@ def train_one_epoch(model, loader, crit, opt):
         opt.zero_grad()
         loss = crit(model(xb), yb)
         loss.backward()
+        if GRAD_CLIP > 0:
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=GRAD_CLIP)
         opt.step()
         total += loss.item() * len(yb)
     return total / len(loader.dataset)
@@ -260,8 +288,14 @@ class ClinAECCrossAttn(nn.Module):
         else:
             self.aec_encoder = ScalarFeatureTokenizer(num_aec_features, d_model)
 
-        self.clinical_to_aec = CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
-        self.aec_to_clinical = CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
+        self.clin_to_aec_layers = nn.ModuleList([
+            CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
+            for _ in range(N_CA_LAYERS)
+        ])
+        self.aec_to_clin_layers = nn.ModuleList([
+            CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
+            for _ in range(N_CA_LAYERS)
+        ])
 
         self.classifier = nn.Sequential(
             nn.Linear(d_model * 2, classifier_hidden_dim), nn.ReLU(),
@@ -271,17 +305,20 @@ class ClinAECCrossAttn(nn.Module):
 
     def forward(self, clinical_x: torch.Tensor, aec_x: torch.Tensor,
                 return_attention: bool = False):
-        c_tokens = self.clinical_tokenizer(clinical_x)  # (B, n_clin,       d_model)
-        a_tokens = self.aec_encoder(aec_x)               # (B, n_aec_tokens, d_model)
+        c_tokens = self.clinical_tokenizer(clinical_x)
+        a_tokens = self.aec_encoder(aec_x)
 
-        if return_attention:
-            c_fused, attn_c2a = self.clinical_to_aec(c_tokens, a_tokens, return_attention=True)
-            a_fused, attn_a2c = self.aec_to_clinical(a_tokens, c_tokens, return_attention=True)
-        else:
-            c_fused = self.clinical_to_aec(c_tokens, a_tokens)
-            a_fused = self.aec_to_clinical(a_tokens, c_tokens)
+        attn_c2a = attn_a2c = None
+        for i, (c2a, a2c) in enumerate(zip(self.clin_to_aec_layers, self.aec_to_clin_layers)):
+            last = (i == len(self.clin_to_aec_layers) - 1)
+            if return_attention and last:
+                c_tokens, attn_c2a = c2a(c_tokens, a_tokens, return_attention=True)
+                a_tokens, attn_a2c = a2c(a_tokens, c_tokens, return_attention=True)
+            else:
+                c_tokens = c2a(c_tokens, a_tokens)
+                a_tokens = a2c(a_tokens, c_tokens)
 
-        fused = torch.cat([c_fused.mean(1), a_fused.mean(1)], dim=-1)  # (B, d_model*2)
+        fused = torch.cat([c_tokens.mean(1), a_tokens.mean(1)], dim=-1)  # (B, d_model*2)
         logits = self.classifier(fused).squeeze(-1)
 
         if return_attention:
@@ -291,7 +328,7 @@ class ClinAECCrossAttn(nn.Module):
 
 def build_cross_attn(y_tr_arr, num_clinical_features=3, num_aec_features=256,
                      aec_encoder='resnet'):
-    """ClinAECCrossAttn 모델·BCEWithLogitsLoss(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+    """ClinAECCrossAttn 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
     pos_w = torch.tensor(
         [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
     ).to(DEVICE)
@@ -300,7 +337,7 @@ def build_cross_attn(y_tr_arr, num_clinical_features=3, num_aec_features=256,
         num_aec_features=num_aec_features,
         aec_encoder=aec_encoder,
     ).to(DEVICE)
-    crit  = nn.BCEWithLogitsLoss(pos_weight=pos_w)
+    crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)
     opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
     return model, crit, opt, sched
@@ -381,8 +418,14 @@ class ClinAECScanCrossAttn(nn.Module):
         self.mfr_tokenizer      = MfrTokenizer(n_manufacturers, d_model)
         self.aec_encoder        = ResNet1DEncoder(d_model=d_model, n_tokens=n_aec_tokens)
 
-        self.cs_to_aec = CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
-        self.aec_to_cs = CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
+        self.cs_to_aec_layers = nn.ModuleList([
+            CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
+            for _ in range(N_CA_LAYERS)
+        ])
+        self.aec_to_cs_layers = nn.ModuleList([
+            CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
+            for _ in range(N_CA_LAYERS)
+        ])
 
         self.classifier = nn.Sequential(
             nn.Linear(d_model * 2, classifier_hidden_dim), nn.ReLU(),
@@ -397,14 +440,17 @@ class ClinAECScanCrossAttn(nn.Module):
         a_tokens  = self.aec_encoder(aec_x)                # (B, n_aec_tokens, d_model)
         cs_tokens = torch.cat([c_tokens, s_tokens], dim=1) # (B, 4, d_model)
 
-        if return_attention:
-            cs_fused, attn_cs2a = self.cs_to_aec(cs_tokens, a_tokens, return_attention=True)
-            a_fused,  attn_a2cs = self.aec_to_cs(a_tokens, cs_tokens, return_attention=True)
-        else:
-            cs_fused = self.cs_to_aec(cs_tokens, a_tokens)
-            a_fused  = self.aec_to_cs(a_tokens, cs_tokens)
+        attn_cs2a = attn_a2cs = None
+        for i, (cs2a, a2cs) in enumerate(zip(self.cs_to_aec_layers, self.aec_to_cs_layers)):
+            last = (i == len(self.cs_to_aec_layers) - 1)
+            if return_attention and last:
+                cs_tokens, attn_cs2a = cs2a(cs_tokens, a_tokens, return_attention=True)
+                a_tokens,  attn_a2cs = a2cs(a_tokens, cs_tokens, return_attention=True)
+            else:
+                cs_tokens = cs2a(cs_tokens, a_tokens)
+                a_tokens  = a2cs(a_tokens, cs_tokens)
 
-        fused  = torch.cat([cs_fused.mean(1), a_fused.mean(1)], dim=-1)  # (B, d_model*2)
+        fused  = torch.cat([cs_tokens.mean(1), a_tokens.mean(1)], dim=-1)  # (B, d_model*2)
         logits = self.classifier(fused).squeeze(-1)
 
         if return_attention:
@@ -413,14 +459,14 @@ class ClinAECScanCrossAttn(nn.Module):
 
 
 def build_cross_attn3(y_tr_arr, n_manufacturers):
-    """ClinAECScanCrossAttn 모델·BCEWithLogitsLoss(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+    """ClinAECScanCrossAttn 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
     pos_w = torch.tensor(
         [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
     ).to(DEVICE)
     model = ClinAECScanCrossAttn(
         n_manufacturers=n_manufacturers,
     ).to(DEVICE)
-    crit  = nn.BCEWithLogitsLoss(pos_weight=pos_w)
+    crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)
     opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
     return model, crit, opt, sched
@@ -435,6 +481,8 @@ def train_cross3_epoch(model, loader, crit, opt):
         opt.zero_grad()
         loss = crit(model(xc, xa, xmfr), yb)
         loss.backward()
+        if GRAD_CLIP > 0:
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=GRAD_CLIP)
         opt.step()
         total += loss.item() * len(yb)
     return total / len(loader.dataset)
@@ -463,6 +511,8 @@ def train_cross_epoch(model, loader, crit, opt):
         opt.zero_grad()
         loss = crit(model(xc, xa), yb)
         loss.backward()
+        if GRAD_CLIP > 0:
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=GRAD_CLIP)
         opt.step()
         total += loss.item() * len(yb)
     return total / len(loader.dataset)

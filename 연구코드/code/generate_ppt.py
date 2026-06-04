@@ -16,9 +16,9 @@ from parse_md import load_scaling, load_model_results
 # ── 경로 ──────────────────────────────────────────────────────
 BASE   = "C:/Users/jhjun/OneDrive/Desktop/2026-1_Study/연구코드/results/0529/liver_pubis_32"
 M1     = f"{BASE}/model_1"
-M2N    = f"{BASE}/model_2/norm"
-M3N    = f"{BASE}/model_3/norm"
-M22N   = f"{BASE}/model_2_2/norm"
+M2N    = f"{BASE}/model_2/std_norm"
+M3N    = f"{BASE}/model_3/std_norm"
+M22N   = f"{BASE}/model_2_2/std_norm"
 CMP128 = f"{BASE}/comparison"
 
 # ── 데이터 로딩 ──────────────────────────────────────────────
@@ -45,32 +45,32 @@ def _mv(v):
     """M1 의 variant 키를 항상 M1_VAR 로 변환."""
     return M1_VAR if v == 'M1' else v
 
-def fa(m, v='norm'):
+def fa(m, v='std_norm'):
     return f"{_v(m, _mv(m) if m == 'M1' else v, 'AUC-ROC'):.4f}"
 
-def fci(m, v='norm', k='AUC-ROC'):
+def fci(m, v='std_norm', k='AUC-ROC'):
     v_ = M1_VAR if m == 'M1' else v
     lo, hi = _c(m, v_, k)
     return f"[{lo:.3f},{hi:.3f}]"
 
-def fm(m, v='norm', k='AUPRC'):
+def fm(m, v='std_norm', k='AUPRC'):
     v_ = M1_VAR if m == 'M1' else v
     return f"{_v(m, v_, k):.4f}"
 
-def fp(comp, v='norm'):
+def fp(comp, v='std_norm'):
     """DeLong p-value + sig 문자열."""
     d = _d(comp, v)
     pv, sig = d['pval'], d['sig']
     return f"p<0.001 {sig}" if pv < 0.001 else f"p={pv:.3f} {sig}"
 
-def fdelta(comp, v='norm'):
+def fdelta(comp, v='std_norm'):
     """DeLong Δ AUC (B-A) 문자열."""
     val = _d(comp, v)['delta']
     if val is None:
         return "—"
     return f"+{val:.3f}" if val >= 0 else f"−{abs(val):.3f}"
 
-def sig_col(comp, v='norm'):
+def sig_col(comp, v='std_norm'):
     """유의성 표시 색상."""
     sig = _d(comp, v)['sig']
     if sig in ('***', '**', '*'):
@@ -107,7 +107,7 @@ def ncrow(v):
     return (v, f"{d['auc_a']:.4f}", f"{d['auc_b']:.4f}", dstr,
             "<0.001" if pv < 0.001 else f"{pv:.3f}", d['sig'])
 
-def brow(label, ma, mb, v_a=None, v_b='norm'):
+def brow(label, ma, mb, v_a=None, v_b='std_norm'):
     """Bootstrap CI 비교 행 4개 반환 (AUC-ROC / AUPRC / Brier / F1)."""
     va = M1_VAR if ma == 'M1' else (v_a or v_b)
     vb = v_b
@@ -299,17 +299,17 @@ for i,(row,fill) in enumerate(zip([
 txt(s, "연령: 56.95±11.86세  |  BMI: 23.58±3.17 kg/m²  |  Train:Test = 8:2",
     0.5, 2.55, 5.5, 0.28, sz=11, color=C_MGR, italic=True)
 
-txt(s, "AEC 전처리 조건 (5종)", 0.5, 2.97, 5.5, 0.33, sz=15, bold=True)
+txt(s, "AEC 전처리 조건 (4종)", 0.5, 2.97, 5.5, 0.33, sz=15, bold=True)
 hline(s, 0.5, 3.32, 5.5, color=C_TEAL)
 for i,(k,v) in enumerate([
-    ("norm",         "행 방향 z-score 정규화 (곡선 형태만 보존)"),
-    ("crop80/60",    "중앙 80% / 60% 구간만 사용 (양끝 제거)"),
-    ("len128",       "시퀀스 길이 128pt 선형 보간"),
-    ("excl_extreme", "scan-length 상하위 5% 극단 샘플 제외"),
+    ("raw",        "전처리 없음 — 원본 AEC 절대값 그대로"),
+    ("std_scaled", "StandardScaler (열 방향 표준화만)"),
+    ("norm",       "행 방향 z-score만 (환자별 절대 선량 제거)"),
+    ("std_norm",   "StandardScaler + 행 방향 z-score"),
 ]):
     txt(s, k,  0.5, 3.41+i*0.4, 1.7, 0.38, sz=12, bold=True, color=C_BLUE)
     txt(s, v,  2.2, 3.41+i*0.4, 3.9, 0.38, sz=12, color=C_DARK)
-txt(s, "AEC 128pt × 5 전처리 조건 = 5 case",
+txt(s, "AEC 128pt × 4 전처리 조건 = 4 case",
     0.5, 5.05, 5.5, 0.3, sz=11, color=C_MGR, italic=True)
 
 card(s, 6.5, 0.99, 5.9, 3.31)
@@ -368,7 +368,7 @@ snum(s, 4)
 # SLIDE 5 — 전체 모델 성능 비교 개요
 # ═══════════════════════════════════════════════════════════════
 s = add_slide()
-hdr(s, "전체 모델 성능 비교 개요  (AEC 128pt + norm)",
+hdr(s, "전체 모델 성능 비교 개요  (AEC 128pt + std_norm)",
     "M1 → M2 → M3 순차 비교  |  Bootstrap 95% CI  |  Brier → Calibration 참조")
 
 hx = [0.3,1.9,3.05,4.6,5.75,6.85,7.95,9.65,11.35]
@@ -400,14 +400,14 @@ for i,(row,fill) in enumerate(zip(rows_ov, fills)):
 
 # 비교 핵심 카드
 m1_aupr = _v('M1', M1_VAR, 'AUPRC')
-m2_aupr = _v('M2', 'norm', 'AUPRC')
+m2_aupr = _v('M2', 'std_norm', 'AUPRC')
 aupr_pct = (m2_aupr - m1_aupr) / m1_aupr * 100 if m1_aupr else 0
-excl_delta = _d('M2vM22','excl_extreme')['auc_a'] - _d('M2vM22','excl_extreme')['auc_b']
+std_norm_m2_m22_delta = _d('M2vM22','std_norm')['auc_a'] - _d('M2vM22','std_norm')['auc_b']
 f_m1 = M1res['sex'].get('F',{}).get('AUC-ROC', 0.0)
 f_m3 = M3res['sex'].get('F',{}).get('AUC-ROC', 0.0)
 
-txt(s, "ROC 비교 (M1·M2·M2₂·M3 / norm)", 0.3, 3.87, 4.5, 0.3, sz=12, bold=True)
-pic(s, img(CMP128, "roc_all_models_norm.png"), 0.3, 4.19, 4.5, 3.11)
+txt(s, "ROC 비교 (M1·M2·M2₂·M3 / std_norm)", 0.3, 3.87, 4.5, 0.3, sz=12, bold=True)
+pic(s, img(CMP128, "roc_all_models_std_norm.png"), 0.3, 4.19, 4.5, 3.11)
 
 card(s, 5.0, 3.87, 4.1, 3.43, fill=RGBColor(0xE8,0xF8,0xE8))
 box(s, 5.0, 3.87, 0.1, 3.43, fill=C_GRN)
@@ -415,14 +415,14 @@ txt(s, "비교 핵심", 5.2, 3.95, 3.7, 0.32, sz=14, bold=True, color=C_GRN)
 for i,t in enumerate([
     f"• M1→M2: Δ AUC {fdelta('M1vM2')}, {fp('M1vM2')}",
     f"• M1→M3: Δ AUC {fdelta('M1vM3')}, {fp('M1vM3')}",
-    f"• M2→M3 norm: Δ={fdelta('M2vM3')}, p={_d('M2vM3','norm')['pval']:.3f} {_d('M2vM3','norm')['sig']}",
+    f"• M2→M3 std_norm: Δ={fdelta('M2vM3')}, p={_d('M2vM3','std_norm')['pval']:.3f} {_d('M2vM3','std_norm')['sig']}",
     f"• AUPRC: M1({m1_aupr:.3f})→M2({m2_aupr:.3f}) {aupr_pct:+.1f}%",
-    f"• M2>M2_2 excl_extreme: Δ={excl_delta:.3f} ***",
+    f"• M2>M2_2 std_norm: Δ={std_norm_m2_m22_delta:.3f}",
     f"• 여성 AUC: M1({f_m1:.3f})→M3({f_m3:.3f}) 큰 개선",
 ]):
     txt(s, t, 5.2, 4.36+i*0.45, 3.7, 0.42, sz=12, color=C_DARK)
 
-calib_banner(s, 9.25, 3.87, 3.85, f"M3 norm  (Brier {fm('M3',k='Brier')})")
+calib_banner(s, 9.25, 3.87, 3.85, f"M3 std_norm  (Brier {fm('M3',k='Brier')})")
 pic(s, img(M3N, "calibration.png"), 9.25, 4.22, 3.85, 3.08)
 snum(s, 5)
 
@@ -431,7 +431,7 @@ snum(s, 5)
 # ═══════════════════════════════════════════════════════════════
 s = add_slide()
 hdr(s, "M1 vs M2 비교 — AEC 신호의 기여",
-    f"Clinic Only(LR) vs Clinic+AEC(CrossAttn)  |  norm: {fp('M1vM2')}  |  Brier → Calibration 참조")
+    f"Clinic Only(LR) vs Clinic+AEC(CrossAttn)  |  std_norm: {fp('M1vM2')}  |  Brier → Calibration 참조")
 
 card(s, 0.3, 0.99, 6.0, 4.52)
 txt(s, "DeLong Test — M1(LR) vs M2(CrossAttn)  [ AEC 128pt ]",
@@ -439,14 +439,14 @@ txt(s, "DeLong Test — M1(LR) vs M2(CrossAttn)  [ AEC 128pt ]",
 hline(s, 0.5, 1.42, 5.6, color=C_BLUE)
 dx = [0.45, 2.05, 3.1, 4.15, 5.2]; dw = [1.55, 1.0, 1.0, 1.0, 0.95]
 trow_h(s, ["시나리오","M1 AUC","M2 AUC","Δ AUC","p-val"], dx, dw, 1.47)
-for i, variant in enumerate(['norm','len128','crop80','crop60']):
+for i, variant in enumerate(['raw','std_scaled','norm','std_norm']):
     row = drow('M1vM2', variant)
     sc = sig_col('M1vM2', variant)
     fill = C_WHT if i%2==0 else C_LGR
     trow_d(s, row, dx, dw, 1.79+i*0.4, ht=0.4, fill=fill,
            colors=[C_DARK,C_DARK,C_BLUE,C_BLUE,sc])
 
-txt(s, "Bootstrap 95% CI — norm 기준",
+txt(s, "Bootstrap 95% CI — std_norm 기준",
     0.5, 3.49, 5.6, 0.3, sz=12, bold=True, color=C_DARK)
 hline(s, 0.5, 3.81, 5.6, color=C_TEAL, h=0.03)
 bx2 = [0.45, 1.85, 3.25, 4.7]; bw2 = [1.35, 1.35, 1.4, 1.25]
@@ -454,10 +454,10 @@ trow_h(s, ["지표","M1","M2","Δ(M2-M1)"], bx2, bw2, 3.87, ht=0.28)
 for i,(row,fill) in enumerate(zip(brow("",  'M1','M2'), [C_WHT,C_LGR,C_WHT,C_LGR])):
     trow_d(s, row, bx2, bw2, 4.17+i*0.33, ht=0.33, fill=fill)
 
-txt(s, "ROC 비교  (norm / M1·M2·M2₂·M3)", 6.5, 0.99, 6.6, 0.3, sz=12, bold=True)
-pic(s, img(CMP128, "roc_all_models_norm.png"), 6.5, 1.34, 6.6, 3.28)
+txt(s, "ROC 비교  (std_norm / M1·M2·M2₂·M3)", 6.5, 0.99, 6.6, 0.3, sz=12, bold=True)
+pic(s, img(CMP128, "roc_all_models_std_norm.png"), 6.5, 1.34, 6.6, 3.28)
 
-calib_banner(s, 6.5, 4.74, 6.6, f"M2  norm  (Brier {fm('M2',k='Brier')})")
+calib_banner(s, 6.5, 4.74, 6.6, f"M2  std_norm  (Brier {fm('M2',k='Brier')})")
 pic(s, img(M2N, "calibration.png"), 6.5, 5.09, 6.6, 2.21)
 snum(s, 6)
 
@@ -466,31 +466,31 @@ snum(s, 6)
 # ═══════════════════════════════════════════════════════════════
 s = add_slide()
 hdr(s, "M1 vs M3 비교 — Scanner + AEC 조합 효과",
-    f"Clinic Only(LR) vs Clinic+Scanner+AEC(CrossAttn3)  |  norm: {fp('M1vM3')} — 통계적 유의")
+    f"Clinic Only(LR) vs Clinic+Scanner+AEC(CrossAttn3)  |  std_norm: {fp('M1vM3')} — 통계적 유의")
 
 card(s, 0.3, 0.99, 6.0, 4.52)
 txt(s, "DeLong Test — M1(LR) vs M3(CrossAttn3)  [ AEC 128pt ]",
     0.5, 1.07, 5.6, 0.33, sz=14, bold=True)
 hline(s, 0.5, 1.42, 5.6, color=C_ORG)
 trow_h(s, ["시나리오","M1 AUC","M3 AUC","Δ AUC","p-val"], dx, dw, 1.47)
-for i, variant in enumerate(['norm','len128','crop80','crop60']):
+for i, variant in enumerate(['raw','std_scaled','norm','std_norm']):
     row = drow('M1vM3', variant)
     sc = sig_col('M1vM3', variant)
     fill = C_WHT if i%2==0 else C_LGR
     trow_d(s, row, dx, dw, 1.79+i*0.4, ht=0.4, fill=fill,
            colors=[C_DARK,C_DARK,C_ORG,C_BLUE,sc])
 
-txt(s, "Bootstrap 95% CI — norm 기준",
+txt(s, "Bootstrap 95% CI — std_norm 기준",
     0.5, 3.49, 5.6, 0.3, sz=12, bold=True)
 hline(s, 0.5, 3.81, 5.6, color=C_ORG, h=0.03)
 trow_h(s, ["지표","M1","M3","Δ(M3-M1)"], bx2, bw2, 3.87, ht=0.28)
 for i,(row,fill) in enumerate(zip(brow("", 'M1','M3'), [C_WHT,C_LGR,C_WHT,C_LGR])):
     trow_d(s, row, bx2, bw2, 4.17+i*0.33, ht=0.33, fill=fill)
 
-txt(s, "ROC 비교  (norm / M1·M2·M2₂·M3)", 6.5, 0.99, 6.6, 0.3, sz=12, bold=True)
-pic(s, img(CMP128, "roc_all_models_norm.png"), 6.5, 1.34, 6.6, 3.28)
+txt(s, "ROC 비교  (std_norm / M1·M2·M2₂·M3)", 6.5, 0.99, 6.6, 0.3, sz=12, bold=True)
+pic(s, img(CMP128, "roc_all_models_std_norm.png"), 6.5, 1.34, 6.6, 3.28)
 
-calib_banner(s, 6.5, 4.74, 6.6, f"M3  norm  (Brier {fm('M3',k='Brier')})")
+calib_banner(s, 6.5, 4.74, 6.6, f"M3  std_norm  (Brier {fm('M3',k='Brier')})")
 pic(s, img(M3N, "calibration.png"), 6.5, 5.09, 6.6, 2.21)
 snum(s, 7)
 
@@ -499,7 +499,7 @@ snum(s, 7)
 # ═══════════════════════════════════════════════════════════════
 s = add_slide()
 hdr(s, "M2 vs M3 비교 — Scanner(MFR) 추가 효과",
-    f"norm: {fp('M2vM3','norm')} | crop60: {fp('M2vM3','crop60')} (M2>M3) | 조건별 혼재")
+    f"std_norm: {fp('M2vM3','std_norm')} | norm: {fp('M2vM3','norm')} | 조건별 비교")
 
 card(s, 0.3, 0.99, 7.5, 4.31)
 txt(s, "DeLong Test — M2(CrossAttn) vs M3(CrossAttn3)  [ 전 조건 ]",
@@ -508,29 +508,28 @@ hline(s, 0.5, 1.42, 7.1, color=C_MGR)
 mx = [0.45, 2.3, 3.45, 4.6, 5.75, 6.85]
 mw = [1.8,  1.1, 1.1,  1.1, 1.05, 0.9]
 trow_h(s, ["조건","M2 AUC","M3 AUC","Δ AUC","p-val","sig"], mx, mw, 1.47)
-for i, variant in enumerate(['norm','crop60','crop80','len128','excl_extreme']):
+for i, variant in enumerate(['raw','std_scaled','norm','std_norm']):
     row = mrow('M2vM3', variant)
     sc = sig_col('M2vM3', variant)
     fill = C_WHT if i%2==0 else C_LGR
     trow_d(s, row, mx, mw, 1.79+i*0.37, ht=0.37, fill=fill,
            colors=[C_DARK]*4+[sc, sc])
 
-txt(s, "ROC — norm  (M2 vs M3 차이)", 8.0, 0.99, 5.1, 0.3, sz=12, bold=True)
-pic(s, img(CMP128,"roc_all_models_norm.png"), 8.0, 1.31, 5.1, 2.68)
+txt(s, "ROC — std_norm  (M2 vs M3 차이)", 8.0, 0.99, 5.1, 0.3, sz=12, bold=True)
+pic(s, img(CMP128,"roc_all_models_std_norm.png"), 8.0, 1.31, 5.1, 2.68)
 
 card(s, 8.0, 4.14, 5.1, 3.11, fill=RGBColor(0xF5,0xF5,0xF5))
 box(s, 8.0, 4.14, 0.1, 3.11, fill=C_MGR)
 txt(s, "해석", 8.2, 4.22, 4.7, 0.33, sz=14, bold=True, color=C_MGR)
-m2n_auc = _d('M2vM3','norm')['auc_a']
-m3n_auc = _d('M2vM3','norm')['auc_b']
-m2c_auc = _d('M2vM3','crop60')['auc_a']
-m3c_auc = _d('M2vM3','crop60')['auc_b']
+m2sn_auc = _d('M2vM3','std_norm')['auc_a']
+m3sn_auc = _d('M2vM3','std_norm')['auc_b']
+m2n_auc  = _d('M2vM3','norm')['auc_a']
+m3n_auc  = _d('M2vM3','norm')['auc_b']
 for i,t in enumerate([
-    f"• norm: M3({m3n_auc:.3f})>M2({m2n_auc:.3f}) Δ={fdelta('M2vM3','norm')}, {fp('M2vM3','norm')}",
-    f"• crop60: M2({m2c_auc:.3f})>M3({m3c_auc:.3f}) Δ={fdelta('M2vM3','crop60')}, {fp('M2vM3','crop60')}",
-    "• crop80/len128/excl_extreme: ns — 방향 혼재",
-    "• norm은 M3 유리(†), crop60는 M2 유리(*)",
-    "• 조건별 방향 불일치 → AEC 처리가 핵심",
+    f"• std_norm: M3({m3sn_auc:.3f}) vs M2({m2sn_auc:.3f}) Δ={fdelta('M2vM3','std_norm')}, {fp('M2vM3','std_norm')}",
+    f"• norm: M3({m3n_auc:.3f}) vs M2({m2n_auc:.3f}) Δ={fdelta('M2vM3','norm')}, {fp('M2vM3','norm')}",
+    f"• raw: {fp('M2vM3','raw')} | std_scaled: {fp('M2vM3','std_scaled')}",
+    "• 조건별 방향 불일치 → AEC 전처리 방식이 핵심",
     "• 추후 n↑ → M2 vs M3 재검증 권장",
 ]):
     txt(s, t, 8.2, 4.64+i*0.38, 4.7, 0.36, sz=11.5, color=C_DARK)
@@ -560,21 +559,21 @@ hline(s, 0.5, 2.97, 7.1, color=C_TEAL)
 nx = [0.45, 2.5, 3.7, 5.0, 5.95, 6.95]
 nw = [2.0, 1.15, 1.25, 0.9, 0.95, 0.9]
 trow_h(s, ["조건","M2 AUC","M2_2 AUC","Δ(M2-M2₂)","p-val","sig"], nx, nw, 3.02)
-for i, variant in enumerate(['norm','len128','crop80','crop60','excl_extreme']):
+for i, variant in enumerate(['raw','std_scaled','norm','std_norm']):
     row = ncrow(variant)
     sc = C_RED if row[-1] not in ('ns','†') else (C_ORG if row[-1]=='†' else C_MGR)
     fill = C_WHT if i%2==0 else C_LGR
     trow_d(s, row, nx, nw, 3.34+i*0.37, ht=0.37, fill=fill,
            colors=[C_DARK]*4+[sc,sc])
 
-txt(s, "ROC — excl_extreme (가장 극적인 차이)",
+txt(s, "ROC — std_norm  (M2 vs M2_2 비교)",
     8.0, 0.99, 5.1, 0.3, sz=12, bold=True)
-pic(s, img(CMP128,"roc_all_models_excl_extreme.png"), 8.0, 1.31, 5.1, 2.55)
+pic(s, img(CMP128,"roc_all_models_std_norm.png"), 8.0, 1.31, 5.1, 2.55)
 
-d_excl = _d('M2vM22','excl_extreme')
-excl_m2  = d_excl['auc_a']
-excl_m22 = d_excl['auc_b']
-excl_dv  = excl_m2 - excl_m22
+d_sn_nc = _d('M2vM22','std_norm')
+sn_m2   = d_sn_nc['auc_a']
+sn_m22  = d_sn_nc['auc_b']
+sn_dv   = sn_m2 - sn_m22
 
 d_norm_nc = _d('M2vM22','norm')
 nc_dir = "M2_2>M2" if d_norm_nc['delta'] > 0 else "M2>M2_2"
@@ -583,11 +582,11 @@ card(s, 8.0, 3.99, 5.1, 2.71, fill=RGBColor(0xFF,0xF3,0xE0))
 box(s, 8.0, 3.99, 0.1, 2.71, fill=C_ORG)
 txt(s, "해석", 8.2, 4.07, 4.7, 0.3, sz=14, bold=True, color=C_ORG)
 for i,t in enumerate([
-    f"• excl_extreme: M2({excl_m2:.3f}) vs M2_2({excl_m22:.3f}) Δ={excl_dv:.3f} ***",
+    f"• std_norm: M2({sn_m2:.3f}) vs M2_2({sn_m22:.3f}) Δ={sn_dv:.3f} {_d('M2vM22','std_norm')['sig']}",
     "  → AEC는 개인별 고유 신호 — 단순 체형 proxy 아님",
-    f"• norm 조건: {nc_dir} (ns) — 일반 조건 매칭 미확인",
-    "• 극단 샘플 제거 후에야 AEC 고유 정보가 두드러짐",
-    "  → AEC 신호의 개인 특이성은 극단 체형에서 강조",
+    f"• norm 조건: {nc_dir} ({_d('M2vM22','norm')['sig']})",
+    f"• raw: {fp('M2vM22','raw')} | std_scaled: {fp('M2vM22','std_scaled')}",
+    "• 전처리 조건에 따라 매칭 효과 강도 변화",
 ]):
     txt(s, t, 8.2, 4.45+i*0.38, 4.7, 0.36, sz=11.5, color=C_DARK)
 snum(s, 9)
@@ -596,15 +595,14 @@ snum(s, 9)
 # SLIDE 10 — AEC 전처리 조건별 ROC 비교 (5종)
 # ═══════════════════════════════════════════════════════════════
 s = add_slide()
-hdr(s, "AEC 전처리 조건별 ROC 비교 — 5종",
+hdr(s, "AEC 전처리 조건별 ROC 비교 — 4종",
     "M1·M2·M2₂·M3 포함  |  AEC 128pt  |  각 전처리 조건의 성능 차이 비교")
 
 panels = [
-    ("norm",         "norm — 행 방향 정규화",      C_BLUE),
-    ("crop80",       "crop80 — 중앙 80% 구간",     C_TEAL),
-    ("crop60",       "crop60 — 중앙 60% 구간",     C_ORG),
-    ("len128",       "len128 — 선형 보간 128pt",   C_GRN),
-    ("excl_extreme", "excl_extreme — 극단 제외",   C_RED),
+    ("raw",        "raw — 원본 AEC",                C_BLUE),
+    ("std_scaled", "std_scaled — StandardScaler",   C_TEAL),
+    ("norm",       "norm — 행 방향 z-score",         C_ORG),
+    ("std_norm",   "std_norm — Std+RowNorm",         C_GRN),
 ]
 positions = [(0.25, 0.99),(4.6, 0.99),(8.95, 0.99),(0.25, 4.09),(4.6, 4.09)]
 for (var,label,col),(x0,y0) in zip(panels[:3], positions[:3]):
@@ -617,25 +615,23 @@ for (var,label,col),(x0,y0) in zip(panels[3:], positions[3:]):
     pic(s, img(CMP128,f"roc_all_models_{var}.png"), x0, y0+0.38, 4.15, 2.97)
 
 # 요약 카드
-m3_norm_auc  = _v('M3','norm','AUC-ROC')
-m2_crop60    = _v('M2','crop60','AUC-ROC')
-m3_crop60    = _v('M3','crop60','AUC-ROC')
-m2_len128    = _v('M2','len128','AUC-ROC')
-m3_len128    = _v('M3','len128','AUC-ROC')
-m2_crop80    = _v('M2','crop80','AUC-ROC')
-m3_crop80    = _v('M3','crop80','AUC-ROC')
-m22_excl_auc = _v('M2_2','excl_extreme','AUC-ROC')
+m2_raw       = _v('M2','raw','AUC-ROC')
+m3_raw       = _v('M3','raw','AUC-ROC')
+m2_std       = _v('M2','std_scaled','AUC-ROC')
+m3_std       = _v('M3','std_scaled','AUC-ROC')
+m2_norm      = _v('M2','norm','AUC-ROC')
+m3_norm      = _v('M3','norm','AUC-ROC')
+m2_stdnorm   = _v('M2','std_norm','AUC-ROC')
+m3_stdnorm   = _v('M3','std_norm','AUC-ROC')
 
-card(s, 8.95, 4.09, 4.15, 3.35, fill=RGBColor(0xF0,0xF4,0xF8))
-txt(s, "조건별 요약", 9.1, 4.17, 3.8, 0.3, sz=13, bold=True)
-hline(s, 9.1, 4.49, 3.8, color=C_BLUE)
+card(s, 4.6, 4.09, 4.15, 3.35, fill=RGBColor(0xF0,0xF4,0xF8))
+txt(s, "조건별 요약", 4.75, 4.17, 3.8, 0.3, sz=13, bold=True)
+hline(s, 4.75, 4.49, 3.8, color=C_BLUE)
 for i,t in enumerate([
-    f"• norm: M3({m3_norm_auc:.3f}) {fp('M1vM3','norm')}",
-    f"• len128: M2({m2_len128:.3f}) M3({m3_len128:.3f}), ns",
-    f"• crop80: M2({m2_crop80:.3f}) M3({m3_crop80:.3f}), ns",
-    f"• crop60: M2({m2_crop60:.3f})>M3({m3_crop60:.3f}), {fp('M2vM3','crop60')}",
-    f"• excl_extreme: M2 vs M2_2 p<0.001 ***",
-    f"  (M2_2 AUC {m22_excl_auc:.3f} — 매칭 효과 검증)",
+    f"• raw: M2({m2_raw:.3f}) M3({m3_raw:.3f}), {fp('M1vM2','raw')}",
+    f"• std_scaled: M2({m2_std:.3f}) M3({m3_std:.3f}), {fp('M1vM2','std_scaled')}",
+    f"• norm: M2({m2_norm:.3f}) M3({m3_norm:.3f}), {fp('M1vM3','norm')}",
+    f"• std_norm: M2({m2_stdnorm:.3f}) M3({m3_stdnorm:.3f}), {fp('M1vM3','std_norm')}",
 ]):
     txt(s, t, 9.1, 4.60+i*0.42, 3.8, 0.4, sz=11, color=C_DARK)
 snum(s, 10)
@@ -644,7 +640,7 @@ snum(s, 10)
 # SLIDE 11 — Attention Map 양방향 + Grad-CAM AEC (M2 vs M3)
 # ═══════════════════════════════════════════════════════════════
 s = add_slide()
-hdr(s, "Attention Map 양방향 비교 + Grad-CAM AEC  (norm)",
+hdr(s, "Attention Map 양방향 비교 + Grad-CAM AEC  (std_norm)",
     "C→A · A→C Cross-Attention 패턴  |  Grad-CAM 기여 구간  |  M2(CrossAttn) vs M3(CrossAttn3)")
 
 cx = [0.20, 4.57, 8.94]; cw = [4.25, 4.25, 4.25]

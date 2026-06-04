@@ -23,12 +23,12 @@ from scipy import stats as scipy_stats
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────────
 PROJECT_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../../..")
+    os.path.join(os.path.dirname(__file__), "../../..")
 )
 sys.path.insert(0, os.path.dirname(__file__))
 
-DATA_PATH   = os.path.join(PROJECT_ROOT, "연구코드/data/강남/강남_merged_features.xlsx")
-OUT_DIR     = os.path.join(PROJECT_ROOT, "연구코드/results/0522/eda")
+DATA_PATH   = os.path.join(PROJECT_ROOT, "연구코드/data/강남/강남_liver_merged_features_ok.xlsx")
+OUT_DIR     = os.path.join(PROJECT_ROOT, "연구코드/results/0605/eda")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # ── 상수 (model/config.py와 동일) ──────────────────────────────────────────

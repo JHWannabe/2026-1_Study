@@ -22,7 +22,9 @@ Deep model 학습 epoch:
   (pred, prob, true, stats, model, X_clin_te_s, X_aec_te_s)
   스케일된 test 배열을 함께 반환해 attention map / Grad-CAM 시각화에 바로 사용한다.
 """
+import os
 import numpy as np
+import torch
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
@@ -55,12 +57,23 @@ def _print_by_sex(y_true, y_pred, y_prob, sex):
                                     zero_division=0))
 
 
-def _scale_or_copy(X_tr, X_te, do_scale):
-    """do_scale=True이면 StandardScaler로 fit_transform/transform, False이면 복사본 반환."""
-    if do_scale:
+def _scale_aec(X_cv, X_te, scale_mode: str):
+    """AEC 스케일링 모드에 따라 train(CV)/test AEC를 정규화한다.
+
+    scale_mode:
+      "column" — StandardScaler (열 방향, CV 전체에서 fit)
+      "global" — CV 전체의 단일 mean/std로 정규화 (Global Z-score)
+      "none"   — 정규화 없이 복사본 반환
+    """
+    if scale_mode == "column":
         sc = StandardScaler()
-        return sc.fit_transform(X_tr), sc.transform(X_te)
-    return X_tr.copy(), X_te.copy()
+        return sc.fit_transform(X_cv), sc.transform(X_te)
+    if scale_mode == "global":
+        g_mean = float(X_cv.mean())
+        g_std  = max(float(X_cv.std()), 1e-8)
+        return ((X_cv - g_mean) / g_std).astype(np.float32), \
+               ((X_te - g_mean) / g_std).astype(np.float32)
+    return X_cv.copy(), X_te.copy()
 
 
 def _scale_clin_te(X_cv, X_te, do_scale):
@@ -115,11 +128,11 @@ def evaluate_test(X_cv, y_cv, X_te, y_te, sex_te, scale_X=True, threshold=0.5):
 def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
                         X_clin_te, X_aec_te, y_te, sex_te,
                         med_epoch,
-                        scale_clin=True, scale_aec=True,
-                        threshold=0.5):
+                        scale_clin=True, scale_aec="column",
+                        threshold=0.5, weight_path=None):
     """
     전체 CV 세트로 ClinAECCrossAttn 최종 모델을 학습하고 test set 예측 결과를 반환.
-    AEC는 scale_aec=True(기본)일 때 StandardScaler로 표준화한다.
+    scale_aec: "column" | "global" | "none" — AEC 정규화 모드 (기본: column-wise)
 
     threshold: CV fold별 Youden's J 최적값의 중앙값 (기본 0.5)
     Returns: ca_pred_te, ca_prob_te, ca_true_te, stats_te, model, X_clin_te_s, X_aec_te_s
@@ -129,7 +142,7 @@ def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
     print(f"{'='*55}")
 
     X_clin_cv_s, X_clin_te_s = _scale_clin_te(X_clin_cv, X_clin_te, scale_clin)
-    X_aec_cv_s,  X_aec_te_s  = _scale_or_copy(X_aec_cv,  X_aec_te,  scale_aec)
+    X_aec_cv_s,  X_aec_te_s  = _scale_aec(X_aec_cv,  X_aec_te,  scale_aec)
 
     tr_dl, te_dl = make_dual_loaders(X_clin_cv_s, X_aec_cv_s, y_cv,
                                      X_clin_te_s,  X_aec_te_s,  y_te)
@@ -139,6 +152,11 @@ def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
     for _ in range(1, med_epoch + 1):
         train_cross_epoch(model_f, tr_dl, crit_f, opt_f)
         sched_f.step()
+
+    if weight_path is not None:
+        os.makedirs(os.path.dirname(weight_path), exist_ok=True)
+        torch.save(model_f.state_dict(), weight_path)
+        print(f"  [CrossAttn] Model weights saved → {weight_path}")
 
     _, ca_prob_te, ca_true_te = eval_cross_loader(model_f, te_dl, crit_f)
     ca_pred_te = (ca_prob_te >= threshold).astype(int)
@@ -165,11 +183,11 @@ def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
 def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
                           X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
                           sex_te, med_epoch, n_manufacturers,
-                          scale_clin=True, scale_aec=True,
-                          threshold=0.5):
+                          scale_clin=True, scale_aec="column",
+                          threshold=0.5, weight_path=None):
     """
     전체 CV 세트로 ClinAECScanCrossAttn 최종 모델을 학습하고 test set 예측 결과를 반환.
-    AEC는 scale_aec=True(기본)일 때 StandardScaler로 표준화한다.
+    scale_aec: "column" | "global" | "none" — AEC 정규화 모드 (기본: column-wise)
 
     threshold: CV fold별 Youden's J 최적값의 중앙값 (기본 0.5)
     ManufacturerModelName은 nn.Embedding index(1-indexed 정수)이므로 스케일링하지 않는다.
@@ -180,7 +198,7 @@ def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
     print(f"{'='*65}")
 
     X_clin_cv_s, X_clin_te_s = _scale_clin_te(X_clin_cv, X_clin_te, scale_clin)
-    X_aec_cv_s,  X_aec_te_s  = _scale_or_copy(X_aec_cv,  X_aec_te,  scale_aec)
+    X_aec_cv_s,  X_aec_te_s  = _scale_aec(X_aec_cv,  X_aec_te,  scale_aec)
 
     tr_dl, te_dl = make_quad_loaders(
         X_clin_cv_s, X_aec_cv_s, X_scan_mfr_cv, y_cv,
@@ -192,6 +210,11 @@ def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
     for _ in range(1, med_epoch + 1):
         train_cross3_epoch(model_f, tr_dl, crit_f, opt_f)
         sched_f.step()
+
+    if weight_path is not None:
+        os.makedirs(os.path.dirname(weight_path), exist_ok=True)
+        torch.save(model_f.state_dict(), weight_path)
+        print(f"  [CrossAttn3] Model weights saved → {weight_path}")
 
     _, ca3_prob_te, ca3_true_te = eval_cross3_loader(model_f, te_dl, crit_f)
     ca3_pred_te = (ca3_prob_te >= threshold).astype(int)
