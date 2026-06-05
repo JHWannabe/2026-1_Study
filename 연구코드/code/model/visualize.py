@@ -533,8 +533,9 @@ def plot_roc_all_models(aec_var,
                         r2_y, r2_prob,
                         r2_2_y, r2_2_prob,
                         r3_y, r3_prob,
-                        out_path):
-    """M1/M2/M2_2/M3의 test-set ROC 커브를 하나의 이미지에 비교."""
+                        out_path,
+                        r4_y=None, r4_prob=None):
+    """M1/M2/M2_2/M3(/M4) test-set ROC 커브를 하나의 이미지에 비교."""
     fig, ax = plt.subplots(figsize=(8, 7))
     fig.suptitle(f"ROC Comparison — AEC variant: {aec_var}",
                  fontsize=13, fontweight="bold")
@@ -545,6 +546,9 @@ def plot_roc_all_models(aec_var,
         (f"Model 2_2 Unmatched ({aec_var})", r2_2_y, r2_2_prob, "orange",    "-."),
         (f"Model 3  CrossAttn3 ({aec_var})", r3_y,   r3_prob,   "seagreen",  "-"),
     ]
+    if r4_y is not None and r4_prob is not None:
+        entries.append((f"Model 4  AECOnly ({aec_var})", r4_y, r4_prob, "mediumpurple", ":"))
+
     for label, y_true, y_prob, color, ls in entries:
         fpr, tpr, _ = roc_curve(y_true, y_prob)
         auc = roc_auc_score(y_true, y_prob)
@@ -602,28 +606,28 @@ def _save_cross(fname, fig):
     plt.close(fig)
 
 
-def plot_cv_roc_cross(ca_roc_folds):
+def plot_cv_roc_cross(ca_roc_folds, model_label="CrossAttn"):
     """CrossAttn의 fold별 ROC 커브를 그려 cv_roc_curves.png로 저장."""
     fig, ax = plt.subplots(figsize=(7, 6))
-    fig.suptitle(f"CV ROC Curves — {N_FOLDS}-Fold  [CrossAttn]",
+    fig.suptitle(f"CV ROC Curves — {N_FOLDS}-Fold  [{model_label}]",
                  fontsize=13, fontweight="bold")
     for i, d in enumerate(ca_roc_folds):
         ax.plot(d["fpr"], d["tpr"], color=FOLD_COLORS[i], alpha=0.7,
                 label=f"Fold {i+1} (AUC={d['auc']:.3f})")
     ax.plot([0, 1], [0, 1], "k--", alpha=0.3)
-    ax.set_title("CrossAttn"); ax.set_xlabel("FPR"); ax.set_ylabel("TPR")
+    ax.set_title(model_label); ax.set_xlabel("FPR"); ax.set_ylabel("TPR")
     ax.legend(fontsize=8)
     _save_cross("cv_roc_curves.png", fig)
 
 
-def plot_cv_metric_cross(ca_cv):
+def plot_cv_metric_cross(ca_cv, model_label="CrossAttn"):
     """CrossAttn의 fold별 AUC·Accuracy·F1 박스플롯을 그려 cv_metric_distribution.png로 저장."""
     fig, axes = plt.subplots(1, 3, figsize=(14, 5))
     fig.suptitle(f"CV Metric Distribution ({N_FOLDS}-Fold)",
                  fontsize=13, fontweight="bold")
     for ax, (mname, mkey) in zip(axes, [("AUC-ROC", "auc"), ("Accuracy", "acc"), ("F1-Score", "f1")]):
         ca_vals = [m[mkey] for m in ca_cv]
-        bp = ax.boxplot([ca_vals], labels=["CrossAttn"],
+        bp = ax.boxplot([ca_vals], labels=[model_label],
                         patch_artist=True,
                         medianprops=dict(color="black", linewidth=2))
         for patch in bp["boxes"]:
@@ -634,10 +638,10 @@ def plot_cv_metric_cross(ca_cv):
     _save_cross("cv_metric_distribution.png", fig)
 
 
-def plot_training_curves_cross(ca_histories, med_epoch):
+def plot_training_curves_cross(ca_histories, med_epoch, model_label="CrossAttn"):
     """CrossAttn의 fold별 train/val loss·val AUC 학습 커브(mean±std)를 training_curves.png로 저장."""
     fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(13, 4))
-    fig.suptitle(f"CrossAttn Training Curves ({N_FOLDS}-Fold Mean ± Std)",
+    fig.suptitle(f"{model_label} Training Curves ({N_FOLDS}-Fold Mean ± Std)",
                  fontsize=13, fontweight="bold")
     train_arr = np.array([h["train_loss"] for h in ca_histories])
     val_arr   = np.array([h["val_loss"]   for h in ca_histories])
@@ -658,13 +662,13 @@ def plot_training_curves_cross(ca_histories, med_epoch):
     _save_cross("training_curves.png", fig)
 
 
-def plot_test_roc_cross(ca_true_te, ca_prob_te):
+def plot_test_roc_cross(ca_true_te, ca_prob_te, model_label="CrossAttn"):
     """CrossAttn의 test set 전체 ROC 커브를 test_roc_curves.png로 저장."""
     fig, ax = plt.subplots(figsize=(7, 6))
     fig.suptitle("Test Set ROC Curves", fontsize=13, fontweight="bold")
     fpr, tpr, _ = roc_curve(ca_true_te, ca_prob_te)
     auc = roc_auc_score(ca_true_te, ca_prob_te)
-    ax.plot(fpr, tpr, color="steelblue", linewidth=2, label=f"CrossAttn (AUC={auc:.3f})")
+    ax.plot(fpr, tpr, color="steelblue", linewidth=2, label=f"{model_label} (AUC={auc:.3f})")
     ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
     ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
     _save_cross("test_roc_curves.png", fig)
@@ -694,12 +698,12 @@ def plot_test_roc_with_baseline(primary_true, primary_prob, primary_label,
     plt.close(fig)
 
 
-def plot_test_roc_by_sex_cross(ca_true_te, ca_prob_te, sex_te):
+def plot_test_roc_by_sex_cross(ca_true_te, ca_prob_te, sex_te, model_label="CrossAttn"):
     """CrossAttn의 test set 성별 분리 ROC 커브를 test_roc_by_sex.png로 저장."""
     sex_colors = {"M": "steelblue", "F": "tomato"}
     sex_labels = {"M": "Male", "F": "Female"}
     fig, ax = plt.subplots(figsize=(7, 6))
-    fig.suptitle("Test Set ROC Curves by Sex  [CrossAttn]", fontsize=13, fontweight="bold")
+    fig.suptitle(f"Test Set ROC Curves by Sex  [{model_label}]", fontsize=13, fontweight="bold")
     for s, col in sex_colors.items():
         mask = sex_te == s
         if not mask.any():
@@ -712,22 +716,22 @@ def plot_test_roc_by_sex_cross(ca_true_te, ca_prob_te, sex_te):
         ax.plot(fpr, tpr, color=col, linewidth=2,
                 label=f"{sex_labels[s]} (n={mask.sum()}, AUC={auc:.3f})")
     ax.plot([0, 1], [0, 1], "k--", alpha=0.4)
-    ax.set_title("CrossAttn"); ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
+    ax.set_title(model_label); ax.set_xlabel("FPR"); ax.set_ylabel("TPR"); ax.legend()
     _save_cross("test_roc_by_sex.png", fig)
 
 
-def plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te):
+def plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te, model_label="CrossAttn"):
     """CrossAttn의 test set confusion matrix(전체 + 성별)를 confusion_matrices.png로 저장."""
     sexes = [s for s in ["M", "F"] if (sex_te == s).any()]
     n_cols = 1 + len(sexes)
     fig, axes = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5))
     if n_cols == 1:
         axes = [axes]
-    fig.suptitle("Confusion Matrices — Test Set  [CrossAttn]", fontsize=13, fontweight="bold")
+    fig.suptitle(f"Confusion Matrices — Test Set  [{model_label}]", fontsize=13, fontweight="bold")
 
     combos = [
-        ("CrossAttn — Overall", ca_true_te, ca_pred_te),
-        *[(f"CrossAttn — {'Male' if s=='M' else 'Female'} (n={(sex_te==s).sum()})",
+        (f"{model_label} — Overall", ca_true_te, ca_pred_te),
+        *[(f"{model_label} — {'Male' if s=='M' else 'Female'} (n={(sex_te==s).sum()})",
            ca_true_te[sex_te==s], ca_pred_te[sex_te==s]) for s in sexes],
     ]
     for ax, (title, yt, yp) in zip(axes, combos):
@@ -1305,11 +1309,13 @@ def plot_individual_aec_normalization(X_aec_raw_cv, X_aec_raw_te, y_te, sex_te,
     ]
 
     # ── 4그룹 정의: (y, sex, 레이블, colormap, 선스타일, 색조 범위) ──
+    _cmap_blues = plt.colormaps["Blues"]
+    _cmap_reds  = plt.colormaps["Reds"]
     group_defs = [
-        (1, "M", "Sarco-M",  plt.cm.Blues, "-",  (0.55, 0.95)),
-        (1, "F", "Sarco-F",  plt.cm.Reds,  "-",  (0.55, 0.95)),
-        (0, "M", "Normal-M", plt.cm.Blues, "--", (0.30, 0.55)),
-        (0, "F", "Normal-F", plt.cm.Reds,  "--", (0.30, 0.55)),
+        (1, "M", "Sarco-M",  _cmap_blues, "-",  (0.55, 0.95)),
+        (1, "F", "Sarco-F",  _cmap_reds,  "-",  (0.55, 0.95)),
+        (0, "M", "Normal-M", _cmap_blues, "--", (0.30, 0.55)),
+        (0, "F", "Normal-F", _cmap_reds,  "--", (0.30, 0.55)),
     ]
 
     sex_arr = np.asarray(sex_te)
@@ -1353,6 +1359,19 @@ def plot_individual_aec_normalization(X_aec_raw_cv, X_aec_raw_te, y_te, sex_te,
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  {out_path}")
+
+    # ── Raw AEC 데이터 Excel 저장 ──────────────────────────────
+    import pandas as pd
+    X_raw_sel = X_aec_raw_te[sel_idx_all].astype(np.float64)
+    pos_cols   = [f"pos_{i}" for i in range(1, n_aec + 1)]
+    df_raw     = pd.DataFrame(X_raw_sel, columns=pos_cols)
+    df_raw.insert(0, "group_label", labels_all)
+    df_raw.insert(1, "y_true",      [int(y_te[i]) for i in sel_idx_all])
+    df_raw.insert(2, "sex",         [sex_te[i]    for i in sel_idx_all])
+    xl_path    = f"{out_dir}/aec_individual_normalization_compare_raw.xlsx"
+    df_raw.to_excel(xl_path, index=False)
+    print(f"  {xl_path}")
+
     return out_path
 
 
@@ -1386,3 +1405,355 @@ def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,
     _save_report_md_cross(ca_cv, X_clin_cv, y_cv, sex_cv, X_clin_te, y_te,
                           ca_pred_te, ca_prob_te, ca_true_te,
                           sex_te, ca_histories, med_epoch, ci_dict=ci_dict)
+
+
+# ── Model 4: AEC Only ───────────────────────────────────────
+
+def plot_label_distribution(y_cv, sex_cv, y_te, sex_te, out_dir=None):
+    """레이블·성별 분포 그래프 (AEC-only 모델용 — clinical 특징 미포함)."""
+    cls_colors = {"Normal": "steelblue", "Sarco": "tomato"}
+    fig, axes = plt.subplots(1, 2, figsize=(9, 5))
+    fig.suptitle("Dataset Distribution — Train (CV) vs Test  [AEC Only]",
+                 fontsize=13, fontweight="bold")
+    for ax, (y, sex, name) in zip(axes, [
+        (y_cv, sex_cv, "Train (CV)"),
+        (y_te, sex_te, "Test"),
+    ]):
+        n_split = len(y)
+        sex_list = [s for s in ["M", "F"] if (sex == s).any()]
+        x_pos = np.arange(len(sex_list))
+        width = 0.3
+        for i, (cls, col) in enumerate(cls_colors.items()):
+            props = [(y[sex == s] == i).sum() / (sex == s).sum() for s in sex_list]
+            ax.bar(x_pos + (i - 0.5) * width, props, width,
+                   label=cls, color=col, alpha=0.7)
+            for j, p in enumerate(props):
+                ax.text(x_pos[j] + (i - 0.5) * width, p + 0.01,
+                        f"{p:.1%}", ha="center", va="bottom", fontsize=8)
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(
+            [f"{'Male' if s == 'M' else 'Female'}\n(n={(sex == s).sum()})"
+             for s in sex_list]
+        )
+        ax.set_xlim(-0.7, len(sex_list) - 0.3)
+        ax.set_ylim(0, 1.15)
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:.0%}"))
+        ax.set_title(f"{name}  (n={n_split})")
+        ax.set_ylabel("Proportion within sex group")
+        ax.legend()
+    fig.tight_layout()
+    save_dir = out_dir or RESULTS_DIR
+    fig.savefig(f"{save_dir}/label_distribution.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _save_report_md_aec_only(cv, y_cv, sex_cv, y_te,
+                              pred_te, prob_te, true_te,
+                              sex_te, histories, med_epoch, ci_dict=None):
+    """AECOnly CV 결과와 test set 성능 지표를 results.md로 저장 (Model 4 전용)."""
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    auc_arr = np.array([h["val_auc"] for h in histories])
+    best_val_aucs = auc_arr.max(axis=1)
+
+    lines = [
+        "# SMI Binary Classification — AECOnly Results",
+        "",
+        f"Generated: {now}  |  {N_FOLDS}-Fold CV  |  Median best epoch: {med_epoch}",
+        "",
+        "---",
+        "",
+        "## 0. Dataset Distribution",
+        "",
+        "### Class Distribution",
+        "",
+        _dist_table(y_cv, sex_cv, y_te, sex_te),
+        "",
+        "![Label Distribution](label_distribution.png)",
+        "",
+        "---",
+        "",
+        "## 1. Cross-Validation Summary",
+        "",
+        "### AECOnly",
+        "",
+        _cv_table(cv),
+        "",
+        "AECOnly best val AUC per fold: " +
+        ", ".join(f"Fold{i+1}={v:.4f}" for i, v in enumerate(best_val_aucs)),
+        "",
+        "---",
+        "",
+        "## 2. Test Set Performance",
+        "",
+        "### Overall",
+        "",
+        "| Model | AUC-ROC | AUPRC | Brier | Accuracy | F1 |",
+        "|-------|--------:|------:|------:|---------:|---:|",
+        f"| AECOnly | {roc_auc_score(true_te, prob_te):.4f}"
+        f" | {average_precision_score(true_te, prob_te):.4f}"
+        f" | {brier_score_loss(true_te, prob_te):.4f}"
+        f" | {accuracy_score(true_te, pred_te):.4f}"
+        f" | {f1_score(true_te, pred_te, zero_division=0):.4f} |",
+        "",
+        "### By Sex",
+        "",
+        "| Sex | n | AUC-ROC | AUPRC | Brier | Accuracy | F1 |",
+        "|-----|--:|--------:|------:|------:|---------:|---:|",
+        _sex_rows(true_te, pred_te, prob_te, sex_te),
+        "",
+        "---",
+        "",
+        "## 3. Confusion Matrix (Test Set)",
+        "",
+        _cm_block(true_te, pred_te),
+        "",
+        "---",
+        "",
+        *_ci_section(ci_dict),
+        "",
+        "---",
+        "",
+        "## 5. Figures",
+        "",
+        "| File | Description |",
+        "|------|-------------|",
+        "| `label_distribution.png` | Train/Test class·sex distributions |",
+        "| `cv_roc_curves.png` | Per-fold ROC curves (AECOnly) |",
+        "| `cv_metric_distribution.png` | Boxplot of AUC / Acc / F1 across folds |",
+        "| `training_curves.png` | Loss & AUC training curves (mean ± std) |",
+        "| `test_roc_curves.png` | Final test-set ROC curve |",
+        "| `test_roc_by_sex.png` | Final test-set ROC curves by sex |",
+        "| `confusion_matrices.png` | Test-set confusion matrices |",
+        "| `calibration.png` | Calibration plot + Precision-Recall curve |",
+        "| `cam_aec_mean.png` | Grad-CAM mean ± std per class |",
+        "| `cam_aec_lines.png` | Grad-CAM individual samples per class |",
+        "| `cam_aec_heatmap.png` | Grad-CAM sample-level heatmap |",
+    ]
+
+    md_path = f"{_dir2}/results.md"
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"  {md_path}")
+
+
+def save_all_aec_only(cv, roc_folds, histories, med_epoch,
+                      y_cv, sex_cv, y_te, true_te,
+                      pred_te, prob_te, sex_te,
+                      model_label="model 4", out_dir=None, ci_dict=None):
+    """Model 4(AEC Only)용 시각화 전체(8종 png)와 results.md를 out_dir에 저장."""
+    global _dir2
+    _dir2 = out_dir or RESULTS_DIR
+    plot_label_distribution(y_cv, sex_cv, y_te, sex_te, out_dir=_dir2)
+    plot_cv_roc_cross(roc_folds, model_label="AECOnly")
+    plot_cv_metric_cross(cv, model_label="AECOnly")
+    plot_training_curves_cross(histories, med_epoch, model_label="AECOnly")
+    plot_test_roc_cross(true_te, prob_te, model_label="AECOnly")
+    plot_test_roc_by_sex_cross(true_te, prob_te, sex_te, model_label="AECOnly")
+    plot_confusion_matrices_cross(true_te, pred_te, sex_te, model_label="AECOnly")
+    plot_calibration(
+        [("AECOnly", true_te, prob_te, "mediumpurple")],
+        out_path=f"{_dir2}/calibration_.png",
+    )
+
+    print(f"\nSaved ({model_label}):")
+    for fname in ["label_distribution", "cv_roc_curves", "cv_metric_distribution",
+                  "training_curves", "test_roc_curves", "test_roc_by_sex",
+                  "confusion_matrices", "calibration"]:
+        print(f"  {_dir2}/{fname}.png")
+
+    _save_report_md_aec_only(cv, y_cv, sex_cv, y_te,
+                             pred_te, prob_te, true_te,
+                             sex_te, histories, med_epoch, ci_dict=ci_dict)
+
+
+def _compute_gradcam_aec_only(model, X_aec_s):
+    """
+    AECOnlyNet의 마지막 ResBlock에 Grad-CAM(Selvaraju et al. 2017)을 적용.
+
+    Returns
+    -------
+    cam : np.ndarray (N, n_aec) — 샘플별 0~1 정규화된 Grad-CAM 중요도 맵 또는 None.
+    """
+    import torch
+    from config import DEVICE
+
+    if not hasattr(model, "blocks"):
+        print("  [CAM] model.blocks 없음 — AECOnly Grad-CAM 미지원.")
+        return None
+
+    _activations = [None]
+    _gradients   = [None]
+
+    def _fwd_hook(*args):
+        _activations[0] = args[2]
+
+    def _bwd_hook(*args):
+        _gradients[0] = args[2][0]
+
+    last_block = model.blocks[-1]
+    fwd_h = last_block.register_forward_hook(_fwd_hook)
+    bwd_h = last_block.register_full_backward_hook(_bwd_hook)
+
+    model.eval()
+    xa = torch.tensor(X_aec_s, dtype=torch.float32).to(DEVICE)
+
+    try:
+        logits = model(xa)
+        model.zero_grad()
+        logits.sum().backward()
+    finally:
+        fwd_h.remove()
+        bwd_h.remove()
+
+    if _activations[0] is None or _gradients[0] is None:
+        print("  [CAM] 훅이 트리거되지 않음 — Grad-CAM 계산 불가.")
+        return None
+
+    act  = _activations[0].detach().cpu().numpy()   # (B, d_model, n_aec)
+    grad = _gradients[0].detach().cpu().numpy()      # (B, d_model, n_aec)
+
+    weights = grad.mean(axis=-1, keepdims=True)      # (B, d_model, 1)
+    cam     = (weights * act).sum(axis=1)            # (B, n_aec)
+    cam     = np.maximum(cam, 0)
+
+    c_min = cam.min(axis=1, keepdims=True)
+    c_max = cam.max(axis=1, keepdims=True)
+    cam   = np.where(c_max > c_min,
+                     (cam - c_min) / (c_max - c_min + 1e-8),
+                     0.0)
+    return cam
+
+
+def plot_cam_aec_only(model, X_aec_te_s, y_true_te,
+                      out_dir, aec_var, model_label):
+    """
+    AECOnlyNet의 Grad-CAM을 계산해 세 가지 시각화를 저장.
+
+    출력 파일 (out_dir):
+      cam_aec_mean.png     — 클래스별 평균 AEC ± std + 평균 CAM 배경 히트맵
+      cam_aec_lines.png    — 클래스별 샘플 선 시각화
+      cam_aec_heatmap.png  — 전체 샘플 × AEC position 히트맵
+    """
+    cam = _compute_gradcam_aec_only(model, X_aec_te_s)
+    if cam is None:
+        return
+
+    n_pts    = cam.shape[1]
+    x_pts    = np.arange(n_pts)
+    cls_info = [(0, "Normal", "steelblue"), (1, "Sarcopenia", "tomato")]
+
+    s_idx   = np.where(y_true_te == 1)[0]
+    n_idx   = np.where(y_true_te == 0)[0]
+    ordered = np.concatenate([s_idx, n_idx])
+
+    # ── Figure 1: Class-average CAM + mean AEC signal ────────
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8))
+    fig.suptitle(
+        f"Grad-CAM — AEC Signal  ·  {model_label}  [{aec_var}]",
+        fontsize=12, fontweight="bold",
+    )
+    for ax, (cls_idx, cls_name, color) in zip(axes, cls_info):
+        mask = y_true_te == cls_idx
+        if not mask.any():
+            ax.set_visible(False)
+            continue
+        aec_cls  = X_aec_te_s[mask]
+        cam_cls  = cam[mask]
+        mean_aec = aec_cls.mean(0)
+        std_aec  = aec_cls.std(0)
+        mean_cam = cam_cls.mean(0)
+        pad  = (mean_aec.max() - mean_aec.min()) * 0.15 + 0.05
+        ymin = (mean_aec - std_aec).min() - pad
+        ymax = (mean_aec + std_aec).max() + pad
+        im = ax.imshow(
+            mean_cam.reshape(1, -1), aspect="auto",
+            extent=[-0.5, n_pts - 0.5, ymin, ymax],
+            cmap="YlOrRd", alpha=0.55, vmin=0, vmax=1, origin="lower",
+        )
+        ax.fill_between(x_pts, mean_aec - std_aec, mean_aec + std_aec,
+                        color=color, alpha=0.18)
+        ax.plot(x_pts, mean_aec, color=color, linewidth=2.0,
+                label=f"Mean AEC (n={mask.sum()})")
+        ax.set_xlim(-0.5, n_pts - 0.5)
+        ax.set_ylim(ymin, ymax)
+        ax.set_title(f"{cls_name}  (n={mask.sum()})", fontsize=10)
+        ax.set_xlabel("AEC Position  (scan start → scan end)")
+        ax.set_ylabel("Scaled AEC Value")
+        ax.legend(fontsize=8)
+        plt.colorbar(im, ax=ax, label="Grad-CAM (mean)", shrink=0.6, pad=0.01)
+    fig.tight_layout()
+    path1 = f"{out_dir}/cam_aec_mean.png"
+    fig.savefig(path1, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    # ── Figure 2: 클래스별 샘플 선 시각화 ────────────────────
+    _N_LINES    = 10
+    _line_cmap  = plt.colormaps["tab10"]
+    _line_colors = [_line_cmap(i) for i in range(_N_LINES)]
+    _rng = np.random.default_rng(42)
+    x_f  = x_pts.astype(float)
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 5), constrained_layout=True)
+    fig.suptitle(
+        f"Class Activation Map — AEC  ·  {model_label}  [{aec_var}]",
+        fontsize=12, fontweight="bold",
+    )
+    for ax, (cls_idx, cls_name, _) in zip(axes, cls_info):
+        mask_idx = np.where(y_true_te == cls_idx)[0]
+        if len(mask_idx) == 0:
+            ax.set_visible(False)
+            continue
+        if len(mask_idx) > _N_LINES:
+            sel_idx = _rng.choice(mask_idx, _N_LINES, replace=False)
+            sel_idx = np.sort(sel_idx)
+        else:
+            sel_idx = mask_idx
+        aec_sel = X_aec_te_s[sel_idx]
+        for i, (_, c) in enumerate(zip(sel_idx, _line_colors)):
+            ax.plot(x_f, aec_sel[i].astype(float),
+                    color=c, linewidth=1.2, alpha=0.85, label=f"S{i + 1}")
+        pad = (aec_sel.max() - aec_sel.min()) * 0.08 + 0.05
+        ax.set_xlim(x_f[0] - 0.5, x_f[-1] + 0.5)
+        ax.set_ylim(aec_sel.min() - pad, aec_sel.max() + pad)
+        ax.set_title(f"{cls_name}  ({len(sel_idx)} of {len(mask_idx)} samples)", fontsize=10)
+        ax.set_xlabel("AEC Position  (scan start → scan end)", fontsize=9)
+        ax.set_ylabel("Scaled AEC Value", fontsize=9)
+        ax.legend(fontsize=7, ncol=2, loc="upper right")
+    path2 = f"{out_dir}/cam_aec_lines.png"
+    fig.savefig(path2, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    # ── Figure 3: Sample-level heatmap (Sarco → Normal 정렬) ─
+    hmap   = cam[ordered]
+    n_samp = len(ordered)
+    fig_h  = max(5, n_samp * 0.20)
+    fig, ax = plt.subplots(figsize=(14, fig_h))
+    im = ax.imshow(hmap, aspect="auto", cmap="YlOrRd",
+                   interpolation="nearest", vmin=0, vmax=1)
+    plt.colorbar(im, ax=ax, shrink=0.6, label="Grad-CAM")
+    if len(s_idx) > 0 and len(n_idx) > 0:
+        ax.axhline(len(s_idx) - 0.5, color="white", linewidth=1.5, linestyle="--")
+    ax.text(-0.8, len(s_idx) / 2 - 0.5,
+            "Sarco",  va="center", ha="right",
+            color="tomato",    fontsize=8, fontweight="bold", clip_on=False)
+    ax.text(-0.8, len(s_idx) + len(n_idx) / 2 - 0.5,
+            "Normal", va="center", ha="right",
+            color="steelblue", fontsize=8, fontweight="bold", clip_on=False)
+    tick_step = max(1, n_pts // 8)
+    ax.set_xticks(x_pts[::tick_step])
+    ax.set_xticklabels(x_pts[::tick_step])
+    ax.set_yticks([])
+    ax.set_xlabel("AEC Position  (scan start → scan end)")
+    ax.set_ylabel("Sample")
+    ax.set_title(
+        f"Sample-level Grad-CAM Heatmap  ·  {model_label}  [{aec_var}]",
+        fontsize=10, fontweight="bold",
+    )
+    fig.tight_layout()
+    path3 = f"{out_dir}/cam_aec_heatmap.png"
+    fig.savefig(path3, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"  {path1}")
+    print(f"  {path2}")
+    print(f"  {path3}")

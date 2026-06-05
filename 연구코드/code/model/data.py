@@ -114,7 +114,10 @@ def load_data_with_aec(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
 
     df_aec = pd.read_excel(DATA_PATH, sheet_name=aec_sheet)
     df_aec["PatientID"] = df_aec["PatientID"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-    aec_cols = [c for c in df_aec.columns if c != "PatientID"][:aec_len]
+    aec_cols = sorted(
+        [c for c in df_aec.columns if str(c).startswith("aec_")],
+        key=lambda x: int(str(x).split("_")[1]),
+    )[:aec_len]
 
     df = pd.merge(df_meta, df_aec[["PatientID"] + aec_cols], on="PatientID", how="inner").reset_index(drop=True)
 
@@ -174,7 +177,10 @@ def load_data_with_aec_meta(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
 
     df_aec = pd.read_excel(DATA_PATH, sheet_name=aec_sheet)
     df_aec["PatientID"] = df_aec["PatientID"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-    aec_cols = [c for c in df_aec.columns if c != "PatientID"][:aec_len]
+    aec_cols = sorted(
+        [c for c in df_aec.columns if str(c).startswith("aec_")],
+        key=lambda x: int(str(x).split("_")[1]),
+    )[:aec_len]
 
     df = pd.merge(df_meta, df_aec[["PatientID"] + aec_cols], on="PatientID", how="inner").reset_index(drop=True)
 

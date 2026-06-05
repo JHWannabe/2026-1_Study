@@ -20,7 +20,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score, roc_curve
 
 from config import N_FOLDS, SEED, EPOCHS
-from models import (build_cross_attn, make_dual_loaders, train_cross_epoch, eval_cross_loader,
+from models import (build_resnet, make_loaders, train_one_epoch, eval_loader,
+                    build_aec_only,
+                    build_cross_attn, make_dual_loaders, train_cross_epoch, eval_cross_loader,
                     build_cross_attn3, make_quad_loaders, train_cross3_epoch, eval_cross3_loader)
 from metrics import group_metrics
 
@@ -62,6 +64,70 @@ def _youden_threshold(y_true, y_prob):
     fpr, tpr, thresholds = roc_curve(y_true, y_prob)
     j = tpr - fpr
     return float(thresholds[np.argmax(j)])
+
+
+def run_cross_validation_aec_only(X_aec_cv, y_cv, scale_aec="column"):
+    """
+    AECOnlyNet에 대해 N_FOLDS 교차검증을 수행하고 fold별 지표·ROC·학습 이력·최적 임계값을 반환.
+    scale_aec: "column" | "global" | "none"
+
+    Returns: cv, roc_folds, histories, best_epochs, best_thresholds
+    """
+    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
+    cv, roc_folds, histories, best_epochs, best_thresholds = [], [], [], [], []
+
+    print("=" * 55)
+    print(f"{N_FOLDS}-Fold CV  [AECOnly | scale_aec={scale_aec}]")
+    print("=" * 55)
+
+    for fold, (tr_i, val_i) in enumerate(skf.split(X_aec_cv, y_cv), 1):
+        print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
+
+        X_aec_tr,  X_aec_val  = X_aec_cv[tr_i],  X_aec_cv[val_i]
+        y_tr,      y_val       = y_cv[tr_i],       y_cv[val_i]
+
+        X_aec_tr, X_aec_val = _scale_aec_by_mode(X_aec_tr, X_aec_val, scale_aec)
+
+        tr_dl, val_dl = make_loaders(X_aec_tr, y_tr, X_aec_val, y_val)
+        model, crit, opt, sched = build_aec_only(y_tr)
+
+        best_auc, best_epoch = 0.0, 0
+        best_state: dict = {}
+        hist = {"train_loss": [], "val_loss": [], "val_auc": []}
+
+        for ep in range(1, EPOCHS + 1):
+            t_loss = train_one_epoch(model, tr_dl, crit, opt)
+            sched.step()
+            v_loss, vp, vt = eval_loader(model, val_dl, crit)
+            v_auc = roc_auc_score(vt, vp)
+
+            hist["train_loss"].append(t_loss)
+            hist["val_loss"].append(v_loss)
+            hist["val_auc"].append(v_auc)
+
+            if v_auc > best_auc:
+                best_auc, best_epoch = v_auc, ep
+                best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+        model.load_state_dict(best_state)
+        _, fprob, _ = eval_loader(model, val_dl, crit)
+
+        best_thresh = _youden_threshold(y_val, fprob)
+        fp = (fprob >= best_thresh).astype(int)
+        best_thresholds.append(best_thresh)
+
+        m = group_metrics(y_val, fp, fprob)
+        cv.append({"fold": fold, **m})
+        fpr, tpr, _ = roc_curve(y_val, fprob)
+        roc_folds.append({"fpr": fpr, "tpr": tpr, "auc": m["auc"]})
+        histories.append(hist)
+        best_epochs.append(best_epoch)
+
+        print(f"  AEC  — AUC: {m['auc']:.4f}  AUPRC: {m['auprc']:.4f}"
+              f"  Brier: {m['brier']:.4f}  Acc: {m['acc']:.4f}  F1: {m['f1']:.4f}"
+              f"  (best ep={best_epoch}, thresh={best_thresh:.3f})")
+
+    return cv, roc_folds, histories, best_epochs, best_thresholds
 
 
 def run_cross_validation(X_cv, y_cv, scale_X=True):

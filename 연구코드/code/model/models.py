@@ -2,7 +2,8 @@
 PyTorch 모델 정의 및 학습·평가 유틸리티.
 
 모델 계층:
-  ResNet1D              — tabular 특징을 1D Conv로 처리 (M1/M2/M3 ResNet1D 베이스라인)
+  ResNet1D              — tabular 특징을 1D Conv로 처리 (M1 베이스라인)
+  AECOnlyNet            — AEC 시퀀스만 입력하는 분류 모델 (M4)
   ClinAECCrossAttn      — Clinic + AEC Bidirectional Cross-Attention (M2)
   ClinAECScanCrossAttn  — Clinic + Scanner(MFR Embedding) + AEC Cross-Attention (M3)
 
@@ -154,6 +155,44 @@ def eval_loader(model, loader, crit):
         probs.extend(torch.sigmoid(logits).cpu().numpy())
         trues.extend(yb.cpu().numpy())
     return total / len(loader.dataset), np.array(probs), np.array(trues)
+
+
+# ── AEC Only Model (M4) ──────────────────────────────────────
+
+class AECOnlyNet(nn.Module):
+    """
+    AEC 시퀀스만을 입력으로 하는 ResNet1D 기반 분류 모델 (Model 4).
+
+    임상 특징 없이 AEC 128 포인트에서 직접 sarcopenia를 분류한다.
+    """
+
+    def __init__(self, hidden=HIDDEN, n_blocks=N_BLOCKS):
+        super().__init__()
+        self.stem = nn.Sequential(
+            nn.Conv1d(1, hidden, 1, bias=False),
+            nn.BatchNorm1d(hidden), nn.ReLU(),
+        )
+        self.blocks = nn.Sequential(*[ResBlock1D(hidden) for _ in range(n_blocks)])
+        self.head = nn.Sequential(
+            nn.AdaptiveAvgPool1d(1), nn.Flatten(),
+            nn.Linear(hidden, 32), nn.ReLU(),
+            nn.Dropout(0.3), nn.Linear(32, 1),
+        )
+
+    def forward(self, x):
+        return self.head(self.blocks(self.stem(x.unsqueeze(1)))).squeeze(-1)
+
+
+def build_aec_only(y_tr_arr):
+    """AECOnlyNet 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+    pos_w = torch.tensor(
+        [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
+    ).to(DEVICE)
+    model = AECOnlyNet().to(DEVICE)
+    crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)
+    opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
+    return model, crit, opt, sched
 
 
 # ── Clinic + AEC Cross-Attention Model ───────────────────────

@@ -14,12 +14,15 @@ xlsx 파일의 각 시트에 저장한다.
 import os
 import sys
 
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "model"))
 
 from model.config import DATA_PATH, RESULTS_DIR, SMI_THRESH_M, SMI_THRESH_F
 from model.data import load_data_with_aec
@@ -158,7 +161,7 @@ def _plot_scaling_comparison(
     fig, ax = plt.subplots(figsize=(10, 5))
     data_for_box = [X.flatten() for _, X in cases]
     bp = ax.boxplot(data_for_box, patch_artist=True, notch=False,
-                    labels=[name for name, _ in cases])
+                    tick_labels=[name for name, _ in cases])
     colors = ["#4c72b0", "#55a868", "#c44e52", "#8172b2"]
     for patch, color in zip(bp["boxes"], colors):
         patch.set_facecolor(color)

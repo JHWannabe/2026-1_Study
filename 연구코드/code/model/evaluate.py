@@ -35,7 +35,8 @@ from sklearn.metrics import (
 
 from config import SEED
 from metrics import print_bootstrap_ci
-from models import (build_cross_attn, make_dual_loaders, train_cross_epoch, eval_cross_loader,
+from models import (build_aec_only, make_loaders, train_one_epoch, eval_loader,
+                    build_cross_attn, make_dual_loaders, train_cross_epoch, eval_cross_loader,
                     build_cross_attn3, make_quad_loaders, train_cross3_epoch, eval_cross3_loader)
 
 
@@ -86,6 +87,55 @@ def _scale_clin_te(X_cv, X_te, do_scale):
     X_cv_s[:, [0, 2]] = sc.fit_transform(X_cv[:, [0, 2]])
     X_te_s[:, [0, 2]] = sc.transform(X_te[:, [0, 2]])
     return X_cv_s, X_te_s
+
+
+def evaluate_test_aec_only(X_aec_cv, y_cv, X_aec_te, y_te, sex_te,
+                           med_epoch, scale_aec="column",
+                           threshold=0.5, weight_path=None):
+    """
+    전체 CV 세트로 AECOnlyNet 최종 모델을 학습하고 test set 예측 결과를 반환.
+    scale_aec: "column" | "global" | "none"
+
+    Returns: pred_te, prob_te, true_te, stats_te, model, X_aec_te_s
+    """
+    print(f"\n{'='*55}")
+    print(f"AECOnly Test Evaluation  (scale_aec={scale_aec}, threshold={threshold:.3f})")
+    print(f"{'='*55}")
+
+    X_aec_cv_s, X_aec_te_s = _scale_aec(X_aec_cv, X_aec_te, scale_aec)
+
+    tr_dl, te_dl = make_loaders(X_aec_cv_s, y_cv, X_aec_te_s, y_te)
+    model_f, crit_f, opt_f, sched_f = build_aec_only(y_cv)
+
+    print(f"AECOnly — training final model for {med_epoch} epochs on full CV set …")
+    for _ in range(1, med_epoch + 1):
+        train_one_epoch(model_f, tr_dl, crit_f, opt_f)
+        sched_f.step()
+
+    if weight_path is not None:
+        os.makedirs(os.path.dirname(weight_path), exist_ok=True)
+        torch.save(model_f.state_dict(), weight_path)
+        print(f"  [AECOnly] Model weights saved → {weight_path}")
+
+    _, prob_te, true_te = eval_loader(model_f, te_dl, crit_f)
+    pred_te = (prob_te >= threshold).astype(int)
+
+    print(f"\nAECOnly — Test Set (Overall):")
+    print(f"  AUC: {roc_auc_score(true_te, prob_te):.4f}"
+          f"  AUPRC: {average_precision_score(true_te, prob_te):.4f}"
+          f"  Brier: {brier_score_loss(true_te, prob_te):.4f}"
+          f"  Acc: {accuracy_score(true_te, pred_te):.4f}"
+          f"  F1: {f1_score(true_te, pred_te, zero_division=0):.4f}")
+    print("\nAECOnly — Test Set (By Sex):")
+    _print_by_sex(true_te, pred_te, prob_te, sex_te)
+
+    print(f"\n{'─'*55}")
+    print("Test Set — Bootstrap CI")
+    print(f"{'─'*55}")
+    ci = print_bootstrap_ci("AECOnly", true_te, pred_te, prob_te)
+
+    stats_te = {"bootstrap_aec_only": ci}
+    return pred_te, prob_te, true_te, stats_te, model_f, X_aec_te_s
 
 
 def evaluate_test(X_cv, y_cv, X_te, y_te, sex_te, scale_X=True, threshold=0.5):
