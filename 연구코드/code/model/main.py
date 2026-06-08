@@ -63,11 +63,11 @@ from visualize import (save_all, save_all_cross, plot_test_roc_with_baseline,
 
 # ── 모델 실행 toggle ─────────────────────────────────────────
 # True: 해당 모델 실행 / False: 건너뜀 (결과 = [])
-RUN_M1   = False
+RUN_M1   = True
 RUN_M2   = True
 RUN_M2_2 = True
 RUN_M3   = True
-RUN_M4   = False
+RUN_M4   = True
 
 
 def _metrics(y_true, y_pred, y_prob):

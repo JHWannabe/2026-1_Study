@@ -238,6 +238,55 @@ def aec_variant(X_aec: np.ndarray, variant: str):
 
     raise ValueError(f"Unknown AEC variant: {variant!r}")
 
+def augment_aec(
+    X_aec: np.ndarray,
+    p_noise: float = 0.5,
+    p_mask: float = 0.5,
+    p_freq: float = 0.5,
+    noise_std_ratio: float = 0.02,
+    mask_ratio: float = 0.10,
+    freq_perturb_std: float = 0.05,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """
+    AEC 신호 배치 (N, T)에 랜덤 augmentation을 적용한다.
+    각 기법은 샘플별·독립적으로 p 확률로 적용된다. train split에만 사용할 것.
+
+    Gaussian noise : 신호 std의 noise_std_ratio 배 크기 노이즈 (기본 2%)
+    Masking        : 연속 구간(mask_ratio × T)을 해당 샘플 평균으로 치환 (기본 10%)
+    Frequency      : FFT magnitude에 (1 + N(0, freq_perturb_std)) 곱 (기본 5%)
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    X = X_aec.copy()
+    N, T = X.shape
+
+    # Gaussian noise
+    idxs_noise = np.where(rng.random(N) < p_noise)[0]
+    if len(idxs_noise):
+        row_std = X[idxs_noise].std(axis=1, keepdims=True) + 1e-8
+        noise = rng.standard_normal((len(idxs_noise), T)).astype(np.float32)
+        X[idxs_noise] += noise * row_std * noise_std_ratio
+
+    # Masking — 연속 구간을 샘플 평균으로 채움
+    idxs_mask = np.where(rng.random(N) < p_mask)[0]
+    if len(idxs_mask):
+        mask_len = max(1, int(T * mask_ratio))
+        row_means = X[idxs_mask].mean(axis=1)
+        starts = rng.integers(0, max(1, T - mask_len + 1), size=len(idxs_mask))
+        for k, i in enumerate(idxs_mask):
+            X[i, starts[k]:starts[k] + mask_len] = row_means[k]
+
+    # Frequency domain — rfft magnitude에 소폭 곱셈 노이즈
+    idxs_freq = np.where(rng.random(N) < p_freq)[0]
+    if len(idxs_freq):
+        specs = np.fft.rfft(X[idxs_freq].astype(np.float64), axis=1)
+        mag_scale = 1.0 + rng.standard_normal(specs.shape) * freq_perturb_std
+        X[idxs_freq] = np.fft.irfft(specs * mag_scale, n=T, axis=1).astype(np.float32)
+
+    return X
+
+
 def describe_dataset() -> None:
     """Train/Test split 전 전체 데이터셋의 분포를 출력한다.
 

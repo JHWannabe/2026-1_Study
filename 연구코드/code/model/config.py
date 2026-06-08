@@ -7,7 +7,7 @@ import torch
 
 # ── 데이터 경로 ──────────────────────────────────────────────
 DATA_PATH = "연구코드/data/강남/강남_liver_merged_features_ok.xlsx"
-AEC_LEN   = 120
+AEC_LEN   = 128
 AEC_SHEET = "aec_128"
 
 AEC_VARIANTS = [
@@ -38,7 +38,7 @@ N_CA_LAYERS = 2
 # ── 기기 및 결과 경로 ─────────────────────────────────────────
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-RESULTS_DIR           = f"연구코드/results/0612_120/"
+RESULTS_DIR           = f"연구코드/results/0612_128_aug/"
 RESULTS_MODEL_1_DIR   = RESULTS_DIR + "model_1"
 RESULTS_MODEL_2_DIR   = RESULTS_DIR + "model_2"
 RESULTS_MODEL_2_2_DIR = RESULTS_DIR + "model_2_2"

@@ -42,6 +42,7 @@ from models import (
     build_cross_attn3, make_quad_loaders, train_cross3_epoch, eval_cross3_loader,
 )
 from metrics import group_metrics, print_bootstrap_ci
+from data import augment_aec
 
 
 # ── Scaling helpers ───────────────────────────────────────────
@@ -174,6 +175,7 @@ def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv, scale_aec="column"):
         print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
         X_clin_tr, X_clin_val = _scale_clin(X_clin_cv[tr_i], X_clin_cv[val_i])
         X_aec_tr,  X_aec_val  = _scale_aec(X_aec_cv[tr_i],  X_aec_cv[val_i], scale_aec)
+        X_aec_tr = augment_aec(X_aec_tr, rng=np.random.default_rng(SEED + fold))
         y_tr, y_val = y_cv[tr_i], y_cv[val_i]
 
         tr_dl, val_dl = make_dual_loaders(X_clin_tr, X_aec_tr, y_tr, X_clin_val, X_aec_val, y_val)
@@ -217,6 +219,7 @@ def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv, n_manu
         print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
         X_clin_tr, X_clin_val = _scale_clin(X_clin_cv[tr_i], X_clin_cv[val_i])
         X_aec_tr,  X_aec_val  = _scale_aec(X_aec_cv[tr_i],  X_aec_cv[val_i], scale_aec)
+        X_aec_tr = augment_aec(X_aec_tr, rng=np.random.default_rng(SEED + fold))
         X_mfr_tr,  X_mfr_val  = X_scan_mfr_cv[tr_i], X_scan_mfr_cv[val_i]
         y_tr, y_val = y_cv[tr_i], y_cv[val_i]
 
@@ -262,6 +265,7 @@ def run_cross_validation_aec_only(X_aec_cv, y_cv, scale_aec="column"):
     for fold, (tr_i, val_i) in enumerate(skf.split(X_aec_cv, y_cv), 1):
         print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
         X_aec_tr, X_aec_val = _scale_aec(X_aec_cv[tr_i], X_aec_cv[val_i], scale_aec)
+        X_aec_tr = augment_aec(X_aec_tr, rng=np.random.default_rng(SEED + fold))
         y_tr, y_val = y_cv[tr_i], y_cv[val_i]
 
         tr_dl, val_dl = make_loaders(X_aec_tr, y_tr, X_aec_val, y_val)
