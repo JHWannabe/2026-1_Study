@@ -107,17 +107,21 @@ class ResNet1D(nn.Module):
         return self.head(self.blocks(self.stem(x.unsqueeze(1)))).squeeze(-1)
 
 
-def build_resnet(y_tr_arr):
-    """ResNet1D 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+def _build_simple_net(model, y_tr_arr):
+    """모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
     # sarcopenia(양성) 비율이 낮으므로 pos_weight = n_negative/n_positive 로 클래스 불균형 보정
     pos_w = torch.tensor(
         [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
     ).to(DEVICE)
-    model = ResNet1D().to(DEVICE)
     crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)
     opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
     return model, crit, opt, sched
+
+
+def build_resnet(y_tr_arr):
+    """ResNet1D 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+    return _build_simple_net(ResNet1D().to(DEVICE), y_tr_arr)
 
 
 def make_loaders(X_tr, y_tr, X_val, y_val):
@@ -159,40 +163,17 @@ def eval_loader(model, loader, crit):
 
 # ── AEC Only Model (M4) ──────────────────────────────────────
 
-class AECOnlyNet(nn.Module):
-    """
-    AEC 시퀀스만을 입력으로 하는 ResNet1D 기반 분류 모델 (Model 4).
+class AECOnlyNet(ResNet1D):
+    """AEC 시퀀스만을 입력으로 하는 ResNet1D 기반 분류 모델 (Model 4).
 
     임상 특징 없이 AEC 128 포인트에서 직접 sarcopenia를 분류한다.
+    ResNet1D와 동일한 아키텍처를 사용하며 입력 도메인만 다르다.
     """
-
-    def __init__(self, hidden=HIDDEN, n_blocks=N_BLOCKS):
-        super().__init__()
-        self.stem = nn.Sequential(
-            nn.Conv1d(1, hidden, 1, bias=False),
-            nn.BatchNorm1d(hidden), nn.ReLU(),
-        )
-        self.blocks = nn.Sequential(*[ResBlock1D(hidden) for _ in range(n_blocks)])
-        self.head = nn.Sequential(
-            nn.AdaptiveAvgPool1d(1), nn.Flatten(),
-            nn.Linear(hidden, 32), nn.ReLU(),
-            nn.Dropout(0.3), nn.Linear(32, 1),
-        )
-
-    def forward(self, x):
-        return self.head(self.blocks(self.stem(x.unsqueeze(1)))).squeeze(-1)
 
 
 def build_aec_only(y_tr_arr):
     """AECOnlyNet 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
-    pos_w = torch.tensor(
-        [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
-    ).to(DEVICE)
-    model = AECOnlyNet().to(DEVICE)
-    crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)
-    opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
-    return model, crit, opt, sched
+    return _build_simple_net(AECOnlyNet().to(DEVICE), y_tr_arr)
 
 
 # ── Clinic + AEC Cross-Attention Model ───────────────────────
@@ -297,7 +278,7 @@ class CrossAttentionBlock(nn.Module):
 
 class ClinAECCrossAttn(nn.Module):
     """
-    Clinic (Age, Sex, BMI) + AEC (256 scalar)를
+    Clinic (Age, Sex, BMI) + AEC (128 scalar)를
     Bidirectional Cross-Attention으로 결합하는 분류 모델.
 
     방향 1: clinical → Query,  AEC → Key/Value
@@ -310,7 +291,7 @@ class ClinAECCrossAttn(nn.Module):
     def __init__(
         self,
         num_clinical_features: int = 3,
-        num_aec_features: int = 256,
+        num_aec_features: int = 128,
         d_model: int = HIDDEN,
         num_heads: int = N_HEADS,
         ff_hidden_dim: int = 128,
@@ -365,7 +346,7 @@ class ClinAECCrossAttn(nn.Module):
         return logits
 
 
-def build_cross_attn(y_tr_arr, num_clinical_features=3, num_aec_features=256,
+def build_cross_attn(y_tr_arr, num_clinical_features=3, num_aec_features=128,
                      aec_encoder='resnet'):
     """ClinAECCrossAttn 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
     pos_w = torch.tensor(

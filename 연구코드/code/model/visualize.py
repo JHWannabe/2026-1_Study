@@ -572,10 +572,10 @@ def save_all(lr_roc_folds, lr_cv,
     global _dir1
     _dir1 = out_dir or RESULTS_DIR
     plot_data_distribution(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir=_dir1)
-    if _dir1 != RESULTS_DIR:
-        import shutil
-        shutil.copy2(f"{_dir1}/data_distribution.png",
-                     f"{RESULTS_DIR}/data_distribution.png")
+    # if _dir1 != RESULTS_DIR:
+    #     import shutil
+    #     shutil.copy2(f"{_dir1}/data_distribution.png",
+    #                  f"{RESULTS_DIR}/data_distribution.png")
     plot_roc_curves(lr_roc_folds)
     plot_metric_distribution(lr_cv)
     plot_confusion_matrices(y_te, lr_pred, sex_te)
@@ -1269,9 +1269,9 @@ def plot_individual_aec_normalization(X_aec_raw_cv, X_aec_raw_te, y_te, sex_te,
     """
     환자 개별 AEC 신호 — 정규화 전후 비교 그래프.
 
-    test set에서 (진단 × 성별) 4그룹별 n_per_class명을 무작위 선택해 4가지 정규화
-    (① Raw / ② Column-wise / ③ Row-wise / ④ Global Z-score)를 나란히 시각화.
-    Column-wise와 Global Z-score는 train(CV) set으로 scaler를 fit한다.
+    test set에서 (진단 × 성별) 4그룹별 n_per_class명을 무작위 선택해 3가지 정규화
+    (① Raw / ② Row-wise / ③ Global Z-score)를 나란히 시각화.
+    Global Z-score는 train(CV) set으로 scaler를 fit한다.
 
     색상 체계:
       Blues 계열 (진한→연) = Male,   실선 = Sarcopenia
@@ -1286,13 +1286,10 @@ def plot_individual_aec_normalization(X_aec_raw_cv, X_aec_raw_te, y_te, sex_te,
     out_dir      : str
     n_per_class  : int         — 그룹별 표시 환자 수
     """
-    from sklearn.preprocessing import StandardScaler
-
     rng   = np.random.default_rng(seed)
     n_aec = X_aec_raw_te.shape[1]
     x_pos = np.arange(n_aec)
 
-    sc_col = StandardScaler().fit(X_aec_raw_cv)
     g_mean = float(X_aec_raw_cv.mean())
     g_std  = max(float(X_aec_raw_cv.std()), 1e-8)
 
@@ -1302,10 +1299,9 @@ def plot_individual_aec_normalization(X_aec_raw_cv, X_aec_raw_te, y_te, sex_te,
         return (X - mu) / sd
 
     transforms = [
-        ("① Raw\n(전처리 없음)",                    lambda X: X),
-        ("② Column-wise\n(StandardScaler, 열 방향)", lambda X: sc_col.transform(X)),
-        ("③ Row-wise\n(환자별 z-score, 행 방향)",     _row_norm),
-        ("④ Global Z-score\n(Train 전체 단일 μ/σ)",  lambda X: (X - g_mean) / g_std),
+        ("① Raw\n(전처리 없음)",                   lambda X: X),
+        ("② Row-wise\n(환자별 z-score, 행 방향)",   _row_norm),
+        ("③ Global Z-score\n(Train 전체 단일 μ/σ)", lambda X: (X - g_mean) / g_std),
     ]
 
     # ── 4그룹 정의: (y, sex, 레이블, colormap, 선스타일, 색조 범위) ──

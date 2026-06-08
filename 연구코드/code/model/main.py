@@ -4,7 +4,7 @@ SMI Binary Classification — 모델별 AEC variant 비교 실험 진입점.
 모델 구성:
   Model 1   : Clinic Only (Age, Sex, BMI)                — LR
   Model 2   : Clinic + AEC Matched                       — CrossAttn
-  Model 2_2 : Clinic + AEC Unmatched (음성 대조군)         — CrossAttn
+  Model 2_2 : Clinic + AEC Unmatched (음성 대조군)        — CrossAttn
   Model 3   : Clinic + Scanner(MFR Embedding) + AEC      — CrossAttn3
   Model 4   : AEC Only (임상 특징 없음)                   — AECOnlyNet
 
@@ -50,15 +50,24 @@ from data import (load_data, split_data,
                   load_data_with_aec, load_data_with_aec_unmatched, split_data_dual,
                   load_data_with_aec_meta, split_data_quad,
                   aec_variant, print_stats, describe_dataset)
-from cross_val import (run_cross_validation, run_cross_validation_cross,
-                       run_cross_validation_cross3, run_cross_validation_aec_only)
-from evaluate import (evaluate_test, evaluate_test_cross, evaluate_test_cross3,
-                      evaluate_test_aec_only)
+from train_eval import (run_cross_validation, run_cross_validation_cross,
+                        run_cross_validation_cross3, run_cross_validation_aec_only,
+                        evaluate_test, evaluate_test_cross, evaluate_test_cross3,
+                        evaluate_test_aec_only)
 from metrics import print_cv_summary, print_delong_comparison, delong_test
 from visualize import (save_all, save_all_cross, plot_test_roc_with_baseline,
                        plot_roc_all_models, plot_attention_maps, plot_cam_aec,
                        plot_individual_aec_normalization,
                        save_all_aec_only, plot_cam_aec_only)
+
+
+# ── 모델 실행 toggle ─────────────────────────────────────────
+# True: 해당 모델 실행 / False: 건너뜀 (결과 = [])
+RUN_M1   = False
+RUN_M2   = True
+RUN_M2_2 = True
+RUN_M3   = True
+RUN_M4   = False
 
 
 def _metrics(y_true, y_pred, y_prob):
@@ -95,14 +104,14 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir: str | None = No
         os.makedirs(out1, exist_ok=True)
 
         print(f"  [M1] Cross-validating LR ...", flush=True)
-        (lr_cv, lr_roc_folds, lr_best_thresholds) = run_cross_validation(X_cv, y_cv, scale_X=True)
+        (lr_cv, lr_roc_folds, lr_best_thresholds) = run_cross_validation(X_cv, y_cv)
 
         print_cv_summary("LR", lr_cv)
 
         med_thresh_lr = float(np.median(lr_best_thresholds))
         print(f"  [M1] Evaluating on test set (thresh={med_thresh_lr:.3f}) ...", flush=True)
         (lr_pred, lr_prob, stats_te) = evaluate_test(
-            X_cv, y_cv, X_te, y_te, sex_te, scale_X=True, threshold=med_thresh_lr
+            X_cv, y_cv, X_te, y_te, sex_te, threshold=med_thresh_lr
         )
 
         print(f"  [M1] Saving figures ...", flush=True)
@@ -130,7 +139,6 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir: str | None = No
         f.write(buf.getvalue())
 
     return results
-
 
 def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 X_clin_te, X_aec_te, y2_te, sex2_te,
@@ -169,7 +177,7 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
             (ca_cv, ca_roc_folds,
              ca_histories, ca_best_epochs2,
              ca_best_thresholds2) = run_cross_validation_cross(
-                X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_clin=True, scale_aec=scale_aec_v,
+                X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_aec=scale_aec_v,
             )
 
             print_cv_summary("CrossAttn", ca_cv)
@@ -181,7 +189,7 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
              model_te2, X_clin_te_s2, X_aec_te_s2) = evaluate_test_cross(
                 X_clin_cv_v, X_aec_cv_v, y2_cv_v,
                 X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
-                med_epoch2, scale_clin=True, scale_aec=scale_aec_v,
+                med_epoch2, scale_aec=scale_aec_v,
                 threshold=med_thresh2,
                 weight_path=os.path.join(out2, f"M2_{aec_var}_weights.pt"),
             )
@@ -230,7 +238,6 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
 
     return results
 
-
 def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                   X_clin_te, X_aec_te, y2_te, sex2_te,
                   aec_size: int = 128, aec_variants: list | None = None,
@@ -271,7 +278,7 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
             (ca_cv, ca_roc_folds,
              ca_histories, ca_best_epochs2_2,
              ca_best_thresholds2_2) = run_cross_validation_cross(
-                X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_clin=True, scale_aec=scale_aec_v,
+                X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_aec=scale_aec_v,
             )
 
             print_cv_summary("CrossAttn", ca_cv)
@@ -283,7 +290,7 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
              model_te2_2, X_clin_te_s2_2, X_aec_te_s2_2) = evaluate_test_cross(
                 X_clin_cv_v, X_aec_cv_v, y2_cv_v,
                 X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
-                med_epoch2_2, scale_clin=True, scale_aec=scale_aec_v,
+                med_epoch2_2, scale_aec=scale_aec_v,
                 threshold=med_thresh2_2,
                 weight_path=os.path.join(out2_2, f"M2_2_{aec_var}_weights.pt"),
             )
@@ -332,7 +339,6 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
 
     return results
 
-
 def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                 X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
                 aec_size: int = 128, aec_variants: list | None = None,
@@ -373,7 +379,7 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
              ca3_histories, ca3_best_epochs3,
              ca3_best_thresholds3) = run_cross_validation_cross3(
                 X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v, n_mfr,
-                scale_clin=True, scale_aec=scale_aec_v,
+                scale_aec=scale_aec_v,
             )
 
             print_cv_summary("CrossAttn3", ca3_cv)
@@ -386,7 +392,7 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                 X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v,
                 X_clin3_te_v, X_aec3_te_v, X_mfr3_te_v, y3_te_v,
                 sex3_te_v, med_epoch3, n_mfr,
-                scale_clin=True, scale_aec=scale_aec_v,
+                scale_aec=scale_aec_v,
                 threshold=med_thresh3,
                 weight_path=os.path.join(out3, f"M3_{aec_var}_weights.pt"),
             )
@@ -436,7 +442,6 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
         f.write(buf.getvalue())
 
     return results
-
 
 def _run_model4(X_aec_cv, y_cv, sex_cv,
                 X_aec_te, y_te, sex_te,
@@ -528,7 +533,6 @@ def _run_model4(X_aec_cv, y_cv, sex_cv,
 
     return results
 
-
 def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, results_m4,
                               aec_size: int = 128):
     """모델 간 Test-set AUC를 DeLong (1988) 검정으로 쌍별 비교해 콘솔 출력."""
@@ -537,6 +541,8 @@ def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, 
     print(f"  AEC {aec_size}pt — DeLong Test  (Test-set ROC AUC 쌍별 비교)")
     print(sep)
 
+    if not results_m1:
+        return
     r1      = results_m1[0]
     m1_y    = r1["y_te"]
     m1_prob = r1["lr_prob"]
@@ -626,16 +632,15 @@ def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, 
             r4["y_true_te"], r4["prob_te"], r2["ca_prob_te"],
         )
 
-
 def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, results_m4,
                                 aec_size: int = 128, results_dir: str | None = None):
     """병렬 실행 완료 후, baseline을 포함한 test_roc_curves.png를 각 디렉토리에 덮어씀.
     - M2/M3/M4: Model 1 LR을 baseline으로 비교
     - M2_2: 동일 aec_var의 Model 2 Matched를 baseline으로 비교
     """
-    r1 = results_m1[0]
-    m1_y_te    = r1["y_te"]
-    m1_lr_prob = r1["lr_prob"]
+    r1 = results_m1[0] if results_m1 else None
+    m1_y_te    = r1["y_te"]    if r1 else None
+    m1_lr_prob = r1["lr_prob"] if r1 else None
 
     for r in results_m2:
         plot_test_roc_with_baseline(
@@ -702,19 +707,19 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
         r22 = r2_2_dict[aec_var]
         r3  = r3_dict[aec_var]
         r4  = r4_dict.get(aec_var)
-        plot_roc_all_models(
-            aec_var=aec_var,
-            r1_y=r1["y_te"],         r1_prob=r1["lr_prob"],
-            r2_y=r2["y_true_te"],    r2_prob=r2["ca_prob_te"],
-            r2_2_y=r22["y_true_te"], r2_2_prob=r22["ca_prob_te"],
-            r3_y=r3["y_true_te"],    r3_prob=r3["ca3_prob_te"],
-            r4_y=r4["y_true_te"] if r4 else None,
-            r4_prob=r4["prob_te"] if r4 else None,
-            out_path=os.path.join(comparison_dir, f"roc_all_models_{aec_var}.png"),
-        )
+        if r1:
+            plot_roc_all_models(
+                aec_var=aec_var,
+                r1_y=r1["y_te"],         r1_prob=r1["lr_prob"],
+                r2_y=r2["y_true_te"],    r2_prob=r2["ca_prob_te"],
+                r2_2_y=r22["y_true_te"], r2_2_prob=r22["ca_prob_te"],
+                r3_y=r3["y_true_te"],    r3_prob=r3["ca3_prob_te"],
+                r4_y=r4["y_true_te"] if r4 else None,
+                r4_prob=r4["prob_te"] if r4 else None,
+                out_path=os.path.join(comparison_dir, f"roc_all_models_{aec_var}.png"),
+            )
 
     print(f"  Comparison ROC curves saved.")
-
 
 def run_all_cases():
     """Model 1은 1회, Model 2/2_2/3/4는 AEC_VARIANTS(4종) 실행."""
@@ -724,22 +729,24 @@ def run_all_cases():
     print(f"{'='*60}")
     print(f"Device  : {DEVICE}\n")
 
-    describe_dataset()
+    # describe_dataset()
 
     # ── Model 1: AEC 미사용, 1회만 실행 ──────────────────────
-    print("\n[Data] Loading Model 1 data ...")
-    X, y, sex = load_data()
-    X_cv, y_cv, sex_cv, X_te, y_te, sex_te = split_data(X, y, sex)
-    print("[Data] Model 1 data ready.")
-    print("=== Model 1 dataset ==="); print_stats(y, sex)
+    results_m1 = []
+    if RUN_M1:
+        print("\n[Data] Loading Model 1 data ...")
+        X, y, sex = load_data()
+        X_cv, y_cv, sex_cv, X_te, y_te, sex_te = split_data(X, y, sex)
+        print("[Data] Model 1 data ready.")
+        print("=== Model 1 dataset ==="); print_stats(y, sex)
 
-    print("\n[Model 1] Starting ...")
-    with ProcessPoolExecutor(max_workers=1) as executor:
-        results_m1 = executor.submit(
-            _run_model1, X_cv, y_cv, sex_cv, X_te, y_te, sex_te,
-            RESULTS_MODEL_1_DIR,
-        ).result()
-    print("[Model 1] Finished.\n")
+        print("\n[Model 1] Starting ...")
+        with ProcessPoolExecutor(max_workers=1) as executor:
+            results_m1 = executor.submit(
+                _run_model1, X_cv, y_cv, sex_cv, X_te, y_te, sex_te,
+                RESULTS_MODEL_1_DIR,
+            ).result()
+        print("[Model 1] Finished.\n")
 
     aec_variants = AEC_VARIANTS
     actual_size  = AEC_LEN
@@ -760,9 +767,12 @@ def run_all_cases():
         aec_len=AEC_LEN, aec_sheet=AEC_SHEET, crop_points=None)
     print("[Data] AEC datasets loaded.")
 
-    print("=== Model 2   dataset ==="); print_stats(y2,  sex2)
-    print("=== Model 2_2 dataset ==="); print_stats(y2u, sex2u)
-    print("=== Model 3   dataset ==="); print_stats(y3,  sex3)
+    print("=== Model 2   dataset ===")
+    print_stats(y2,  sex2)
+    print("=== Model 2_2 dataset ===")
+    print_stats(y2u, sex2u)
+    print("=== Model 3   dataset ===")
+    print_stats(y3,  sex3)
 
     print("[Data] Splitting datasets ...")
     X_clin_cv,  X_aec_cv,  y2_cv,  sex2_cv, \
@@ -780,59 +790,71 @@ def run_all_cases():
         X_aec_cv, X_aec_te, y2_te, sex2_te, out_dir=results_dir,
     )
 
-    print(f"\n  Launching Model 2, 2_2, 3, 4 in parallel ...\n")
+    results_m2 = results_m2_2 = results_m3 = results_m4 = []
+
+    _active_cfg = [
+        ("M2",   RUN_M2,   "M2   ", 0),
+        ("M2_2", RUN_M2_2, "M2_2 ", 1),
+        ("M3",   RUN_M3,   "M3   ", 2),
+        ("M4",   RUN_M4,   "M4   ", 3),
+    ]
+    _active_keys = [k for k, flag, _, _ in _active_cfg if flag]
+    active_label = "/".join(_active_keys) or "(none)"
+    print(f"\n  Launching {active_label} in parallel ...\n")
 
     n_var = len(aec_variants)
-    with Manager() as mp_manager:
-        q = mp_manager.Queue()
-        bars = {
-            "M2":   tqdm(total=n_var, desc="M2   ", position=0, leave=True),
-            "M2_2": tqdm(total=n_var, desc="M2_2 ", position=1, leave=True),
-            "M3":   tqdm(total=n_var, desc="M3   ", position=2, leave=True),
-            "M4":   tqdm(total=n_var, desc="M4   ", position=3, leave=True),
-        }
-        with ProcessPoolExecutor(max_workers=4) as executor:
-            f2 = executor.submit(
-                _run_model2,
-                X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
-                X_clin_te, X_aec_te, y2_te, sex2_te,
-                actual_size, aec_variants, q, RESULTS_MODEL_2_DIR,
-            )
-            f2_2 = executor.submit(
-                _run_model2_2,
-                X_clin_ucv, X_aec_ucv, y2u_cv, sex2u_cv,
-                X_clin_ute, X_aec_ute, y2u_te, sex2u_te,
-                actual_size, aec_variants, q, RESULTS_MODEL_2_2_DIR,
-            )
-            f3 = executor.submit(
-                _run_model3,
-                X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
-                X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
-                actual_size, aec_variants, q, RESULTS_MODEL_3_DIR,
-            )
-            f4 = executor.submit(
-                _run_model4,
-                X_aec_cv, y2_cv, sex2_cv,
-                X_aec_te, y2_te, sex2_te,
-                actual_size, aec_variants, q, RESULTS_MODEL_4_DIR,
-            )
-            total_updates = n_var * 4
-            received = 0
-            while received < total_updates:
-                try:
-                    model_tag, done_var = q.get(timeout=0.5)
-                    bars[model_tag].update(1)
-                    bars[model_tag].set_postfix(variant=done_var)
-                    received += 1
-                except Exception:
-                    if all(fut.done() for fut in [f2, f2_2, f3, f4]):
-                        break
-            results_m2   = f2.result()
-            results_m2_2 = f2_2.result()
-            results_m3   = f3.result()
-            results_m4   = f4.result()
-        for bar in bars.values():
-            bar.close()
+    if _active_keys:
+        with Manager() as mp_manager:
+            q = mp_manager.Queue()
+            bars = {k: tqdm(total=n_var, desc=desc, position=pos, leave=True)
+                    for k, flag, desc, pos in _active_cfg if flag}
+            with ProcessPoolExecutor(max_workers=len(_active_keys)) as executor:
+                futures = {}
+                if RUN_M2:
+                    futures["M2"] = executor.submit(
+                        _run_model2,
+                        X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
+                        X_clin_te, X_aec_te, y2_te, sex2_te,
+                        actual_size, aec_variants, q, RESULTS_MODEL_2_DIR,
+                    )
+                if RUN_M2_2:
+                    futures["M2_2"] = executor.submit(
+                        _run_model2_2,
+                        X_clin_ucv, X_aec_ucv, y2u_cv, sex2u_cv,
+                        X_clin_ute, X_aec_ute, y2u_te, sex2u_te,
+                        actual_size, aec_variants, q, RESULTS_MODEL_2_2_DIR,
+                    )
+                if RUN_M3:
+                    futures["M3"] = executor.submit(
+                        _run_model3,
+                        X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
+                        X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
+                        actual_size, aec_variants, q, RESULTS_MODEL_3_DIR,
+                    )
+                if RUN_M4:
+                    futures["M4"] = executor.submit(
+                        _run_model4,
+                        X_aec_cv, y2_cv, sex2_cv,
+                        X_aec_te, y2_te, sex2_te,
+                        actual_size, aec_variants, q, RESULTS_MODEL_4_DIR,
+                    )
+                total_updates = n_var * len(futures)
+                received = 0
+                while received < total_updates:
+                    try:
+                        model_tag, done_var = q.get(timeout=0.5)
+                        bars[model_tag].update(1)
+                        bars[model_tag].set_postfix(variant=done_var)
+                        received += 1
+                    except Exception:
+                        if all(fut.done() for fut in futures.values()):
+                            break
+                if RUN_M2:   results_m2   = futures["M2"].result()
+                if RUN_M2_2: results_m2_2 = futures["M2_2"].result()
+                if RUN_M3:   results_m3   = futures["M3"].result()
+                if RUN_M4:   results_m4   = futures["M4"].result()
+            for bar in bars.values():
+                bar.close()
     print("  All models done.\n")
 
     print("[Results] Plotting comparison ROC curves ...")
@@ -847,20 +869,20 @@ def run_all_cases():
                         actual_size, results_dir=results_dir)
     print("[Results] All done.\n")
 
-
 # ── 출력 헬퍼 ────────────────────────────────────────────────
-
 _METRICS_DEF = [("AUC", "auc"), ("AUPRC", "auprc"), ("Brier", "brier"),
                 ("Acc", "acc"), ("F1", "f1")]
 
-
 def _best_case(results, metric_key):
-    """Test 전체 AUC 기준으로 best case 반환."""
+    """Test 전체 AUC 기준으로 best case 반환. 결과가 없으면 None."""
+    if not results:
+        return None
     return max(results, key=lambda r: r[metric_key]["auc"])
-
 
 def _model_table_str(results, model_key, col=8):
     """단일 모델 결과를 콘솔 테이블 문자열로 반환. best case에 <- BEST 표시."""
+    if not results:
+        return "(skip — 모델 미실행)"
     best = _best_case(results, model_key)
     hdr_parts = [f"{'Case':<32}"]
     for mname, _ in _METRICS_DEF:
@@ -876,7 +898,6 @@ def _model_table_str(results, model_key, col=8):
             row += "  <- BEST"
         rows.append(row)
     return "\n".join(rows)
-
 
 def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, results_m4):
     """각 모델의 best case(Test AUC 기준)를 요약 출력."""
@@ -899,12 +920,13 @@ def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, result
     print("  " + "-" * (len(hdr) - 2))
     for model_lbl, sub_lbl, results, key in entries:
         best = _best_case(results, key)
+        if best is None:
+            continue
         m = best[key]
         row = f"  {model_lbl:<6} {sub_lbl:<12} {_case_label(best):<32}"
         for _, mk in _METRICS_DEF:
             row += f" {m[mk]:>{col}.4f}"
         print(row)
-
 
 def _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_m4,
                       aec_size: int = 128):
@@ -943,7 +965,6 @@ def _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_
 
     _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, results_m4)
 
-
 def _md_table(results, model_key):
     """Test AUC 기준 best case 행을 **굵게** 표시."""
     best = _best_case(results, model_key)
@@ -962,7 +983,6 @@ def _md_table(results, model_key):
         else:
             lines.append(f"| {lbl} | {cells} |")
     return "\n".join(lines)
-
 
 def _fold_stats(folds1, folds2):
     """compare_fold_metrics와 동일한 통계 계산, 출력 없이 dict만 반환."""
@@ -985,7 +1005,6 @@ def _fold_stats(folds1, folds2):
         }
     return result
 
-
 def _cross_model_md_block(results_a, fold_key_a, label_a,
                            results_b, fold_key_b, label_b,
                            stat_rows_fn, hdr, sep,
@@ -1007,7 +1026,6 @@ def _cross_model_md_block(results_a, fold_key_a, label_a,
         lines.append("")
     return lines
 
-
 def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, results_m4):
     """각 모델별 best case(Test AUC 기준) 요약 markdown 테이블 반환."""
     entries = [
@@ -1025,11 +1043,12 @@ def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, res
     ]
     for model_lbl, sub_lbl, results, key in entries:
         best = _best_case(results, key)
+        if best is None:
+            continue
         m = best[key]
         cells = " | ".join(f"{m[mk]:.4f}" for _, mk in _METRICS_DEF)
         lines.append(f"| {model_lbl} | {sub_lbl} | {_case_label(best)} | {cells} |")
     return "\n".join(lines)
-
 
 def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, results_m4,
                         aec_size: int = 128, results_dir: str | None = None):
@@ -1122,9 +1141,9 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         return rows
 
     _duo_key = lambda r: r["aec_var"]  # noqa: E731
-    m1_r      = results_m1[0]  # M1은 단일 case
-    m1_y_te   = m1_r["y_te"]
-    m1_lr_prob = m1_r["lr_prob"]
+    m1_r       = results_m1[0] if results_m1 else None
+    m1_y_te    = m1_r["y_te"]    if m1_r else None
+    m1_lr_prob = m1_r["lr_prob"] if m1_r else None
 
     # ── M1 LR vs M2 CrossAttn ──────────────────────────────────
     lines += [
@@ -1133,13 +1152,14 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         "> A = M1 LR, B = M2 CrossAttn.",
         "",
     ]
-    for r2 in results_m2:
-        stat = _fold_stats(m1_r["lr_cv_folds"], r2["ca_cv_folds"])
-        lines.append(f"### {_case_label(r2)}  (M1-LR vs M2-CrossAttn)")
-        lines.append("")
-        lines += [_CSTAT_HDR, _CSTAT_SEP]
-        lines += _cstat_rows(stat)
-        lines.append("")
+    if m1_r:
+        for r2 in results_m2:
+            stat = _fold_stats(m1_r["lr_cv_folds"], r2["ca_cv_folds"])
+            lines.append(f"### {_case_label(r2)}  (M1-LR vs M2-CrossAttn)")
+            lines.append("")
+            lines += [_CSTAT_HDR, _CSTAT_SEP]
+            lines += _cstat_rows(stat)
+            lines.append("")
 
     # ── M2 CrossAttn vs M3 CrossAttn3 ─────────────────────────
     lines += [
@@ -1162,13 +1182,14 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         "> A = M1 LR, B = M3 CrossAttn3.",
         "",
     ]
-    for r3 in results_m3:
-        stat = _fold_stats(m1_r["lr_cv_folds"], r3["ca3_cv_folds"])
-        lines.append(f"### {_case_label(r3)}  (M1-LR vs M3-CrossAttn3)")
-        lines.append("")
-        lines += [_CSTAT_HDR, _CSTAT_SEP]
-        lines += _cstat_rows(stat)
-        lines.append("")
+    if m1_r:
+        for r3 in results_m3:
+            stat = _fold_stats(m1_r["lr_cv_folds"], r3["ca3_cv_folds"])
+            lines.append(f"### {_case_label(r3)}  (M1-LR vs M3-CrossAttn3)")
+            lines.append("")
+            lines += [_CSTAT_HDR, _CSTAT_SEP]
+            lines += _cstat_rows(stat)
+            lines.append("")
 
     # ── M1 LR vs M4 AECOnly ───────────────────────────────────
     lines += [
@@ -1177,13 +1198,14 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         "> A = M1 LR, B = M4 AECOnly.",
         "",
     ]
-    for r4 in results_m4:
-        stat = _fold_stats(m1_r["lr_cv_folds"], r4["cv_folds"])
-        lines.append(f"### {_case_label(r4)}  (M1-LR vs M4-AECOnly)")
-        lines.append("")
-        lines += [_CSTAT_HDR, _CSTAT_SEP]
-        lines += _cstat_rows(stat)
-        lines.append("")
+    if m1_r:
+        for r4 in results_m4:
+            stat = _fold_stats(m1_r["lr_cv_folds"], r4["cv_folds"])
+            lines.append(f"### {_case_label(r4)}  (M1-LR vs M4-AECOnly)")
+            lines.append("")
+            lines += [_CSTAT_HDR, _CSTAT_SEP]
+            lines += _cstat_rows(stat)
+            lines.append("")
 
     # ── M4 AECOnly vs M2 CrossAttn ────────────────────────────
     lines += [
@@ -1280,14 +1302,17 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         ("## M1 LR vs M2 CrossAttn", [
             (f"M1-LR", f"M2-{r['aec_var']}", m1_y_te, m1_lr_prob, r["ca_prob_te"], r["y_true_te"])
             for r in results_m2
+            if m1_y_te is not None
         ]),
         ("## M1 LR vs M3 CrossAttn3", [
             (f"M1-LR", f"M3-{r['aec_var']}", m1_y_te, m1_lr_prob, r["ca3_prob_te"], r["y_true_te"])
             for r in results_m3
+            if m1_y_te is not None
         ]),
         ("## M1 LR vs M4 AECOnly", [
             (f"M1-LR", f"M4-{r['aec_var']}", m1_y_te, m1_lr_prob, r["prob_te"], r["y_true_te"])
             for r in results_m4
+            if m1_y_te is not None
         ]),
         ("## M2 Matched vs M2_2 Unmatched", [
             (f"M2-{r['aec_var']}", f"M2_2-{r['aec_var']}",
@@ -1333,7 +1358,6 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     print(f"\n  Comparison saved → {md_path}")
-
 
 if __name__ == "__main__":
     run_all_cases()

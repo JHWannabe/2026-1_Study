@@ -11,7 +11,7 @@ build_dataset.py에서 사전 적용되어 merged_features.xlsx에 저장된다.
   Model 3       : load_data_with_aec_meta()
 
 AEC 민감도 분석:
-  aec_variant() — 4가지 변환(raw·std_scaled·norm·std_norm) 적용
+  aec_variant() — 4가지 변환(raw·std_scaled·norm·global_zscore) 적용
 """
 import numpy as np
 import pandas as pd
@@ -20,7 +20,6 @@ from sklearn.preprocessing import LabelEncoder
 
 from config import DATA_PATH, AEC_SHEET, AEC_LEN, SEED, TEST_SIZE, SMI_THRESH_M, SMI_THRESH_F, AEC_SHUFFLE_SEED
 
-
 def _apply_crop(X_aec: np.ndarray, aec_len: int, crop_points: int | None) -> np.ndarray:
     """중앙 crop_points개 포인트를 추출. None이거나 aec_len 이상이면 그대로 반환."""
     if crop_points is None or crop_points >= aec_len:
@@ -28,15 +27,12 @@ def _apply_crop(X_aec: np.ndarray, aec_len: int, crop_points: int | None) -> np.
     start = (aec_len - crop_points) // 2
     return X_aec[:, start:start + crop_points]
 
-
 def _make_label(row):
     """성별 기준 SMI 임계값을 적용해 sarcopenia(1) / normal(0) 이진 레이블을 반환."""
     thresh = SMI_THRESH_M if row["PatientSex"] == "M" else SMI_THRESH_F
     return 1 if row["SMI"] <= thresh else 0
 
-
 _filtered_meta_cache: pd.DataFrame | None = None
-
 
 def _load_filtered_meta():
     """metadata 시트를 읽어 모델 학습에 필요한 컬럼을 반환한다.
@@ -58,7 +54,6 @@ def _load_filtered_meta():
     _filtered_meta_cache = df
     return df.copy()
 
-
 def load_data():
     """임상 데이터(Age, Sex, BMI)와 sarcopenia 레이블을 로드해 (X, y, sex)를 반환."""
     df = _load_filtered_meta()
@@ -71,7 +66,6 @@ def load_data():
     sex = df["PatientSex"].values
     return X, y, sex
 
-
 def _strat_key(y, sex, age=None, bmi=None, n_bins: int = 3):
     """label × sex × age_bin × bmi_bin 조합 stratification key."""
     key = y * 2 + (sex == "M").astype(int)
@@ -83,7 +77,6 @@ def _strat_key(y, sex, age=None, bmi=None, n_bins: int = 3):
         key = key * n_bins + bmi_bin
     return key
 
-
 def _safe_strat_key(y, sex, age, bmi):
     """strata 최소 크기 < 2이면 bin 수를 줄여 재시도. 최종 fallback은 label × sex."""
     for n_bins in (3, 2):
@@ -92,7 +85,6 @@ def _safe_strat_key(y, sex, age, bmi):
             return key
     key = _strat_key(y, sex)
     return key if pd.Series(key).value_counts().min() >= 2 else y
-
 
 def split_data(X, y, sex):
     """label × sex × age × bmi stratified train/test split. (X_cv, y_cv, sex_cv, X_te, y_te, sex_te) 반환."""
@@ -105,7 +97,6 @@ def split_data(X, y, sex):
         X[cv_idx], y[cv_idx], sex[cv_idx],
         X[te_idx], y[te_idx], sex[te_idx],
     )
-
 
 def load_data_with_aec(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
                        crop_points: int | None = None):
@@ -130,7 +121,6 @@ def load_data_with_aec(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
     sex    = df["PatientSex"].values
     return X_clin, X_aec, y, sex
 
-
 def load_data_with_aec_unmatched(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
                                  crop_points: int | None = None):
     """
@@ -147,7 +137,6 @@ def load_data_with_aec_unmatched(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SH
     perm = rng.permutation(len(y))
     return X_clin, X_aec[perm], y, sex
 
-
 def split_data_dual(X_clin, X_aec, y, sex):
     """Clinic + AEC 배열을 label × sex × age × bmi stratified split. CV/test 8개 배열을 반환."""
     idx = np.arange(len(y))
@@ -159,7 +148,6 @@ def split_data_dual(X_clin, X_aec, y, sex):
         X_clin[cv_idx], X_aec[cv_idx], y[cv_idx], sex[cv_idx],
         X_clin[te_idx], X_aec[te_idx], y[te_idx], sex[te_idx],
     )
-
 
 def load_data_with_aec_meta(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
                             crop_points: int | None = None):
@@ -200,7 +188,6 @@ def load_data_with_aec_meta(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
     sex        = df["PatientSex"].values
     return X_clin, X_aec, X_scan_mfr, y, sex, n_manufacturers
 
-
 def split_data_quad(X_clin, X_aec, X_scan_mfr, y, sex):
     """Clinic + AEC + Scanner(mfr) 배열을 label × sex × age × bmi stratified split. CV/test 10개 배열을 반환."""
     idx = np.arange(len(y))
@@ -212,7 +199,6 @@ def split_data_quad(X_clin, X_aec, X_scan_mfr, y, sex):
         X_clin[cv_idx], X_aec[cv_idx], X_scan_mfr[cv_idx], y[cv_idx], sex[cv_idx],
         X_clin[te_idx], X_aec[te_idx], X_scan_mfr[te_idx], y[te_idx], sex[te_idx],
     )
-
 
 def aec_variant(X_aec: np.ndarray, variant: str):
     """
@@ -236,9 +222,9 @@ def aec_variant(X_aec: np.ndarray, variant: str):
     if variant == "raw":
         return X_aec.copy(), None, "none"
 
-    if variant == "std_scaled":
-        # StandardScaler(열 방향) — cross_val/evaluate에서 train fold 기준으로 적용
-        return X_aec.copy(), None, "column"
+    # if variant == "std_scaled":
+    #     # StandardScaler(열 방향) — cross_val/evaluate에서 train fold 기준으로 적용
+    #     return X_aec.copy(), None, "column"
 
     if variant == "norm":
         # 행 방향 z-score (환자별 절대 선량 수준 제거, 곡선 형태 보존)
@@ -251,7 +237,6 @@ def aec_variant(X_aec: np.ndarray, variant: str):
         return X_aec.copy(), None, "global"
 
     raise ValueError(f"Unknown AEC variant: {variant!r}")
-
 
 def describe_dataset() -> None:
     """Train/Test split 전 전체 데이터셋의 분포를 출력한다.
@@ -310,7 +295,6 @@ def describe_dataset() -> None:
         print(f"  {grp_label:<14}  {n:>5}  {pos:>9}  {pos / n * 100:>9.1f}%")
 
     print()
-
 
 def print_stats(y, sex):
     """데이터셋 통계(샘플 수, 성별 분포, sarcopenia 비율)를 콘솔 출력."""

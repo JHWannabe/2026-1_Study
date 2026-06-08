@@ -82,12 +82,14 @@ def load_scaling(md_path):
 
     # DeLong 테이블
     # | Comparison | AUC A | AUC B | Δ AUC | z-stat | p-val | sig |
-    VARS = ['norm', 'crop80', 'crop60', 'len128', 'excl_extreme']
+    VARS = ['raw', 'norm', 'global_zscore']
     for marker, comp_key in [
         ('## M1 LR vs M2 CrossAttn',         'M1vM2'),
         ('## M1 LR vs M3 CrossAttn3',        'M1vM3'),
+        ('## M1 LR vs M4 AECOnly',           'M1vM4'),
         ('## M2 Matched vs M2_2 Unmatched',  'M2vM22'),
         ('## M2 CrossAttn vs M3 CrossAttn3', 'M2vM3'),
+        ('## M4 AECOnly vs M2 CrossAttn',    'M4vM2'),
     ]:
         for row in _table_rows(text, marker):
             if len(row) < 7:
