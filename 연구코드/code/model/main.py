@@ -44,16 +44,19 @@ matplotlib.use('Agg')
 
 from config import (DEVICE, RESULTS_DIR, RESULTS_MODEL_1_DIR, RESULTS_MODEL_2_DIR,
                     RESULTS_MODEL_2_2_DIR, RESULTS_MODEL_3_DIR, RESULTS_MODEL_4_DIR,
+                    RESULTS_MODEL_5_DIR,
                     AEC_VARIANTS, AEC_LEN, AEC_SHEET,
                     LR_RATE, HIDDEN, N_HEADS, N_BLOCKS, GRAD_CLIP, N_CA_LAYERS)
 from data import (load_data, split_data,
                   load_data_with_aec, load_data_with_aec_unmatched, split_data_dual,
                   load_data_with_aec_meta, split_data_quad,
+                  load_data_with_aec_features,
                   aec_variant, print_stats, describe_dataset)
 from train_eval import (run_cross_validation, run_cross_validation_cross,
                         run_cross_validation_cross3, run_cross_validation_aec_only,
+                        run_cross_validation_combined,
                         evaluate_test, evaluate_test_cross, evaluate_test_cross3,
-                        evaluate_test_aec_only)
+                        evaluate_test_aec_only, evaluate_test_combined)
 from metrics import print_cv_summary, print_delong_comparison, delong_test
 from visualize import (save_all, save_all_cross, plot_test_roc_with_baseline,
                        plot_roc_all_models, plot_attention_maps, plot_cam_aec,
@@ -68,6 +71,7 @@ RUN_M2   = True
 RUN_M2_2 = True
 RUN_M3   = True
 RUN_M4   = True
+RUN_M5   = True   # Clinic + AEC hand-crafted features (LR)
 
 
 def _metrics(y_true, y_pred, y_prob):
@@ -139,6 +143,57 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir: str | None = No
         f.write(buf.getvalue())
 
     return results
+
+def _run_model5(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir: str | None = None):
+    """Model 5(Clinic + AEC Hand-crafted Features LR)를 실행하고 결과 리스트를 반환."""
+    buf = io.StringIO()
+    sys.stdout = buf
+    results = []
+    try:
+        print(f"{'='*60}")
+        print("  MODEL 5 — Clinic + AEC Hand-crafted Features (LR)")
+        print(f"{'='*60}")
+
+        out5 = out_dir or RESULTS_MODEL_5_DIR
+        os.makedirs(out5, exist_ok=True)
+
+        print(f"  [M5] Cross-validating LR+AEC ...", flush=True)
+        (lr_cv, lr_roc_folds, lr_best_thresholds) = run_cross_validation_combined(X_cv, y_cv)
+
+        print_cv_summary("LR+AEC", lr_cv)
+
+        med_thresh_lr = float(np.median(lr_best_thresholds))
+        print(f"  [M5] Evaluating on test set (thresh={med_thresh_lr:.3f}) ...", flush=True)
+        (lr_pred, lr_prob, stats_te) = evaluate_test_combined(
+            X_cv, y_cv, X_te, y_te, sex_te, threshold=med_thresh_lr
+        )
+
+        print(f"  [M5] Saving figures ...", flush=True)
+        save_all(
+            lr_roc_folds, lr_cv,
+            X_cv[:, :3], y_cv, sex_cv,   # 시각화는 clinic 3개 피처만 사용
+            X_te[:, :3], y_te, lr_pred, lr_prob,
+            sex_te, out_dir=out5,
+            ci_dict=stats_te.get("bootstrap_lr_aec", {}),
+        )
+        print(f"  [M5] Done.", flush=True)
+
+        results.append({
+            "case":        "clinic_aec_feats",
+            "m5_lr":       _metrics(y_te, lr_pred, lr_prob),
+            "lr_cv_folds": lr_cv,
+            "test_stats":  stats_te,
+            "y_te":        y_te,
+            "lr_prob":     lr_prob,
+        })
+    finally:
+        sys.stdout = sys.__stdout__
+
+    with open(os.path.join(out5, "run.log"), "w", encoding="utf-8") as f:
+        f.write(buf.getvalue())
+
+    return results
+
 
 def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
                 X_clin_te, X_aec_te, y2_te, sex2_te,
@@ -534,106 +589,123 @@ def _run_model4(X_aec_cv, y_cv, sex_cv,
     return results
 
 def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                              aec_size: int = 128):
+                              aec_size: int = 128, results_m5=None):
     """모델 간 Test-set AUC를 DeLong (1988) 검정으로 쌍별 비교해 콘솔 출력."""
     sep = "=" * 70
     print(f"\n{sep}")
     print(f"  AEC {aec_size}pt — DeLong Test  (Test-set ROC AUC 쌍별 비교)")
     print(sep)
 
-    if not results_m1:
-        return
-    r1      = results_m1[0]
-    m1_y    = r1["y_te"]
-    m1_prob = r1["lr_prob"]
+    r1      = results_m1[0] if results_m1 else None
+    m1_y    = r1["y_te"]    if r1 else None
+    m1_prob = r1["lr_prob"] if r1 else None
 
     r2_2_dict = {r["aec_var"]: r for r in results_m2_2}
     r3_dict   = {r["aec_var"]: r for r in results_m3}
     r2_dict   = {r["aec_var"]: r for r in results_m2}
 
     # ── M1 vs M2 ──────────────────────────────────────────────
-    print(f"\n  [M1 LR  vs  M2 CrossAttn]")
-    for r2 in results_m2:
-        y2 = r2["y_true_te"]
-        if len(y2) != len(m1_y):
-            print(f"    {r2['aec_var']} — skip (sample size mismatch: M1={len(m1_y)}, M2={len(y2)})")
-            continue
-        print_delong_comparison(
-            f"M1-LR", f"M2-{r2['aec_var']}",
-            m1_y, m1_prob, r2["ca_prob_te"],
-        )
+    if results_m1 and results_m2:
+        print(f"\n  [M1 LR  vs  M2 CrossAttn]")
+        for r2 in results_m2:
+            y2 = r2["y_true_te"]
+            if len(y2) != len(m1_y):
+                print(f"    {r2['aec_var']} — skip (sample size mismatch: M1={len(m1_y)}, M2={len(y2)})")
+                continue
+            print_delong_comparison(
+                f"M1-LR", f"M2-{r2['aec_var']}",
+                m1_y, m1_prob, r2["ca_prob_te"],
+            )
 
     # ── M1 vs M3 ──────────────────────────────────────────────
-    print(f"\n  [M1 LR  vs  M3 CrossAttn3]")
-    for r3 in results_m3:
-        y3 = r3["y_true_te"]
-        if len(y3) != len(m1_y):
-            print(f"    {r3['aec_var']} — skip (sample size mismatch: M1={len(m1_y)}, M3={len(y3)})")
-            continue
-        print_delong_comparison(
-            f"M1-LR", f"M3-{r3['aec_var']}",
-            m1_y, m1_prob, r3["ca3_prob_te"],
-        )
+    if results_m1 and results_m3:
+        print(f"\n  [M1 LR  vs  M3 CrossAttn3]")
+        for r3 in results_m3:
+            y3 = r3["y_true_te"]
+            if len(y3) != len(m1_y):
+                print(f"    {r3['aec_var']} — skip (sample size mismatch: M1={len(m1_y)}, M3={len(y3)})")
+                continue
+            print_delong_comparison(
+                f"M1-LR", f"M3-{r3['aec_var']}",
+                m1_y, m1_prob, r3["ca3_prob_te"],
+            )
 
     # ── M1 vs M4 ──────────────────────────────────────────────
-    print(f"\n  [M1 LR  vs  M4 AECOnly]")
-    for r4 in results_m4:
-        y4 = r4["y_true_te"]
-        if len(y4) != len(m1_y):
-            print(f"    {r4['aec_var']} — skip (sample size mismatch: M1={len(m1_y)}, M4={len(y4)})")
-            continue
-        print_delong_comparison(
-            f"M1-LR", f"M4-{r4['aec_var']}",
-            m1_y, m1_prob, r4["prob_te"],
-        )
+    if results_m1 and results_m4:
+        print(f"\n  [M1 LR  vs  M4 AECOnly]")
+        for r4 in results_m4:
+            y4 = r4["y_true_te"]
+            if len(y4) != len(m1_y):
+                print(f"    {r4['aec_var']} — skip (sample size mismatch: M1={len(m1_y)}, M4={len(y4)})")
+                continue
+            print_delong_comparison(
+                f"M1-LR", f"M4-{r4['aec_var']}",
+                m1_y, m1_prob, r4["prob_te"],
+            )
 
     # ── M2 Matched vs M2_2 Unmatched ──────────────────────────
-    print(f"\n  [M2 Matched  vs  M2_2 Unmatched]")
-    for r2 in results_m2:
-        key = r2["aec_var"]
-        r22 = r2_2_dict.get(key)
-        if r22 is None:
-            continue
-        if len(r2["y_true_te"]) != len(r22["y_true_te"]):
-            print(f"    {key} — skip (sample size mismatch)")
-            continue
-        print_delong_comparison(
-            f"M2-{r2['aec_var']}", f"M2_2-{r22['aec_var']}",
-            r2["y_true_te"], r2["ca_prob_te"], r22["ca_prob_te"],
-        )
+    if results_m2 and results_m2_2:
+        print(f"\n  [M2 Matched  vs  M2_2 Unmatched]")
+        for r2 in results_m2:
+            key = r2["aec_var"]
+            r22 = r2_2_dict.get(key)
+            if r22 is None:
+                continue
+            if len(r2["y_true_te"]) != len(r22["y_true_te"]):
+                print(f"    {key} — skip (sample size mismatch)")
+                continue
+            print_delong_comparison(
+                f"M2-{r2['aec_var']}", f"M2_2-{r22['aec_var']}",
+                r2["y_true_te"], r2["ca_prob_te"], r22["ca_prob_te"],
+            )
 
     # ── M2 vs M3 ──────────────────────────────────────────────
-    print(f"\n  [M2 CrossAttn  vs  M3 CrossAttn3]")
-    for r2 in results_m2:
-        key = r2["aec_var"]
-        r3 = r3_dict.get(key)
-        if r3 is None:
-            continue
-        if len(r2["y_true_te"]) != len(r3["y_true_te"]):
-            print(f"    {key} — skip (sample size mismatch)")
-            continue
-        print_delong_comparison(
-            f"M2-{r2['aec_var']}", f"M3-{r3['aec_var']}",
-            r2["y_true_te"], r2["ca_prob_te"], r3["ca3_prob_te"],
-        )
+    if results_m2 and results_m3:
+        print(f"\n  [M2 CrossAttn  vs  M3 CrossAttn3]")
+        for r2 in results_m2:
+            key = r2["aec_var"]
+            r3 = r3_dict.get(key)
+            if r3 is None:
+                continue
+            if len(r2["y_true_te"]) != len(r3["y_true_te"]):
+                print(f"    {key} — skip (sample size mismatch)")
+                continue
+            print_delong_comparison(
+                f"M2-{r2['aec_var']}", f"M3-{r3['aec_var']}",
+                r2["y_true_te"], r2["ca_prob_te"], r3["ca3_prob_te"],
+            )
 
     # ── M4 vs M2 ──────────────────────────────────────────────
-    print(f"\n  [M4 AECOnly  vs  M2 CrossAttn]")
-    for r4 in results_m4:
-        key = r4["aec_var"]
-        r2 = r2_dict.get(key)
-        if r2 is None:
-            continue
-        if len(r4["y_true_te"]) != len(r2["y_true_te"]):
-            print(f"    {key} — skip (sample size mismatch)")
-            continue
-        print_delong_comparison(
-            f"M4-{r4['aec_var']}", f"M2-{r2['aec_var']}",
-            r4["y_true_te"], r4["prob_te"], r2["ca_prob_te"],
-        )
+    if results_m4 and results_m2:
+        print(f"\n  [M4 AECOnly  vs  M2 CrossAttn]")
+        for r4 in results_m4:
+            key = r4["aec_var"]
+            r2 = r2_dict.get(key)
+            if r2 is None:
+                continue
+            if len(r4["y_true_te"]) != len(r2["y_true_te"]):
+                print(f"    {key} — skip (sample size mismatch)")
+                continue
+            print_delong_comparison(
+                f"M4-{r4['aec_var']}", f"M2-{r2['aec_var']}",
+                r4["y_true_te"], r4["prob_te"], r2["ca_prob_te"],
+            )
+
+    # ── M1 vs M5 ──────────────────────────────────────────────
+    if results_m1 and results_m5:
+        print(f"\n  [M1 LR  vs  M5 LR+AECFeatures]")
+        for r5 in results_m5:
+            if len(r5["y_te"]) != len(m1_y):
+                print(f"    {r5['case']} — skip (sample size mismatch: M1={len(m1_y)}, M5={len(r5['y_te'])})")
+                continue
+            print_delong_comparison(
+                "M1-LR", f"M5-{r5['case']}",
+                m1_y, m1_prob, r5["lr_prob"],
+            )
 
 def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                                aec_size: int = 128, results_dir: str | None = None):
+                                aec_size: int = 128, results_dir: str | None = None,
+                                results_m5=None):
     """병렬 실행 완료 후, baseline을 포함한 test_roc_curves.png를 각 디렉토리에 덮어씀.
     - M2/M3/M4: Model 1 LR을 baseline으로 비교
     - M2_2: 동일 aec_var의 Model 2 Matched를 baseline으로 비교
@@ -719,6 +791,18 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
                 out_path=os.path.join(comparison_dir, f"roc_all_models_{aec_var}.png"),
             )
 
+    if results_m5 and r1:
+        for r5 in results_m5:
+            plot_test_roc_with_baseline(
+                primary_true=r5["y_te"],
+                primary_prob=r5["lr_prob"],
+                primary_label=f"Model 5 LR+AECFeatures ({r5['case']})",
+                baseline_true=m1_y_te,
+                baseline_prob=m1_lr_prob,
+                baseline_label="Model 1 LR (baseline)",
+                out_path=os.path.join(RESULTS_MODEL_5_DIR, "test_roc_curves.png"),
+            )
+
     print(f"  Comparison ROC curves saved.")
 
 def run_all_cases():
@@ -790,7 +874,23 @@ def run_all_cases():
         X_aec_cv, X_aec_te, y2_te, sex2_te, out_dir=results_dir,
     )
 
-    results_m2 = results_m2_2 = results_m3 = results_m4 = []
+    results_m2 = results_m2_2 = results_m3 = results_m4 = results_m5 = []
+
+    # ── Model 5: Clinic + AEC hand-crafted features (LR, 단독 실행) ───────
+    if RUN_M5:
+        print("\n[Data] Loading Model 5 data (Clinic + AEC hand-crafted features) ...")
+        X5, y5, sex5 = load_data_with_aec_features(aec_len=AEC_LEN, aec_sheet=AEC_SHEET)
+        X5_cv, y5_cv, sex5_cv, X5_te, y5_te, sex5_te = split_data(X5, y5, sex5)
+        print("[Data] Model 5 data ready.")
+        print("=== Model 5 dataset ==="); print_stats(y5, sex5)
+
+        print("\n[Model 5] Starting ...")
+        with ProcessPoolExecutor(max_workers=1) as executor:
+            results_m5 = executor.submit(
+                _run_model5, X5_cv, y5_cv, sex5_cv, X5_te, y5_te, sex5_te,
+                RESULTS_MODEL_5_DIR,
+            ).result()
+        print("[Model 5] Finished.\n")
 
     _active_cfg = [
         ("M2",   RUN_M2,   "M2   ", 0),
@@ -859,14 +959,16 @@ def run_all_cases():
 
     print("[Results] Plotting comparison ROC curves ...")
     _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                                actual_size, results_dir=results_dir)
+                                actual_size, results_dir=results_dir,
+                                results_m5=results_m5)
     print("[Results] Printing comparison table ...")
-    _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_m4, actual_size)
+    _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_m4, actual_size,
+                      results_m5=results_m5)
     _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                              actual_size)
+                              actual_size, results_m5=results_m5)
     print("[Results] Saving comparison markdown ...")
     _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                        actual_size, results_dir=results_dir)
+                        actual_size, results_dir=results_dir, results_m5=results_m5)
     print("[Results] All done.\n")
 
 # ── 출력 헬퍼 ────────────────────────────────────────────────
@@ -899,18 +1001,20 @@ def _model_table_str(results, model_key, col=8):
         rows.append(row)
     return "\n".join(rows)
 
-def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, results_m4):
+def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, results_m4,
+                        results_m5=None):
     """각 모델의 best case(Test AUC 기준)를 요약 출력."""
     sep = "=" * 70
     print(f"\n{sep}")
     print("  BEST CASES SUMMARY  (by Test overall AUC)")
     print(sep)
     entries = [
-        ("M1",   "LR",         results_m1,   "m1_lr"),
-        ("M2",   "CrossAttn",  results_m2,   "m2_ca"),
-        ("M2_2", "CrossAttn",  results_m2_2, "m2_2_ca"),
-        ("M3",   "CrossAttn3", results_m3,   "m3_ca3"),
-        ("M4",   "AECOnly",    results_m4,   "m4_aec"),
+        ("M1",   "LR",             results_m1,          "m1_lr"),
+        ("M2",   "CrossAttn",      results_m2,          "m2_ca"),
+        ("M2_2", "CrossAttn",      results_m2_2,        "m2_2_ca"),
+        ("M3",   "CrossAttn3",     results_m3,          "m3_ca3"),
+        ("M4",   "AECOnly",        results_m4,          "m4_aec"),
+        ("M5",   "LR+AECFeatures", results_m5 or [],    "m5_lr"),
     ]
     col = 8
     hdr = f"  {'Model':<6} {'Sub-model':<12} {'Best Case':<32}"
@@ -929,8 +1033,8 @@ def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, result
         print(row)
 
 def _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                      aec_size: int = 128):
-    """Model 1~4의 모든 case 결과를 콘솔 테이블로 출력하고, 마지막에 best case 요약을 출력."""
+                      aec_size: int = 128, results_m5=None):
+    """Model 1~5의 모든 case 결과를 콘솔 테이블로 출력하고, 마지막에 best case 요약을 출력."""
     n_var = len({r["aec_var"] for r in results_m2})
     sep = "=" * 70
     print(f"\n{sep}")
@@ -963,7 +1067,15 @@ def _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_
     print(f"\n  [AECOnly]")
     print(_model_table_str(results_m4, "m4_aec"))
 
-    _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, results_m4)
+    if results_m5:
+        print(f"\n{sep}")
+        print(f"  AEC {aec_size}pt — MODEL 5 — Clinic + AEC Hand-crafted Features  (1 case)")
+        print(sep)
+        print(f"\n  [LR+AECFeatures]")
+        print(_model_table_str(results_m5, "m5_lr"))
+
+    _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, results_m4,
+                        results_m5=results_m5)
 
 def _md_table(results, model_key):
     """Test AUC 기준 best case 행을 **굵게** 표시."""
@@ -1026,14 +1138,16 @@ def _cross_model_md_block(results_a, fold_key_a, label_a,
         lines.append("")
     return lines
 
-def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, results_m4):
+def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, results_m4,
+                           results_m5=None):
     """각 모델별 best case(Test AUC 기준) 요약 markdown 테이블 반환."""
     entries = [
-        ("M1",   "LR",         results_m1,   "m1_lr"),
-        ("M2",   "CrossAttn",  results_m2,   "m2_ca"),
-        ("M2_2", "CrossAttn",  results_m2_2, "m2_2_ca"),
-        ("M3",   "CrossAttn3", results_m3,   "m3_ca3"),
-        ("M4",   "AECOnly",    results_m4,   "m4_aec"),
+        ("M1",   "LR",             results_m1,       "m1_lr"),
+        ("M2",   "CrossAttn",      results_m2,       "m2_ca"),
+        ("M2_2", "CrossAttn",      results_m2_2,     "m2_2_ca"),
+        ("M3",   "CrossAttn3",     results_m3,       "m3_ca3"),
+        ("M4",   "AECOnly",        results_m4,       "m4_aec"),
+        ("M5",   "LR+AECFeatures", results_m5 or [], "m5_lr"),
     ]
     col_hdr = " | ".join(mn for mn, _ in _METRICS_DEF)
     col_sep = " | ".join("------:" for _ in _METRICS_DEF)
@@ -1051,7 +1165,8 @@ def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, res
     return "\n".join(lines)
 
 def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                        aec_size: int = 128, results_dir: str | None = None):
+                        aec_size: int = 128, results_dir: str | None = None,
+                        results_m5=None):
     """모든 모델·케이스의 비교 테이블과 통계 검정 결과를 scaling_comparison.md로 저장."""
     lines = [
         f"# Scaling Comparison — Test Set Performance (AEC {aec_size}pt)",
@@ -1060,7 +1175,8 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         "",
         "> 각 모델에서 Test 전체 AUC가 가장 높은 case. 세부 테이블에서 **굵게** 표시.",
         "",
-        _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, results_m4),
+        _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, results_m4,
+                               results_m5=results_m5),
         "",
         "---",
         "",
@@ -1106,6 +1222,16 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         "### AECOnly",
         "",
         _md_table(results_m4, "m4_aec"),
+        "",
+        "---",
+        "",
+        "## Model 5 — Clinic + AEC Hand-crafted Features  (1 case)",
+        "",
+        "> Age/Sex/BMI + AEC 통계 피처 11개(mean·std·max·min·peak_pos·auc·skew·kurt·early/mid/late mean) = 14차원 LR.",
+        "",
+        "### LR+AECFeatures",
+        "",
+        _md_table(results_m5 or [], "m5_lr"),
         "",
         "---",
         "",
@@ -1299,6 +1425,11 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
     r2_dict_dl   = {r["aec_var"]: r for r in results_m2}
 
     for section_title, pairs in [
+        ("## M1 LR vs M5 LR+AECFeatures", [
+            ("M1-LR", f"M5-{r['case']}", m1_y_te, m1_lr_prob, r["lr_prob"], r["y_te"])
+            for r in (results_m5 or [])
+            if m1_y_te is not None and len(r["y_te"]) == len(m1_y_te)
+        ]),
         ("## M1 LR vs M2 CrossAttn", [
             (f"M1-LR", f"M2-{r['aec_var']}", m1_y_te, m1_lr_prob, r["ca_prob_te"], r["y_true_te"])
             for r in results_m2

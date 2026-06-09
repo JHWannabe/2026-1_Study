@@ -69,6 +69,16 @@ def _scale_clin(X_a: np.ndarray, X_b: np.ndarray):
     return Xa, Xb
 
 
+def _scale_combined(X_a: np.ndarray, X_b: np.ndarray):
+    """Clinic+AEC 결합 피처 스케일링. col 1(sex_enc 이진값) 제외, 나머지 전체 StandardScaler."""
+    cols = [i for i in range(X_a.shape[1]) if i != 1]
+    sc = StandardScaler()
+    Xa, Xb = X_a.copy(), X_b.copy()
+    Xa[:, cols] = sc.fit_transform(X_a[:, cols])
+    Xb[:, cols] = sc.transform(X_b[:, cols])
+    return Xa, Xb
+
+
 def _youden_threshold(y_true, y_prob):
     """ROC 기반 Youden's J (sensitivity + specificity - 1) 최대화 임계값 반환."""
     fpr, tpr, thresholds = roc_curve(y_true, y_prob)
@@ -155,6 +165,41 @@ def run_cross_validation(X_cv, y_cv):
         lr_roc_folds.append({"fpr": fpr, "tpr": tpr, "auc": m_lr["auc"]})
 
         print(f"  LR — AUC: {m_lr['auc']:.4f}  AUPRC: {m_lr['auprc']:.4f}"
+              f"  Brier: {m_lr['brier']:.4f}  Acc: {m_lr['acc']:.4f}  F1: {m_lr['f1']:.4f}"
+              f"  (thresh={best_thresh:.3f})")
+
+    return lr_cv, lr_roc_folds, lr_best_thresholds
+
+
+def run_cross_validation_combined(X_cv, y_cv):
+    """Clinic+AEC 결합 피처(14) LR에 대해 N_FOLDS 교차검증.
+    Returns: (lr_cv, lr_roc_folds, lr_best_thresholds)"""
+    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
+    lr_cv, lr_roc_folds, lr_best_thresholds = [], [], []
+
+    print("=" * 55)
+    print(f"{N_FOLDS}-Fold Cross-Validation  [LR + AEC Hand-crafted Features]")
+    print("=" * 55)
+
+    for fold, (tr_i, val_i) in enumerate(skf.split(X_cv, y_cv), 1):
+        print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
+        Xtr_s, Xval_s = _scale_combined(X_cv[tr_i], X_cv[val_i])
+        y_ftr, y_fval = y_cv[tr_i], y_cv[val_i]
+
+        lr_f = LogisticRegression(max_iter=1000, random_state=SEED, class_weight="balanced")
+        lr_f.fit(Xtr_s, y_ftr)
+        lr_fprob = lr_f.predict_proba(Xval_s)[:, 1]
+
+        best_thresh = _youden_threshold(y_fval, lr_fprob)
+        lr_fp = (lr_fprob >= best_thresh).astype(int)
+        lr_best_thresholds.append(best_thresh)
+
+        m_lr = group_metrics(y_fval, lr_fp, lr_fprob)
+        lr_cv.append({"fold": fold, **m_lr})
+        fpr, tpr, _ = roc_curve(y_fval, lr_fprob)
+        lr_roc_folds.append({"fpr": fpr, "tpr": tpr, "auc": m_lr["auc"]})
+
+        print(f"  LR+AEC — AUC: {m_lr['auc']:.4f}  AUPRC: {m_lr['auprc']:.4f}"
               f"  Brier: {m_lr['brier']:.4f}  Acc: {m_lr['acc']:.4f}  F1: {m_lr['f1']:.4f}"
               f"  (thresh={best_thresh:.3f})")
 
@@ -321,6 +366,31 @@ def evaluate_test(X_cv, y_cv, X_te, y_te, sex_te, threshold=0.5):
     print(f"\n{'─'*55}\nTest Set — Bootstrap CI\n{'─'*55}")
     ci_lr = print_bootstrap_ci("LR", y_te, lr_pred, lr_prob)
     return lr_pred, lr_prob, {"bootstrap_lr": ci_lr}
+
+
+def evaluate_test_combined(X_cv, y_cv, X_te, y_te, sex_te, threshold=0.5):
+    """Clinic+AEC 결합 피처 LR 최종 모델 학습 후 test set 예측.
+    Returns: (lr_pred, lr_prob, stats_te)"""
+    print(f"\n{'='*55}\nFinal Test Evaluation  [LR+AEC | threshold={threshold:.3f}]\n{'='*55}")
+    X_cv_s, X_te_s = _scale_combined(X_cv, X_te)
+
+    lr_final = LogisticRegression(max_iter=1000, random_state=SEED, class_weight="balanced")
+    lr_final.fit(X_cv_s, y_cv)
+    lr_prob = lr_final.predict_proba(X_te_s)[:, 1]
+    lr_pred = (lr_prob >= threshold).astype(int)
+
+    print(f"\nLR+AEC — Test Set (Overall):"
+          f"  AUC: {roc_auc_score(y_te, lr_prob):.4f}"
+          f"  AUPRC: {average_precision_score(y_te, lr_prob):.4f}"
+          f"  Brier: {brier_score_loss(y_te, lr_prob):.4f}"
+          f"  Acc: {accuracy_score(y_te, lr_pred):.4f}"
+          f"  F1: {f1_score(y_te, lr_pred):.4f}")
+    print("\nLR+AEC — Test Set (By Sex):")
+    _print_by_sex(y_te, lr_pred, lr_prob, sex_te)
+
+    print(f"\n{'─'*55}\nTest Set — Bootstrap CI\n{'─'*55}")
+    ci_lr = print_bootstrap_ci("LR+AEC", y_te, lr_pred, lr_prob)
+    return lr_pred, lr_prob, {"bootstrap_lr_aec": ci_lr}
 
 
 def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,

@@ -66,6 +66,58 @@ def load_data():
     sex = df["PatientSex"].values
     return X, y, sex
 
+def extract_aec_features_batch(X_aec: np.ndarray) -> np.ndarray:
+    """AEC 시퀀스 배치 (N, T)에서 통계 피처 11개를 추출해 (N, 11) float32 배열로 반환.
+
+    피처 순서:
+      0  mean       — 전체 평균 (절대 감쇠 수준)
+      1  std        — 전체 표준편차 (곡선 변동성)
+      2  max        — 최댓값 (peak 감쇠)
+      3  min        — 최솟값 (기저 감쇠)
+      4  peak_pos   — argmax / T (정규화된 peak 시점)
+      5  auc        — trapz 면적 (총 조영제 통과량)
+      6  skew       — 왜도
+      7  kurt       — 첨도
+      8  early_mean — 앞 1/3 구간 평균 (동맥기)
+      9  mid_mean   — 중간 1/3 구간 평균 (문맥기)
+      10 late_mean  — 뒤 1/3 구간 평균 (평형기)
+    """
+    from scipy.stats import skew as _skew, kurtosis as _kurt
+    T = X_aec.shape[1]
+    seg = T // 3
+    return np.column_stack([
+        X_aec.mean(axis=1),
+        X_aec.std(axis=1),
+        X_aec.max(axis=1),
+        X_aec.min(axis=1),
+        X_aec.argmax(axis=1).astype(float) / T,
+        np.trapz(X_aec, axis=1),
+        _skew(X_aec, axis=1),
+        _kurt(X_aec, axis=1),
+        X_aec[:, :seg].mean(axis=1),
+        X_aec[:, seg:2 * seg].mean(axis=1),
+        X_aec[:, 2 * seg:].mean(axis=1),
+    ]).astype(np.float32)
+
+
+def load_data_with_aec_features(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET):
+    """Clinic(3) + AEC hand-crafted 통계 피처(11) = 총 14개 결합 벡터를 반환.
+
+    열 구성:
+      [0] PatientAge  [1] sex_enc  [2] BMI   ← 임상 피처 (M1과 동일)
+      [3..13]         AEC 통계 피처 11개      ← extract_aec_features_batch 순서
+
+    Returns
+    -------
+    X_combined : (N, 14) float32
+    y          : (N,) int64
+    sex        : (N,) str
+    """
+    X_clin, X_aec, y, sex = load_data_with_aec(aec_len=aec_len, aec_sheet=aec_sheet)
+    X_aec_feats = extract_aec_features_batch(X_aec)
+    return np.concatenate([X_clin, X_aec_feats], axis=1), y, sex
+
+
 def _strat_key(y, sex, age=None, bmi=None, n_bins: int = 3):
     """label × sex × age_bin × bmi_bin 조합 stratification key."""
     key = y * 2 + (sex == "M").astype(int)

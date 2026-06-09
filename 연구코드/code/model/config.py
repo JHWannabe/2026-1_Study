@@ -44,6 +44,7 @@ RESULTS_MODEL_2_DIR   = RESULTS_DIR + "model_2"
 RESULTS_MODEL_2_2_DIR = RESULTS_DIR + "model_2_2"
 RESULTS_MODEL_3_DIR   = RESULTS_DIR + "model_3"
 RESULTS_MODEL_4_DIR   = RESULTS_DIR + "model_4"
+RESULTS_MODEL_5_DIR   = RESULTS_DIR + "model_5"
 
 # ── Sarcopenia 진단 기준 (SMI, cm²/m²) ───────────────────────
 SMI_THRESH_M = 40.96
@@ -57,5 +58,6 @@ os.makedirs(RESULTS_MODEL_2_DIR,   exist_ok=True)
 os.makedirs(RESULTS_MODEL_2_2_DIR, exist_ok=True)
 os.makedirs(RESULTS_MODEL_3_DIR,   exist_ok=True)
 os.makedirs(RESULTS_MODEL_4_DIR,   exist_ok=True)
+os.makedirs(RESULTS_MODEL_5_DIR,   exist_ok=True)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
