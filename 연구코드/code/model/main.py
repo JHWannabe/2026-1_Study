@@ -44,7 +44,7 @@ matplotlib.use('Agg')
 
 from config import (DEVICE, RESULTS_DIR, RESULTS_MODEL_1_DIR, RESULTS_MODEL_2_DIR,
                     RESULTS_MODEL_2_2_DIR, RESULTS_MODEL_3_DIR, RESULTS_MODEL_4_DIR,
-                    RESULTS_MODEL_5_DIR,
+                    RESULTS_MODEL_5_DIR, RESULTS_MODEL_2_LF_DIR, RESULTS_MODEL_3_LF_DIR,
                     AEC_VARIANTS, AEC_LEN, AEC_SHEET,
                     LR_RATE, HIDDEN, N_HEADS, N_BLOCKS, GRAD_CLIP, N_CA_LAYERS)
 from data import (load_data, split_data,
@@ -55,8 +55,10 @@ from data import (load_data, split_data,
 from train_eval import (run_cross_validation, run_cross_validation_cross,
                         run_cross_validation_cross3, run_cross_validation_aec_only,
                         run_cross_validation_combined,
+                        run_cross_validation_late_fusion, run_cross_validation_late_fusion3,
                         evaluate_test, evaluate_test_cross, evaluate_test_cross3,
-                        evaluate_test_aec_only, evaluate_test_combined)
+                        evaluate_test_aec_only, evaluate_test_combined,
+                        evaluate_test_late_fusion, evaluate_test_late_fusion3)
 from metrics import print_cv_summary, print_delong_comparison, delong_test
 from visualize import (save_all, save_all_cross, plot_test_roc_with_baseline,
                        plot_roc_all_models, plot_attention_maps, plot_cam_aec,
@@ -66,12 +68,14 @@ from visualize import (save_all, save_all_cross, plot_test_roc_with_baseline,
 
 # ── 모델 실행 toggle ─────────────────────────────────────────
 # True: 해당 모델 실행 / False: 건너뜀 (결과 = [])
-RUN_M1   = True
-RUN_M2   = True
-RUN_M2_2 = True
-RUN_M3   = True
-RUN_M4   = True
-RUN_M5   = True   # Clinic + AEC hand-crafted features (LR)
+RUN_M1    = True
+RUN_M2    = True
+RUN_M2_2  = True
+RUN_M3    = True
+RUN_M4    = True
+RUN_M5    = True   # Clinic + AEC hand-crafted features (LR)
+RUN_M2_LF = True   # Clinic + AEC Late Fusion
+RUN_M3_LF = True   # Clinic + Scanner + AEC Late Fusion
 
 
 def _metrics(y_true, y_pred, y_prob):
@@ -394,6 +398,197 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
 
     return results
 
+def _run_model2_lf(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
+                   X_clin_te, X_aec_te, y2_te, sex2_te,
+                   aec_size: int = 128, aec_variants: list | None = None,
+                   progress_queue=None, out_base_dir: str | None = None):
+    """Model 2_LF(Clinic+AEC Late Fusion): AEC 변형별로 LateFusion을 실행하고 결과 리스트를 반환.
+    Grad-CAM 3종을 케이스 디렉토리에 저장. 로그는 run.log에 저장."""
+    if aec_variants is None:
+        aec_variants = AEC_VARIANTS
+    buf = io.StringIO()
+    sys.stdout = buf
+    results = []
+    _base = out_base_dir or RESULTS_MODEL_2_LF_DIR
+    try:
+        print(f"{'='*60}")
+        print(f"  MODEL 2_LF — Clinic + AEC Late Fusion (aec{aec_size})  ({len(aec_variants)} AEC variants)")
+        print(f"{'='*60}")
+
+        for aec_var in aec_variants:
+            X_aec_cv_v, mask_cv, scale_aec_v = aec_variant(X_aec_cv, aec_var)
+            X_aec_te_v, mask_te, _            = aec_variant(X_aec_te, aec_var)
+            X_clin_cv_v = X_clin_cv[mask_cv] if mask_cv is not None else X_clin_cv
+            y2_cv_v     = y2_cv[mask_cv]     if mask_cv is not None else y2_cv
+            sex2_cv_v   = sex2_cv[mask_cv]   if mask_cv is not None else sex2_cv
+            X_clin_te_v = X_clin_te[mask_te] if mask_te is not None else X_clin_te
+            y2_te_v     = y2_te[mask_te]     if mask_te is not None else y2_te
+            sex2_te_v   = sex2_te[mask_te]   if mask_te is not None else sex2_te
+
+            print(f"\n{'#'*60}")
+            print(f"  [M2_LF {aec_var}]  (scale_clinic=True, scale_aec={scale_aec_v})")
+            print(f"{'#'*60}")
+
+            out2_lf = os.path.join(_base, aec_var)
+
+            print(f"  [M2_LF/{aec_var}] Cross-validating LateFusion ...", flush=True)
+            (lf_cv, lf_roc_folds,
+             lf_histories, lf_best_epochs,
+             lf_best_thresholds) = run_cross_validation_late_fusion(
+                X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_aec=scale_aec_v,
+            )
+
+            print_cv_summary("LateFusion", lf_cv)
+
+            med_epoch_lf = int(np.median(lf_best_epochs))
+            med_thresh_lf = float(np.median(lf_best_thresholds))
+            print(f"  [M2_LF/{aec_var}] Evaluating on test set (med_epoch={med_epoch_lf}, thresh={med_thresh_lf:.3f}) ...", flush=True)
+            (lf_pred_te, lf_prob_te, lf_true_te, stats_te_lf,
+             model_te_lf, X_clin_te_s_lf, X_aec_te_s_lf) = evaluate_test_late_fusion(
+                X_clin_cv_v, X_aec_cv_v, y2_cv_v,
+                X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
+                med_epoch_lf, scale_aec=scale_aec_v,
+                threshold=med_thresh_lf,
+                weight_path=os.path.join(out2_lf, f"M2_LF_{aec_var}_weights.pt"),
+            )
+
+            os.makedirs(out2_lf, exist_ok=True)
+            print(f"  [M2_LF/{aec_var}] Saving figures ...", flush=True)
+            save_all_cross(
+                lf_cv, lf_roc_folds, lf_histories, med_epoch_lf,
+                X_clin_cv_v, y2_cv_v, sex2_cv_v,
+                X_clin_te_v, y2_te_v,
+                lf_pred_te, lf_true_te, sex2_te_v, lf_prob_te,
+                model_label=f"model 2_LF ({aec_var})", out_dir=out2_lf,
+                ci_dict=stats_te_lf.get("bootstrap_lf", {}),
+            )
+            print(f"  [M2_LF/{aec_var}] Plotting Grad-CAM ...", flush=True)
+            plot_cam_aec(
+                model_te_lf, X_clin_te_s_lf, X_aec_te_s_lf, lf_true_te,
+                out_dir=out2_lf, aec_var=aec_var,
+                model_label=f"Model 2_LF ({aec_var})",
+            )
+            print(f"  [M2_LF/{aec_var}] Done.", flush=True)
+
+            results.append({
+                "aec_var":     aec_var,
+                "case":        aec_var,
+                "out_dir":     out2_lf,
+                "m2_lf":       _metrics(lf_true_te, lf_pred_te, lf_prob_te),
+                "lf_cv_folds": lf_cv,
+                "test_stats":  stats_te_lf,
+                "y_true_te":   lf_true_te,
+                "lf_prob_te":  lf_prob_te,
+            })
+            if progress_queue is not None:
+                progress_queue.put(("M2_LF", aec_var))
+    finally:
+        sys.stdout = sys.__stdout__
+
+    with open(os.path.join(_base, "run.log"), "w", encoding="utf-8") as f:
+        f.write(buf.getvalue())
+
+    return results
+
+
+def _run_model3_lf(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
+                   X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
+                   aec_size: int = 128, aec_variants: list | None = None,
+                   progress_queue=None, out_base_dir: str | None = None):
+    """Model 3_LF(Clinic+Scanner+AEC Late Fusion): AEC 변형별로 LateFusion3를 실행하고 결과 리스트를 반환.
+    Grad-CAM 3종을 케이스 디렉토리에 저장. 로그는 run.log에 저장."""
+    if aec_variants is None:
+        aec_variants = AEC_VARIANTS
+    buf = io.StringIO()
+    sys.stdout = buf
+    results = []
+    _base = out_base_dir or RESULTS_MODEL_3_LF_DIR
+    try:
+        print(f"{'='*60}")
+        print(f"  MODEL 3_LF — Clinic + Scanner + AEC Late Fusion (aec{aec_size})  ({len(aec_variants)} AEC variants)")
+        print(f"{'='*60}")
+
+        for aec_var in aec_variants:
+            X_aec3_cv_v, mask_cv, scale_aec_v = aec_variant(X_aec3_cv, aec_var)
+            X_aec3_te_v, mask_te, _            = aec_variant(X_aec3_te, aec_var)
+            X_clin3_cv_v = X_clin3_cv[mask_cv] if mask_cv is not None else X_clin3_cv
+            X_mfr3_cv_v  = X_mfr_cv[mask_cv]   if mask_cv is not None else X_mfr_cv
+            y3_cv_v      = y3_cv[mask_cv]       if mask_cv is not None else y3_cv
+            sex3_cv_v    = sex3_cv[mask_cv]     if mask_cv is not None else sex3_cv
+            X_clin3_te_v = X_clin3_te[mask_te] if mask_te is not None else X_clin3_te
+            X_mfr3_te_v  = X_mfr_te[mask_te]   if mask_te is not None else X_mfr_te
+            y3_te_v      = y3_te[mask_te]       if mask_te is not None else y3_te
+            sex3_te_v    = sex3_te[mask_te]     if mask_te is not None else sex3_te
+
+            print(f"\n{'#'*60}")
+            print(f"  [M3_LF {aec_var}]  (scale_clinic=True, scale_aec={scale_aec_v})")
+            print(f"{'#'*60}")
+
+            out3_lf = os.path.join(_base, aec_var)
+
+            print(f"  [M3_LF/{aec_var}] Cross-validating LateFusion3 ...", flush=True)
+            (lf3_cv, lf3_roc_folds,
+             lf3_histories, lf3_best_epochs,
+             lf3_best_thresholds) = run_cross_validation_late_fusion3(
+                X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v, n_mfr,
+                scale_aec=scale_aec_v,
+            )
+
+            print_cv_summary("LateFusion3", lf3_cv)
+
+            med_epoch_lf3 = int(np.median(lf3_best_epochs))
+            med_thresh_lf3 = float(np.median(lf3_best_thresholds))
+            print(f"  [M3_LF/{aec_var}] Evaluating on test set (med_epoch={med_epoch_lf3}, thresh={med_thresh_lf3:.3f}) ...", flush=True)
+            (lf3_pred_te, lf3_prob_te, lf3_true_te, stats_te_lf3,
+             model_te_lf3, X_clin3_te_s, X_aec3_te_s) = evaluate_test_late_fusion3(
+                X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v,
+                X_clin3_te_v, X_aec3_te_v, X_mfr3_te_v, y3_te_v,
+                sex3_te_v, med_epoch_lf3, n_mfr,
+                scale_aec=scale_aec_v,
+                threshold=med_thresh_lf3,
+                weight_path=os.path.join(out3_lf, f"M3_LF_{aec_var}_weights.pt"),
+            )
+
+            os.makedirs(out3_lf, exist_ok=True)
+            print(f"  [M3_LF/{aec_var}] Saving figures ...", flush=True)
+            save_all_cross(
+                lf3_cv, lf3_roc_folds, lf3_histories, med_epoch_lf3,
+                X_clin3_cv_v, y3_cv_v, sex3_cv_v,
+                X_clin3_te_v, y3_te_v,
+                lf3_pred_te, lf3_true_te, sex3_te_v, lf3_prob_te,
+                model_label=f"model 3_LF ({aec_var})", out_dir=out3_lf,
+                ci_dict=stats_te_lf3.get("bootstrap_lf3", {}),
+            )
+            print(f"  [M3_LF/{aec_var}] Plotting Grad-CAM ...", flush=True)
+            plot_cam_aec(
+                model_te_lf3, X_clin3_te_s, X_aec3_te_s, lf3_true_te,
+                out_dir=out3_lf, aec_var=aec_var,
+                model_label=f"Model 3_LF ({aec_var})",
+                X_mfr_te=X_mfr3_te_v,
+            )
+            print(f"  [M3_LF/{aec_var}] Done.", flush=True)
+
+            results.append({
+                "aec_var":      aec_var,
+                "case":         aec_var,
+                "out_dir":      out3_lf,
+                "m3_lf":        _metrics(lf3_true_te, lf3_pred_te, lf3_prob_te),
+                "lf3_cv_folds": lf3_cv,
+                "test_stats":   stats_te_lf3,
+                "y_true_te":    lf3_true_te,
+                "lf3_prob_te":  lf3_prob_te,
+            })
+            if progress_queue is not None:
+                progress_queue.put(("M3_LF", aec_var))
+    finally:
+        sys.stdout = sys.__stdout__
+
+    with open(os.path.join(_base, "run.log"), "w", encoding="utf-8") as f:
+        f.write(buf.getvalue())
+
+    return results
+
+
 def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
                 X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
                 aec_size: int = 128, aec_variants: list | None = None,
@@ -705,9 +900,9 @@ def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, 
 
 def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, results_m4,
                                 aec_size: int = 128, results_dir: str | None = None,
-                                results_m5=None):
+                                results_m5=None, results_m2_lf=None, results_m3_lf=None):
     """병렬 실행 완료 후, baseline을 포함한 test_roc_curves.png를 각 디렉토리에 덮어씀.
-    - M2/M3/M4: Model 1 LR을 baseline으로 비교
+    - M2/M3/M4/M2_LF/M3_LF: Model 1 LR을 baseline으로 비교
     - M2_2: 동일 aec_var의 Model 2 Matched를 baseline으로 비교
     """
     r1 = results_m1[0] if results_m1 else None
@@ -803,6 +998,28 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
                 out_path=os.path.join(RESULTS_MODEL_5_DIR, "test_roc_curves.png"),
             )
 
+    for r in (results_m2_lf or []):
+        plot_test_roc_with_baseline(
+            primary_true=r["y_true_te"],
+            primary_prob=r["lf_prob_te"],
+            primary_label=f"Model 2_LF LateFusion ({r['aec_var']})",
+            baseline_true=m1_y_te,
+            baseline_prob=m1_lr_prob,
+            baseline_label="Model 1 LR (baseline)",
+            out_path=os.path.join(r["out_dir"], "test_roc_curves.png"),
+        )
+
+    for r in (results_m3_lf or []):
+        plot_test_roc_with_baseline(
+            primary_true=r["y_true_te"],
+            primary_prob=r["lf3_prob_te"],
+            primary_label=f"Model 3_LF LateFusion3 ({r['aec_var']})",
+            baseline_true=m1_y_te,
+            baseline_prob=m1_lr_prob,
+            baseline_label="Model 1 LR (baseline)",
+            out_path=os.path.join(r["out_dir"], "test_roc_curves.png"),
+        )
+
     print(f"  Comparison ROC curves saved.")
 
 def run_all_cases():
@@ -875,6 +1092,7 @@ def run_all_cases():
     )
 
     results_m2 = results_m2_2 = results_m3 = results_m4 = results_m5 = []
+    results_m2_lf = results_m3_lf = []
 
     # ── Model 5: Clinic + AEC hand-crafted features (LR, 단독 실행) ───────
     if RUN_M5:
@@ -893,10 +1111,12 @@ def run_all_cases():
         print("[Model 5] Finished.\n")
 
     _active_cfg = [
-        ("M2",   RUN_M2,   "M2   ", 0),
-        ("M2_2", RUN_M2_2, "M2_2 ", 1),
-        ("M3",   RUN_M3,   "M3   ", 2),
-        ("M4",   RUN_M4,   "M4   ", 3),
+        ("M2",    RUN_M2,    "M2    ", 0),
+        ("M2_2",  RUN_M2_2,  "M2_2  ", 1),
+        ("M3",    RUN_M3,    "M3    ", 2),
+        ("M4",    RUN_M4,    "M4    ", 3),
+        ("M2_LF", RUN_M2_LF, "M2_LF ", 4),
+        ("M3_LF", RUN_M3_LF, "M3_LF ", 5),
     ]
     _active_keys = [k for k, flag, _, _ in _active_cfg if flag]
     active_label = "/".join(_active_keys) or "(none)"
@@ -938,6 +1158,20 @@ def run_all_cases():
                         X_aec_te, y2_te, sex2_te,
                         actual_size, aec_variants, q, RESULTS_MODEL_4_DIR,
                     )
+                if RUN_M2_LF:
+                    futures["M2_LF"] = executor.submit(
+                        _run_model2_lf,
+                        X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
+                        X_clin_te, X_aec_te, y2_te, sex2_te,
+                        actual_size, aec_variants, q, RESULTS_MODEL_2_LF_DIR,
+                    )
+                if RUN_M3_LF:
+                    futures["M3_LF"] = executor.submit(
+                        _run_model3_lf,
+                        X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
+                        X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
+                        actual_size, aec_variants, q, RESULTS_MODEL_3_LF_DIR,
+                    )
                 total_updates = n_var * len(futures)
                 received = 0
                 while received < total_updates:
@@ -949,10 +1183,12 @@ def run_all_cases():
                     except Exception:
                         if all(fut.done() for fut in futures.values()):
                             break
-                if RUN_M2:   results_m2   = futures["M2"].result()
-                if RUN_M2_2: results_m2_2 = futures["M2_2"].result()
-                if RUN_M3:   results_m3   = futures["M3"].result()
-                if RUN_M4:   results_m4   = futures["M4"].result()
+                if RUN_M2:    results_m2    = futures["M2"].result()
+                if RUN_M2_2:  results_m2_2  = futures["M2_2"].result()
+                if RUN_M3:    results_m3    = futures["M3"].result()
+                if RUN_M4:    results_m4    = futures["M4"].result()
+                if RUN_M2_LF: results_m2_lf = futures["M2_LF"].result()
+                if RUN_M3_LF: results_m3_lf = futures["M3_LF"].result()
             for bar in bars.values():
                 bar.close()
     print("  All models done.\n")
@@ -960,15 +1196,18 @@ def run_all_cases():
     print("[Results] Plotting comparison ROC curves ...")
     _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, results_m4,
                                 actual_size, results_dir=results_dir,
-                                results_m5=results_m5)
+                                results_m5=results_m5,
+                                results_m2_lf=results_m2_lf, results_m3_lf=results_m3_lf)
     print("[Results] Printing comparison table ...")
     _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_m4, actual_size,
-                      results_m5=results_m5)
+                      results_m5=results_m5,
+                      results_m2_lf=results_m2_lf, results_m3_lf=results_m3_lf)
     _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, results_m4,
                               actual_size, results_m5=results_m5)
     print("[Results] Saving comparison markdown ...")
     _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                        actual_size, results_dir=results_dir, results_m5=results_m5)
+                        actual_size, results_dir=results_dir, results_m5=results_m5,
+                        results_m2_lf=results_m2_lf, results_m3_lf=results_m3_lf)
     print("[Results] All done.\n")
 
 # ── 출력 헬퍼 ────────────────────────────────────────────────
@@ -1002,19 +1241,21 @@ def _model_table_str(results, model_key, col=8):
     return "\n".join(rows)
 
 def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                        results_m5=None):
+                        results_m5=None, results_m2_lf=None, results_m3_lf=None):
     """각 모델의 best case(Test AUC 기준)를 요약 출력."""
     sep = "=" * 70
     print(f"\n{sep}")
     print("  BEST CASES SUMMARY  (by Test overall AUC)")
     print(sep)
     entries = [
-        ("M1",   "LR",             results_m1,          "m1_lr"),
-        ("M2",   "CrossAttn",      results_m2,          "m2_ca"),
-        ("M2_2", "CrossAttn",      results_m2_2,        "m2_2_ca"),
-        ("M3",   "CrossAttn3",     results_m3,          "m3_ca3"),
-        ("M4",   "AECOnly",        results_m4,          "m4_aec"),
-        ("M5",   "LR+AECFeatures", results_m5 or [],    "m5_lr"),
+        ("M1",    "LR",             results_m1,              "m1_lr"),
+        ("M2",    "CrossAttn",      results_m2,              "m2_ca"),
+        ("M2_2",  "CrossAttn",      results_m2_2,            "m2_2_ca"),
+        ("M3",    "CrossAttn3",     results_m3,              "m3_ca3"),
+        ("M4",    "AECOnly",        results_m4,              "m4_aec"),
+        ("M5",    "LR+AECFeatures", results_m5 or [],        "m5_lr"),
+        ("M2_LF", "LateFusion",     results_m2_lf or [],     "m2_lf"),
+        ("M3_LF", "LateFusion3",    results_m3_lf or [],     "m3_lf"),
     ]
     col = 8
     hdr = f"  {'Model':<6} {'Sub-model':<12} {'Best Case':<32}"
@@ -1033,9 +1274,10 @@ def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, result
         print(row)
 
 def _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                      aec_size: int = 128, results_m5=None):
-    """Model 1~5의 모든 case 결과를 콘솔 테이블로 출력하고, 마지막에 best case 요약을 출력."""
-    n_var = len({r["aec_var"] for r in results_m2})
+                      aec_size: int = 128, results_m5=None,
+                      results_m2_lf=None, results_m3_lf=None):
+    """Model 1~5/LF의 모든 case 결과를 콘솔 테이블로 출력하고, 마지막에 best case 요약을 출력."""
+    n_var = len({r["aec_var"] for r in results_m2}) if results_m2 else 0
     sep = "=" * 70
     print(f"\n{sep}")
     print(f"  AEC {aec_size}pt — MODEL 1 — Test Set Performance  (1 scaling case)")
@@ -1074,8 +1316,23 @@ def _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_
         print(f"\n  [LR+AECFeatures]")
         print(_model_table_str(results_m5, "m5_lr"))
 
+    if results_m2_lf:
+        print(f"\n{sep}")
+        print(f"  AEC {aec_size}pt — MODEL 2_LF — Clinic + AEC Late Fusion  ({n_var} AEC variants)")
+        print(sep)
+        print(f"\n  [LateFusion]")
+        print(_model_table_str(results_m2_lf, "m2_lf"))
+
+    if results_m3_lf:
+        print(f"\n{sep}")
+        print(f"  AEC {aec_size}pt — MODEL 3_LF — Clinic + Scanner + AEC Late Fusion  ({n_var} AEC variants)")
+        print(sep)
+        print(f"\n  [LateFusion3]")
+        print(_model_table_str(results_m3_lf, "m3_lf"))
+
     _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                        results_m5=results_m5)
+                        results_m5=results_m5,
+                        results_m2_lf=results_m2_lf, results_m3_lf=results_m3_lf)
 
 def _md_table(results, model_key):
     """Test AUC 기준 best case 행을 **굵게** 표시."""
@@ -1139,15 +1396,17 @@ def _cross_model_md_block(results_a, fold_key_a, label_a,
     return lines
 
 def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                           results_m5=None):
+                           results_m5=None, results_m2_lf=None, results_m3_lf=None):
     """각 모델별 best case(Test AUC 기준) 요약 markdown 테이블 반환."""
     entries = [
-        ("M1",   "LR",             results_m1,       "m1_lr"),
-        ("M2",   "CrossAttn",      results_m2,       "m2_ca"),
-        ("M2_2", "CrossAttn",      results_m2_2,     "m2_2_ca"),
-        ("M3",   "CrossAttn3",     results_m3,       "m3_ca3"),
-        ("M4",   "AECOnly",        results_m4,       "m4_aec"),
-        ("M5",   "LR+AECFeatures", results_m5 or [], "m5_lr"),
+        ("M1",    "LR",             results_m1,              "m1_lr"),
+        ("M2",    "CrossAttn",      results_m2,              "m2_ca"),
+        ("M2_2",  "CrossAttn",      results_m2_2,            "m2_2_ca"),
+        ("M3",    "CrossAttn3",     results_m3,              "m3_ca3"),
+        ("M4",    "AECOnly",        results_m4,              "m4_aec"),
+        ("M5",    "LR+AECFeatures", results_m5 or [],        "m5_lr"),
+        ("M2_LF", "LateFusion",     results_m2_lf or [],     "m2_lf"),
+        ("M3_LF", "LateFusion3",    results_m3_lf or [],     "m3_lf"),
     ]
     col_hdr = " | ".join(mn for mn, _ in _METRICS_DEF)
     col_sep = " | ".join("------:" for _ in _METRICS_DEF)
@@ -1166,7 +1425,7 @@ def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, res
 
 def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, results_m4,
                         aec_size: int = 128, results_dir: str | None = None,
-                        results_m5=None):
+                        results_m5=None, results_m2_lf=None, results_m3_lf=None):
     """모든 모델·케이스의 비교 테이블과 통계 검정 결과를 scaling_comparison.md로 저장."""
     lines = [
         f"# Scaling Comparison — Test Set Performance (AEC {aec_size}pt)",
@@ -1176,7 +1435,8 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         "> 각 모델에서 Test 전체 AUC가 가장 높은 case. 세부 테이블에서 **굵게** 표시.",
         "",
         _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, results_m4,
-                               results_m5=results_m5),
+                               results_m5=results_m5,
+                               results_m2_lf=results_m2_lf, results_m3_lf=results_m3_lf),
         "",
         "---",
         "",
@@ -1232,6 +1492,26 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         "### LR+AECFeatures",
         "",
         _md_table(results_m5 or [], "m5_lr"),
+        "",
+        "---",
+        "",
+        f"## Model 2_LF — Clinic + AEC Late Fusion  ({len(AEC_VARIANTS)} AEC variants)",
+        "",
+        "> Cross-Attention 없이 각 모달리티를 독립 인코딩 후 concat.",
+        "",
+        "### LateFusion",
+        "",
+        _md_table(results_m2_lf or [], "m2_lf"),
+        "",
+        "---",
+        "",
+        f"## Model 3_LF — Clinic + Scanner + AEC Late Fusion  ({len(AEC_VARIANTS)} AEC variants)",
+        "",
+        "> Cross-Attention 없이 Clinic·Scanner·AEC를 독립 인코딩 후 concat.",
+        "",
+        "### LateFusion3",
+        "",
+        _md_table(results_m3_lf or [], "m3_lf"),
         "",
         "---",
         "",
@@ -1392,6 +1672,14 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         ts = r.get("test_stats", {})
         lbl = _case_label(r)
         lines += _ci_rows("M4", "AECOnly", lbl, ts.get("bootstrap_aec_only", {}))
+    for r in (results_m2_lf or []):
+        ts = r.get("test_stats", {})
+        lbl = _case_label(r)
+        lines += _ci_rows("M2_LF", "LateFusion", lbl, ts.get("bootstrap_lf", {}))
+    for r in (results_m3_lf or []):
+        ts = r.get("test_stats", {})
+        lbl = _case_label(r)
+        lines += _ci_rows("M3_LF", "LateFusion3", lbl, ts.get("bootstrap_lf3", {}))
     lines.append("")
 
     # ── Test Set: DeLong AUC 비교 ──────────────────────────────────────────────

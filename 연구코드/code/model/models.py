@@ -6,6 +6,8 @@ PyTorch 모델 정의 및 학습·평가 유틸리티.
   AECOnlyNet            — AEC 시퀀스만 입력하는 분류 모델 (M4)
   ClinAECCrossAttn      — Clinic + AEC Bidirectional Cross-Attention (M2)
   ClinAECScanCrossAttn  — Clinic + Scanner(MFR Embedding) + AEC Cross-Attention (M3)
+  ClinAECLateFusion     — Clinic + AEC Late Fusion (M2_LF)
+  ClinAECScanLateFusion — Clinic + Scanner + AEC Late Fusion (M3_LF)
 
 서브모듈:
   ResBlock1D            — Conv1d×2 + BN + ReLU 잔차 블록
@@ -484,6 +486,124 @@ def build_cross_attn3(y_tr_arr, n_manufacturers):
         [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
     ).to(DEVICE)
     model = ClinAECScanCrossAttn(
+        n_manufacturers=n_manufacturers,
+    ).to(DEVICE)
+    crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)
+    opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
+    return model, crit, opt, sched
+
+
+# ── Late Fusion Models (M2_LF / M3_LF) ──────────────────────
+
+class ClinAECLateFusion(nn.Module):
+    """
+    Clinic + AEC Late Fusion 분류 모델 (M2_LF).
+
+    각 모달리티를 독립 인코더로 처리한 뒤 mean-pool → concat → classifier.
+    Cross-Attention 없이 최종 표현만 결합한다.
+
+    aec_encoder:
+      'resnet' — ResNet1DEncoder (AEC 시퀀스 1D Conv 인코딩)
+      'scalar' — ScalarFeatureTokenizer (AEC 값을 독립 토큰)
+    """
+    def __init__(
+        self,
+        num_clinical_features: int = 3,
+        num_aec_features: int = 128,
+        d_model: int = HIDDEN,
+        classifier_hidden_dim: int = 128,
+        dropout: float = 0.1,
+        aec_encoder: str = 'resnet',
+        n_aec_tokens: int = 32,
+    ):
+        super().__init__()
+        self.clinical_tokenizer = ScalarFeatureTokenizer(num_clinical_features, d_model)
+        if aec_encoder == 'resnet':
+            self.aec_encoder = ResNet1DEncoder(d_model=d_model, n_tokens=n_aec_tokens)
+        else:
+            self.aec_encoder = ScalarFeatureTokenizer(num_aec_features, d_model)
+        self.classifier = nn.Sequential(
+            nn.Linear(d_model * 2, classifier_hidden_dim), nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(classifier_hidden_dim, 1),
+        )
+
+    def forward(self, clinical_x: torch.Tensor, aec_x: torch.Tensor,
+                return_attention: bool = False):
+        c_repr = self.clinical_tokenizer(clinical_x).mean(1)          # (B, d_model)
+        a_repr = self.aec_encoder(aec_x).mean(1)                      # (B, d_model)
+        logits = self.classifier(
+            torch.cat([c_repr, a_repr], dim=-1)                       # (B, d_model*2)
+        ).squeeze(-1)
+        if return_attention:
+            return logits, {}
+        return logits
+
+
+def build_late_fusion(y_tr_arr, num_clinical_features=3, num_aec_features=128,
+                      aec_encoder='resnet'):
+    """ClinAECLateFusion 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+    pos_w = torch.tensor(
+        [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
+    ).to(DEVICE)
+    model = ClinAECLateFusion(
+        num_clinical_features=num_clinical_features,
+        num_aec_features=num_aec_features,
+        aec_encoder=aec_encoder,
+    ).to(DEVICE)
+    crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)
+    opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
+    return model, crit, opt, sched
+
+
+class ClinAECScanLateFusion(nn.Module):
+    """
+    Clinic + Scanner + AEC Late Fusion 분류 모델 (M3_LF).
+
+    임상·스캐너 토큰과 AEC 인코딩을 각각 mean-pool한 뒤 concat → classifier.
+    Cross-Attention 없이 최종 표현만 결합한다.
+    """
+    def __init__(
+        self,
+        n_manufacturers:       int,
+        num_clinical_features: int   = 3,
+        d_model:               int   = HIDDEN,
+        classifier_hidden_dim: int   = 128,
+        dropout:               float = 0.1,
+        n_aec_tokens:          int   = 32,
+    ):
+        super().__init__()
+        self.clinical_tokenizer = ScalarFeatureTokenizer(num_clinical_features, d_model)
+        self.mfr_tokenizer      = MfrTokenizer(n_manufacturers, d_model)
+        self.aec_encoder        = ResNet1DEncoder(d_model=d_model, n_tokens=n_aec_tokens)
+        self.classifier = nn.Sequential(
+            nn.Linear(d_model * 2, classifier_hidden_dim), nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(classifier_hidden_dim, 1),
+        )
+
+    def forward(self, clinical_x: torch.Tensor, aec_x: torch.Tensor,
+                mfr_x: torch.Tensor, return_attention: bool = False):
+        c_tokens = self.clinical_tokenizer(clinical_x)                # (B, 3, d_model)
+        s_tokens = self.mfr_tokenizer(mfr_x)                         # (B, 1, d_model)
+        cs_repr  = torch.cat([c_tokens, s_tokens], dim=1).mean(1)    # (B, d_model)
+        a_repr   = self.aec_encoder(aec_x).mean(1)                   # (B, d_model)
+        logits   = self.classifier(
+            torch.cat([cs_repr, a_repr], dim=-1)                     # (B, d_model*2)
+        ).squeeze(-1)
+        if return_attention:
+            return logits, {}
+        return logits
+
+
+def build_late_fusion3(y_tr_arr, n_manufacturers):
+    """ClinAECScanLateFusion 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+    pos_w = torch.tensor(
+        [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
+    ).to(DEVICE)
+    model = ClinAECScanLateFusion(
         n_manufacturers=n_manufacturers,
     ).to(DEVICE)
     crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)

@@ -1,0 +1,90 @@
+============================================================
+  MODEL 5 — Clinic + AEC Hand-crafted Features (LR)
+============================================================
+  [M5] Cross-validating LR+AEC ...
+=======================================================
+5-Fold Cross-Validation  [LR + AEC Hand-crafted Features]
+=======================================================
+
+── Fold 1/5 ──────────────────────────────
+  LR+AEC — AUC: 0.8273  AUPRC: 0.3419  Brier: 0.1867  Acc: 0.7760  F1: 0.4384  (thresh=0.541)
+
+── Fold 2/5 ──────────────────────────────
+  LR+AEC — AUC: 0.8678  AUPRC: 0.4915  Brier: 0.1454  Acc: 0.7869  F1: 0.4658  (thresh=0.439)
+
+── Fold 3/5 ──────────────────────────────
+  LR+AEC — AUC: 0.7253  AUPRC: 0.2821  Brier: 0.2094  Acc: 0.7377  F1: 0.3333  (thresh=0.565)
+
+── Fold 4/5 ──────────────────────────────
+  LR+AEC — AUC: 0.7683  AUPRC: 0.3329  Brier: 0.1711  Acc: 0.7049  F1: 0.3721  (thresh=0.397)
+
+── Fold 5/5 ──────────────────────────────
+  LR+AEC — AUC: 0.8276  AUPRC: 0.5305  Brier: 0.1726  Acc: 0.8626  F1: 0.5098  (thresh=0.654)
+
+===========================================================================
+LR+AEC  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8273     0.3419     0.1867     0.7760     0.4384
+  2          0.8678     0.4915     0.1454     0.7869     0.4658
+  3          0.7253     0.2821     0.2094     0.7377     0.3333
+  4          0.7683     0.3329     0.1711     0.7049     0.3721
+  5          0.8276     0.5305     0.1726     0.8626     0.5098
+  ──────────────────────────────────────────────────────────
+  Mean       0.8032     0.3958     0.1770     0.7736     0.4239
+  ±Std       0.0503     0.0970     0.0210     0.0531     0.0636
+  [M5] Evaluating on test set (thresh=0.541) ...
+
+=======================================================
+Final Test Evaluation  [LR+AEC | threshold=0.541]
+=======================================================
+
+LR+AEC — Test Set (Overall):  AUC: 0.7874  AUPRC: 0.2809  Brier: 0.1885  Acc: 0.7598  F1: 0.3820
+
+LR+AEC — Test Set (By Sex):
+  [M] n=82  AUC: 0.6901  AUPRC: 0.2692  Brier: 0.2601  Acc: 0.6707  F1: 0.4490
+              precision    recall  f1-score   support
+
+      Normal       0.96      0.64      0.77        69
+  Sarcopenia       0.31      0.85      0.45        13
+
+    accuracy                           0.67        82
+   macro avg       0.63      0.74      0.61        82
+weighted avg       0.85      0.67      0.72        82
+
+  [F] n=147  AUC: 0.8229  AUPRC: 0.3465  Brier: 0.1485  Acc: 0.8095  F1: 0.3000
+              precision    recall  f1-score   support
+
+      Normal       0.96      0.83      0.89       136
+  Sarcopenia       0.21      0.55      0.30        11
+
+    accuracy                           0.81       147
+   macro avg       0.58      0.69      0.59       147
+weighted avg       0.90      0.81      0.85       147
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — LR+AEC  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.7874         0.7000         0.8624
+  AUPRC            0.2809         0.1711         0.4662
+  Brier            0.1885         0.1610         0.2154
+  Accuracy         0.7598         0.7031         0.8166
+  F1               0.3820         0.2500         0.5055
+  [M5] Saving figures ...
+
+Saved:
+  연구코드/results/0612_128_aug/model_5/data_distribution.png
+  연구코드/results/0612_128_aug/model_5/cv_roc_curves.png
+  연구코드/results/0612_128_aug/model_5/cv_metric_distribution.png
+  연구코드/results/0612_128_aug/model_5/confusion_matrices.png
+  연구코드/results/0612_128_aug/model_5/test_roc_curves.png
+  연구코드/results/0612_128_aug/model_5/test_roc_by_sex.png
+  연구코드/results/0612_128_aug/model_5/calibration.png
+  연구코드/results/0612_128_aug/model_5/results.md
+  [M5] Done.

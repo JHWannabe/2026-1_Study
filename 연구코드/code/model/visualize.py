@@ -746,14 +746,15 @@ def plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te, model_label="C
 
 def _save_report_md_cross(ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
                            ca_pred_te, ca_prob_te, ca_true_te,
-                           sex_te, ca_histories, med_epoch, ci_dict=None):
-    """CrossAttn CV 결과와 test set 성능 지표를 results.md 파일로 저장 (Model 2/2_2/3 공용)."""
+                           sex_te, ca_histories, med_epoch, ci_dict=None,
+                           model_name="CrossAttn"):
+    """CrossAttn/LateFusion CV 결과와 test set 성능 지표를 results.md 파일로 저장 (Model 2/2_2/3/2_LF/3_LF 공용)."""
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     auc_arr = np.array([h["val_auc"] for h in ca_histories])
     best_val_aucs = auc_arr.max(axis=1)
 
     lines = [
-        "# SMI Binary Classification — CrossAttn Results",
+        f"# SMI Binary Classification — {model_name} Results",
         "",
         f"Generated: {now}  |  {N_FOLDS}-Fold CV  |  Median best epoch: {med_epoch}",
         "",
@@ -773,11 +774,11 @@ def _save_report_md_cross(ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
         "",
         "## 1. Cross-Validation Summary",
         "",
-        "### CrossAttn",
+        f"### {model_name}",
         "",
         _cv_table(ca_cv),
         "",
-        "CrossAttn best val AUC per fold: " +
+        f"{model_name} best val AUC per fold: " +
         ", ".join(f"Fold{i+1}={v:.4f}" for i, v in enumerate(best_val_aucs)),
         "",
         "---",
@@ -788,7 +789,7 @@ def _save_report_md_cross(ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
         "",
         "| Model | AUC-ROC | AUPRC | Brier | Accuracy | F1 |",
         "|-------|--------:|------:|------:|---------:|---:|",
-        f"| CrossAttn | {roc_auc_score(ca_true_te, ca_prob_te):.4f}"
+        f"| {model_name} | {roc_auc_score(ca_true_te, ca_prob_te):.4f}"
         f" | {average_precision_score(ca_true_te, ca_prob_te):.4f}"
         f" | {brier_score_loss(ca_true_te, ca_prob_te):.4f}"
         f" | {accuracy_score(ca_true_te, ca_pred_te):.4f}"
@@ -817,7 +818,7 @@ def _save_report_md_cross(ca_cv, X_cv, y_cv, sex_cv, X_te, y_te,
         "| File | Description |",
         "|------|-------------|",
         "| `data_distribution.png` | Train/Test class·Age·BMI distributions |",
-        "| `cv_roc_curves.png` | Per-fold ROC curves (CrossAttn) |",
+        f"| `cv_roc_curves.png` | Per-fold ROC curves ({model_name}) |",
         "| `cv_metric_distribution.png` | Boxplot of AUC / Acc / F1 across folds |",
         "| `training_curves.png` | Loss & AUC training curves (mean ± std) |",
         "| `test_roc_curves.png` | Final test-set ROC curve |",
@@ -1376,19 +1377,19 @@ def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,
                    X_clin_te, y_te,
                    ca_pred_te, ca_true_te, sex_te, ca_prob_te,
                    model_label="model 2", out_dir=None, ci_dict=None):
-    """Model 2/2_2/3용 시각화 전체(8종 png)와 results.md를 out_dir에 저장."""
+    """Model 2/2_2/3/2_LF/3_LF용 시각화 전체(8종 png)와 results.md를 out_dir에 저장."""
     global _dir2
     _dir2 = out_dir or RESULTS_MODEL_2_DIR
     plot_data_distribution(X_clin_cv, y_cv, sex_cv, X_clin_te, y_te, sex_te,
                            out_dir=_dir2)
-    plot_cv_roc_cross(ca_roc_folds)
-    plot_cv_metric_cross(ca_cv)
-    plot_training_curves_cross(ca_histories, med_epoch)
-    plot_test_roc_cross(ca_true_te, ca_prob_te)
-    plot_test_roc_by_sex_cross(ca_true_te, ca_prob_te, sex_te)
-    plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te)
+    plot_cv_roc_cross(ca_roc_folds, model_label=model_label)
+    plot_cv_metric_cross(ca_cv, model_label=model_label)
+    plot_training_curves_cross(ca_histories, med_epoch, model_label=model_label)
+    plot_test_roc_cross(ca_true_te, ca_prob_te, model_label=model_label)
+    plot_test_roc_by_sex_cross(ca_true_te, ca_prob_te, sex_te, model_label=model_label)
+    plot_confusion_matrices_cross(ca_true_te, ca_pred_te, sex_te, model_label=model_label)
     plot_calibration(
-        [("CrossAttn", ca_true_te, ca_prob_te, "steelblue")],
+        [(model_label, ca_true_te, ca_prob_te, "steelblue")],
         out_path=f"{_dir2}/calibration_.png",
     )
 
@@ -1400,7 +1401,8 @@ def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,
 
     _save_report_md_cross(ca_cv, X_clin_cv, y_cv, sex_cv, X_clin_te, y_te,
                           ca_pred_te, ca_prob_te, ca_true_te,
-                          sex_te, ca_histories, med_epoch, ci_dict=ci_dict)
+                          sex_te, ca_histories, med_epoch, ci_dict=ci_dict,
+                          model_name=model_label)
 
 
 # ── Model 4: AEC Only ───────────────────────────────────────
