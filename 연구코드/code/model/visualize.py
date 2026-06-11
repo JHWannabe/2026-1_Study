@@ -37,7 +37,7 @@ from sklearn.calibration import calibration_curve
 
 from config import N_FOLDS, EPOCHS, RESULTS_DIR, RESULTS_MODEL_2_DIR
 
-FOLD_COLORS = plt.get_cmap("tab10")(np.linspace(0, 0.45, N_FOLDS))
+FOLD_COLORS = mpl.colormaps["tab10"](np.linspace(0, 0.45, N_FOLDS))
 
 # 현재 저장 디렉토리 (save_all / save_all_cross 호출 시 갱신)
 _dir1: str = RESULTS_DIR
@@ -1755,3 +1755,89 @@ def plot_cam_aec_only(model, X_aec_te_s, y_true_te,
     print(f"  {path1}")
     print(f"  {path2}")
     print(f"  {path3}")
+
+
+# ── Model 5: LR + AEC Hand-crafted Features ─────────────────
+
+_M5_FEATURE_NAMES = [
+    "Age", "Sex", "BMI",
+    "mean", "std", "max", "min",
+    "peak_pos", "auc", "skew", "kurt",
+    "early_mean", "mid_mean", "late_mean",
+]
+
+
+def plot_lr_feature_importance(lr_model, X_te_s, y_true_te, out_dir, model_label="Model 5"):
+    """
+    LR 계수를 피처 중요도로 시각화 (CAM 등가).
+
+    파일:
+      lr_coef_bar.png        — LR 계수 bar chart (clinical=blue, AEC=tomato)
+      lr_feature_heatmap.png — 샘플별 표준화 피처값 히트맵 (Sarco→Normal 순)
+    """
+    from matplotlib.patches import Patch
+
+    coefs  = lr_model.coef_[0]
+    n_feat = len(coefs)
+    names  = _M5_FEATURE_NAMES[:n_feat]
+    colors = ["steelblue"] * 3 + ["tomato"] * (n_feat - 3)
+
+    s_idx   = np.where(y_true_te == 1)[0]
+    n_idx   = np.where(y_true_te == 0)[0]
+    ordered = np.concatenate([s_idx, n_idx])
+
+    # ── Figure 1: LR coefficient bar chart ────────────────────
+    fig, ax = plt.subplots(figsize=(max(10, n_feat * 0.85), 5))
+    fig.suptitle(
+        f"LR Feature Importance (Coefficients)  ·  {model_label}",
+        fontsize=12, fontweight="bold",
+    )
+    x = np.arange(n_feat)
+    ax.bar(x, coefs, color=colors, alpha=0.75, edgecolor="black", linewidth=0.5)
+    ax.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=35, ha="right", fontsize=9)
+    ax.set_ylabel("LR Coefficient")
+    ax.set_xlabel("Feature  (blue = Clinical,  red = AEC hand-crafted)")
+    ax.set_title("Positive → Sarco likelihood  |  Negative → Normal likelihood")
+    legend_elements = [
+        Patch(facecolor="steelblue", alpha=0.75, label="Clinical"),
+        Patch(facecolor="tomato",    alpha=0.75, label="AEC feature"),
+    ]
+    ax.legend(handles=legend_elements, fontsize=9)
+    fig.tight_layout()
+    path1 = f"{out_dir}/lr_coef_bar.png"
+    fig.savefig(path1, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    # ── Figure 2: Sample-level feature heatmap (Sarco → Normal) ──
+    hmap   = X_te_s[ordered]
+    n_samp = len(ordered)
+    fig_h  = max(5, n_samp * 0.20)
+    fig, ax = plt.subplots(figsize=(max(10, n_feat * 0.85), fig_h))
+    im = ax.imshow(hmap, aspect="auto", cmap="RdBu_r", interpolation="nearest")
+    plt.colorbar(im, ax=ax, shrink=0.6, label="Standardized Value")
+    if len(s_idx) > 0 and len(n_idx) > 0:
+        ax.axhline(len(s_idx) - 0.5, color="white", linewidth=1.5, linestyle="--")
+    ax.text(-0.5, len(s_idx) / 2 - 0.5,
+            "Sarco",  va="center", ha="right",
+            color="tomato",    fontsize=8, fontweight="bold", clip_on=False)
+    ax.text(-0.5, len(s_idx) + len(n_idx) / 2 - 0.5,
+            "Normal", va="center", ha="right",
+            color="steelblue", fontsize=8, fontweight="bold", clip_on=False)
+    ax.set_xticks(np.arange(n_feat))
+    ax.set_xticklabels(names, rotation=35, ha="right", fontsize=9)
+    ax.set_yticks([])
+    ax.set_xlabel("Feature")
+    ax.set_ylabel("Sample")
+    ax.set_title(
+        f"Sample-level Feature Values  ·  {model_label}",
+        fontsize=10, fontweight="bold",
+    )
+    fig.tight_layout()
+    path2 = f"{out_dir}/lr_feature_heatmap.png"
+    fig.savefig(path2, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"  {path1}")
+    print(f"  {path2}")

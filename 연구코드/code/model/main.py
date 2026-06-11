@@ -2,15 +2,20 @@
 SMI Binary Classification — 모델별 AEC variant 비교 실험 진입점.
 
 모델 구성:
-  Model 1   : Clinic Only (Age, Sex, BMI)                — LR
-  Model 2   : Clinic + AEC Matched                       — CrossAttn
-  Model 2_2 : Clinic + AEC Unmatched (음성 대조군)        — CrossAttn
-  Model 3   : Clinic + Scanner(MFR Embedding) + AEC      — CrossAttn3
-  Model 4   : AEC Only (임상 특징 없음)                   — AECOnlyNet
+  Model 1    : Clinic Only (Age, Sex, BMI)                        — LR
+  Model 2    : Clinic + AEC Matched                               — CrossAttn
+  Model 2_2  : Clinic + AEC Unmatched (음성 대조군)               — CrossAttn
+  Model 3    : Clinic + Scanner(MFR Embedding) + AEC              — CrossAttn3
+  Model 4    : AEC Only (임상 특징 없음)                          — AECOnlyNet
+  Model 5    : Clinic + AEC Hand-crafted Features (11개)          — CrossAttn
+                 (mean·std·max·min·peak_pos·auc·skew·kurt·early/mid/late mean)
+  Model 2_LF : Clinic + AEC Late Fusion                           — LateFusion
+  Model 3_LF : Clinic + Scanner(MFR Embedding) + AEC Late Fusion  — LateFusion3
 
-각 모델은 AEC_VARIANTS(4종)을 순차 실행한다.
-Model 2/2_2/3/4 는 ProcessPoolExecutor 로 병렬 실행되며,
+각 모델(M1 제외)은 AEC_VARIANTS를 순차 실행한다.
+M2/2_2/3/4/5/2_LF/3_LF 는 ProcessPoolExecutor 로 병렬 실행되며,
 결과는 scaling_comparison.md 와 각 모델 디렉토리 run.log 에 저장된다.
+실행 여부는 상단 RUN_M* 플래그로 제어한다.
 
 스케일링 원칙:
   - Clinic(Age·BMI): StandardScaler 항상 적용
@@ -21,8 +26,12 @@ Model 2/2_2/3/4 는 ProcessPoolExecutor 로 병렬 실행되며,
     · global_zscore→ scale_mode="global" (Train set 전체 단일 μ/σ)
   - sex_enc(이진값), label(y, 0/1), MFR index에는 StandardScaler를 적용하지 않는다
 
+Threshold:
+  각 모델의 이진 분류 기준 확률값. 기본값은 CV fold별 Youden index 최적값의 중앙값.
+  config.py의 THRESH_M* 를 float으로 설정하면 해당 값으로 고정된다 (None → 자동).
+
 Attention Map 시각화:
-  Model 2/2_2/3의 CrossAttn 최종 모델로 test set에서 attention weight를 추출한다.
+  Model 2/2_2/3/5의 CrossAttn 최종 모델로 test set에서 attention weight를 추출한다.
   Clinical↔AEC 양방향 attention을 클래스 분리 bar chart와 샘플별 heatmap으로
   각 디렉토리에 저장한다.
 """
@@ -30,6 +39,7 @@ Attention Map 시각화:
 import os
 import sys
 import io
+from contextlib import contextmanager
 import numpy as np
 from multiprocessing import Manager
 from concurrent.futures import ProcessPoolExecutor
@@ -46,18 +56,26 @@ from config import (DEVICE, RESULTS_DIR, RESULTS_MODEL_1_DIR, RESULTS_MODEL_2_DI
                     RESULTS_MODEL_2_2_DIR, RESULTS_MODEL_3_DIR, RESULTS_MODEL_4_DIR,
                     RESULTS_MODEL_5_DIR, RESULTS_MODEL_2_LF_DIR, RESULTS_MODEL_3_LF_DIR,
                     AEC_VARIANTS, AEC_LEN, AEC_SHEET,
-                    LR_RATE, HIDDEN, N_HEADS, N_BLOCKS, GRAD_CLIP, N_CA_LAYERS)
+                    LR_RATE, HIDDEN, N_HEADS, N_BLOCKS, GRAD_CLIP, N_CA_LAYERS,
+                    THRESH_M1, THRESH_M2, THRESH_M2_2, THRESH_M3,
+                    THRESH_M4, THRESH_M5, THRESH_M2_LF, THRESH_M3_LF)
 from data import (load_data, split_data,
                   load_data_with_aec, load_data_with_aec_unmatched, split_data_dual,
                   load_data_with_aec_meta, split_data_quad,
-                  load_data_with_aec_features,
-                  aec_variant, print_stats, describe_dataset)
+                  extract_aec_features_batch, aec_variant, print_stats, describe_dataset)
 from train_eval import (run_cross_validation, run_cross_validation_cross,
                         run_cross_validation_cross3, run_cross_validation_aec_only,
+<<<<<<< HEAD
+                        run_cross_validation_cross_feat,
+                        run_cross_validation_late_fusion, run_cross_validation_late_fusion3,
+                        evaluate_test, evaluate_test_cross, evaluate_test_cross3,
+                        evaluate_test_aec_only, evaluate_test_cross_feat,
+=======
                         run_cross_validation_combined,
                         run_cross_validation_late_fusion, run_cross_validation_late_fusion3,
                         evaluate_test, evaluate_test_cross, evaluate_test_cross3,
                         evaluate_test_aec_only, evaluate_test_combined,
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
                         evaluate_test_late_fusion, evaluate_test_late_fusion3)
 from metrics import print_cv_summary, print_delong_comparison, delong_test
 from visualize import (save_all, save_all_cross, plot_test_roc_with_baseline,
@@ -73,7 +91,11 @@ RUN_M2    = True
 RUN_M2_2  = True
 RUN_M3    = True
 RUN_M4    = True
+<<<<<<< HEAD
+RUN_M5    = True   # Clinic + AEC hand-crafted features (CrossAttn)
+=======
 RUN_M5    = True   # Clinic + AEC hand-crafted features (LR)
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
 RUN_M2_LF = True   # Clinic + AEC Late Fusion
 RUN_M3_LF = True   # Clinic + Scanner + AEC Late Fusion
 
@@ -94,30 +116,48 @@ def _case_label(r):
     return r.get("aec_var", r["case"])
 
 
+def _apply_mask(arrays, mask):
+    """mask가 None이면 원본 반환, 아니면 각 배열에 mask 인덱싱 적용."""
+    if mask is None:
+        return arrays
+    return [a[mask] for a in arrays]
+
+
+@contextmanager
+def _capture_log(log_path: str):
+    """stdout을 캡처해 log_path에 저장하는 컨텍스트 매니저."""
+    buf = io.StringIO()
+    sys.stdout = buf
+    try:
+        yield
+    finally:
+        sys.stdout = sys.__stdout__
+        os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
+        with open(log_path, "w", encoding="utf-8") as fh:
+            fh.write(buf.getvalue())
+
+
 # ── 모델별 워커 함수 (subprocess 에서 실행) ───────────────────
 # 각 모델의 모든 케이스를 순차 실행하고 결과 리스트를 반환.
 # 상세 출력은 <model_results_dir>/run.log 에 저장.
 
 def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir: str | None = None):
     """Model 1(Clinic Only)을 실행하고 결과 리스트를 반환. 로그는 run.log에 저장."""
-    buf = io.StringIO()
-    sys.stdout = buf
+    out1 = out_dir or RESULTS_MODEL_1_DIR
+    os.makedirs(out1, exist_ok=True)
     results = []
-    try:
+    with _capture_log(os.path.join(out1, "run.log")):
         print(f"{'='*60}")
         print("  MODEL 1 — Clinic Only")
         print(f"{'='*60}")
-
-        out1 = out_dir or RESULTS_MODEL_1_DIR
-        os.makedirs(out1, exist_ok=True)
 
         print(f"  [M1] Cross-validating LR ...", flush=True)
         (lr_cv, lr_roc_folds, lr_best_thresholds) = run_cross_validation(X_cv, y_cv)
 
         print_cv_summary("LR", lr_cv)
 
-        med_thresh_lr = float(np.median(lr_best_thresholds))
-        print(f"  [M1] Evaluating on test set (thresh={med_thresh_lr:.3f}) ...", flush=True)
+        med_thresh_lr = THRESH_M1 if THRESH_M1 is not None else float(np.median(lr_best_thresholds))
+        print(f"  [M1] Evaluating on test set (thresh={med_thresh_lr:.3f}{' [override]' if THRESH_M1 is not None else ''}) ...", flush=True)
         (lr_pred, lr_prob, stats_te) = evaluate_test(
             X_cv, y_cv, X_te, y_te, sex_te, threshold=med_thresh_lr
         )
@@ -140,62 +180,95 @@ def _run_model1(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir: str | None = No
             "y_te":        y_te,
             "lr_prob":     lr_prob,
         })
-    finally:
-        sys.stdout = sys.__stdout__
-
-    with open(os.path.join(out1, "run.log"), "w", encoding="utf-8") as f:
-        f.write(buf.getvalue())
-
     return results
 
-def _run_model5(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir: str | None = None):
-    """Model 5(Clinic + AEC Hand-crafted Features LR)를 실행하고 결과 리스트를 반환."""
-    buf = io.StringIO()
-    sys.stdout = buf
+def _run_model5(X_clin_cv, X_aec_cv, y_cv, sex_cv,
+                X_clin_te, X_aec_te, y_te, sex_te,
+                aec_size: int = 128, aec_variants: list | None = None,
+                progress_queue=None, out_base_dir: str | None = None):
+    """Model 5(Clinic + AEC Hand-crafted Features CrossAttn): AEC 변형별로 실행하고 결과 리스트를 반환.
+    각 variant의 AEC 신호를 변환한 뒤 hand-crafted 피처(11개)를 추출해 CrossAttn 모델을 학습한다.
+    Attention map을 variant 디렉토리에 저장. 로그는 run.log에 저장."""
+    if aec_variants is None:
+        aec_variants = AEC_VARIANTS
     results = []
-    try:
+    _base = out_base_dir or RESULTS_MODEL_5_DIR
+    with _capture_log(os.path.join(_base, "run.log")):
         print(f"{'='*60}")
-        print("  MODEL 5 — Clinic + AEC Hand-crafted Features (LR)")
+        print(f"  MODEL 5 — Clinic + AEC Hand-crafted Features (CrossAttn)  ({len(aec_variants)} AEC variants)")
         print(f"{'='*60}")
 
-        out5 = out_dir or RESULTS_MODEL_5_DIR
-        os.makedirs(out5, exist_ok=True)
+        for aec_var in aec_variants:
+            X_aec_cv_v, _, scale_mode = aec_variant(X_aec_cv, aec_var)
+            X_aec_te_v, _, _          = aec_variant(X_aec_te, aec_var)
 
-        print(f"  [M5] Cross-validating LR+AEC ...", flush=True)
-        (lr_cv, lr_roc_folds, lr_best_thresholds) = run_cross_validation_combined(X_cv, y_cv)
+            # global_zscore: CV set 전체 통계로 AEC 신호를 정규화한 뒤 피처 추출
+            if scale_mode == "global":
+                g_mean = float(X_aec_cv_v.mean())
+                g_std  = max(float(X_aec_cv_v.std()), 1e-8)
+                X_aec_cv_v = ((X_aec_cv_v - g_mean) / g_std).astype(np.float32)
+                X_aec_te_v = ((X_aec_te_v - g_mean) / g_std).astype(np.float32)
 
-        print_cv_summary("LR+AEC", lr_cv)
+            # variant-transformed AEC → hand-crafted 피처 (11개)
+            X_feat_cv_v = extract_aec_features_batch(X_aec_cv_v)
+            X_feat_te_v = extract_aec_features_batch(X_aec_te_v)
 
-        med_thresh_lr = float(np.median(lr_best_thresholds))
-        print(f"  [M5] Evaluating on test set (thresh={med_thresh_lr:.3f}) ...", flush=True)
-        (lr_pred, lr_prob, stats_te) = evaluate_test_combined(
-            X_cv, y_cv, X_te, y_te, sex_te, threshold=med_thresh_lr
-        )
+            print(f"\n{'#'*60}")
+            print(f"  [M5 {aec_var}]  (scale_mode={scale_mode})")
+            print(f"{'#'*60}")
 
-        print(f"  [M5] Saving figures ...", flush=True)
-        save_all(
-            lr_roc_folds, lr_cv,
-            X_cv[:, :3], y_cv, sex_cv,   # 시각화는 clinic 3개 피처만 사용
-            X_te[:, :3], y_te, lr_pred, lr_prob,
-            sex_te, out_dir=out5,
-            ci_dict=stats_te.get("bootstrap_lr_aec", {}),
-        )
-        print(f"  [M5] Done.", flush=True)
+            out5 = os.path.join(_base, aec_var)
+            os.makedirs(out5, exist_ok=True)
 
-        results.append({
-            "case":        "clinic_aec_feats",
-            "m5_lr":       _metrics(y_te, lr_pred, lr_prob),
-            "lr_cv_folds": lr_cv,
-            "test_stats":  stats_te,
-            "y_te":        y_te,
-            "lr_prob":     lr_prob,
-        })
-    finally:
-        sys.stdout = sys.__stdout__
+            print(f"  [M5/{aec_var}] Cross-validating CrossAttn-Feat ...", flush=True)
+            (ca_cv, ca_roc_folds,
+             ca_histories, ca_best_epochs,
+             ca_best_thresholds) = run_cross_validation_cross_feat(
+                X_clin_cv, X_feat_cv_v, y_cv,
+            )
 
-    with open(os.path.join(out5, "run.log"), "w", encoding="utf-8") as f:
-        f.write(buf.getvalue())
+            print_cv_summary("CrossAttn-Feat", ca_cv)
 
+            med_epoch  = int(np.median(ca_best_epochs))
+            med_thresh = THRESH_M5 if THRESH_M5 is not None else float(np.median(ca_best_thresholds))
+            print(f"  [M5/{aec_var}] Evaluating on test set (med_epoch={med_epoch}, thresh={med_thresh:.3f}{' [override]' if THRESH_M5 is not None else ''}) ...", flush=True)
+            (ca_pred_te, ca_prob_te, ca_true_te, stats_te,
+             model_te5, X_clin_te_s, X_feat_te_s) = evaluate_test_cross_feat(
+                X_clin_cv, X_feat_cv_v, y_cv,
+                X_clin_te, X_feat_te_v, y_te, sex_te,
+                med_epoch, threshold=med_thresh,
+                weight_path=os.path.join(out5, f"M5_{aec_var}_weights.pt"),
+            )
+
+            print(f"  [M5/{aec_var}] Saving figures ...", flush=True)
+            save_all_cross(
+                ca_cv, ca_roc_folds, ca_histories, med_epoch,
+                X_clin_cv, y_cv, sex_cv,
+                X_clin_te, y_te,
+                ca_pred_te, ca_true_te, sex_te, ca_prob_te,
+                model_label=f"model 5 ({aec_var})", out_dir=out5,
+                ci_dict=stats_te.get("bootstrap_ca_feat", {}),
+            )
+            print(f"  [M5/{aec_var}] Plotting attention maps ...", flush=True)
+            plot_attention_maps(
+                model_te5, X_clin_te_s, X_feat_te_s, ca_true_te,
+                out_dir=out5, aec_var=aec_var,
+                model_label=f"Model 5 ({aec_var})",
+            )
+            print(f"  [M5/{aec_var}] Done.", flush=True)
+
+            results.append({
+                "aec_var":     aec_var,
+                "case":        aec_var,
+                "out_dir":     out5,
+                "m5_ca":       _metrics(ca_true_te, ca_pred_te, ca_prob_te),
+                "ca_cv_folds": ca_cv,
+                "test_stats":  stats_te,
+                "y_true_te":   ca_true_te,
+                "ca_prob_te":  ca_prob_te,
+            })
+            if progress_queue is not None:
+                progress_queue.put(("M5", aec_var))
     return results
 
 
@@ -207,11 +280,9 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
     attention map 4종 + Grad-CAM 3종을 케이스 디렉토리에 저장. 로그는 run.log에 저장."""
     if aec_variants is None:
         aec_variants = AEC_VARIANTS
-    buf = io.StringIO()
-    sys.stdout = buf
     results = []
     _base = out_base_dir or RESULTS_MODEL_2_DIR
-    try:
+    with _capture_log(os.path.join(_base, "run.log")):
         print(f"{'='*60}")
         print(f"  MODEL 2 — Clinic + AEC (aec{aec_size})  ({len(aec_variants)} AEC variants)")
         print(f"{'='*60}")
@@ -219,12 +290,8 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
         for aec_var in aec_variants:
             X_aec_cv_v, mask_cv, scale_aec_v = aec_variant(X_aec_cv, aec_var)
             X_aec_te_v, mask_te, _            = aec_variant(X_aec_te, aec_var)
-            X_clin_cv_v = X_clin_cv[mask_cv] if mask_cv is not None else X_clin_cv
-            y2_cv_v     = y2_cv[mask_cv]     if mask_cv is not None else y2_cv
-            sex2_cv_v   = sex2_cv[mask_cv]   if mask_cv is not None else sex2_cv
-            X_clin_te_v = X_clin_te[mask_te] if mask_te is not None else X_clin_te
-            y2_te_v     = y2_te[mask_te]     if mask_te is not None else y2_te
-            sex2_te_v   = sex2_te[mask_te]   if mask_te is not None else sex2_te
+            X_clin_cv_v, y2_cv_v, sex2_cv_v  = _apply_mask([X_clin_cv, y2_cv, sex2_cv], mask_cv)
+            X_clin_te_v, y2_te_v, sex2_te_v  = _apply_mask([X_clin_te, y2_te, sex2_te], mask_te)
 
             print(f"\n{'#'*60}")
             print(f"  [M2 {aec_var}]  (scale_clinic=True, scale_aec={scale_aec_v})")
@@ -242,8 +309,8 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
             print_cv_summary("CrossAttn", ca_cv)
 
             med_epoch2 = int(np.median(ca_best_epochs2))
-            med_thresh2 = float(np.median(ca_best_thresholds2))
-            print(f"  [M2/{aec_var}] Evaluating on test set (med_epoch={med_epoch2}, thresh={med_thresh2:.3f}) ...", flush=True)
+            med_thresh2 = THRESH_M2 if THRESH_M2 is not None else float(np.median(ca_best_thresholds2))
+            print(f"  [M2/{aec_var}] Evaluating on test set (med_epoch={med_epoch2}, thresh={med_thresh2:.3f}{' [override]' if THRESH_M2 is not None else ''}) ...", flush=True)
             (ca_pred_te, ca_prob_te, ca_true_te, stats_te2,
              model_te2, X_clin_te_s2, X_aec_te_s2) = evaluate_test_cross(
                 X_clin_cv_v, X_aec_cv_v, y2_cv_v,
@@ -289,12 +356,6 @@ def _run_model2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
             })
             if progress_queue is not None:
                 progress_queue.put(("M2", aec_var))
-    finally:
-        sys.stdout = sys.__stdout__
-
-    with open(os.path.join(_base, "run.log"), "w", encoding="utf-8") as f:
-        f.write(buf.getvalue())
-
     return results
 
 def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
@@ -308,11 +369,9 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
     """
     if aec_variants is None:
         aec_variants = AEC_VARIANTS
-    buf = io.StringIO()
-    sys.stdout = buf
     results = []
     _base = out_base_dir or RESULTS_MODEL_2_2_DIR
-    try:
+    with _capture_log(os.path.join(_base, "run.log")):
         print(f"{'='*60}")
         print(f"  MODEL 2_2 — Clinic + AEC Unmatched (aec{aec_size})  ({len(aec_variants)} AEC variants)")
         print(f"{'='*60}")
@@ -320,12 +379,8 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
         for aec_var in aec_variants:
             X_aec_cv_v, mask_cv, scale_aec_v = aec_variant(X_aec_cv, aec_var)
             X_aec_te_v, mask_te, _            = aec_variant(X_aec_te, aec_var)
-            X_clin_cv_v = X_clin_cv[mask_cv] if mask_cv is not None else X_clin_cv
-            y2_cv_v     = y2_cv[mask_cv]     if mask_cv is not None else y2_cv
-            sex2_cv_v   = sex2_cv[mask_cv]   if mask_cv is not None else sex2_cv
-            X_clin_te_v = X_clin_te[mask_te] if mask_te is not None else X_clin_te
-            y2_te_v     = y2_te[mask_te]     if mask_te is not None else y2_te
-            sex2_te_v   = sex2_te[mask_te]   if mask_te is not None else sex2_te
+            X_clin_cv_v, y2_cv_v, sex2_cv_v  = _apply_mask([X_clin_cv, y2_cv, sex2_cv], mask_cv)
+            X_clin_te_v, y2_te_v, sex2_te_v  = _apply_mask([X_clin_te, y2_te, sex2_te], mask_te)
 
             print(f"\n{'#'*60}")
             print(f"  [M2_2 {aec_var}]  (scale_clinic=True, scale_aec={scale_aec_v})")
@@ -343,8 +398,8 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
             print_cv_summary("CrossAttn", ca_cv)
 
             med_epoch2_2 = int(np.median(ca_best_epochs2_2))
-            med_thresh2_2 = float(np.median(ca_best_thresholds2_2))
-            print(f"  [M2_2/{aec_var}] Evaluating on test set (med_epoch={med_epoch2_2}, thresh={med_thresh2_2:.3f}) ...", flush=True)
+            med_thresh2_2 = THRESH_M2_2 if THRESH_M2_2 is not None else float(np.median(ca_best_thresholds2_2))
+            print(f"  [M2_2/{aec_var}] Evaluating on test set (med_epoch={med_epoch2_2}, thresh={med_thresh2_2:.3f}{' [override]' if THRESH_M2_2 is not None else ''}) ...", flush=True)
             (ca_pred_te, ca_prob_te, ca_true_te, stats_te2_2,
              model_te2_2, X_clin_te_s2_2, X_aec_te_s2_2) = evaluate_test_cross(
                 X_clin_cv_v, X_aec_cv_v, y2_cv_v,
@@ -390,12 +445,6 @@ def _run_model2_2(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
             })
             if progress_queue is not None:
                 progress_queue.put(("M2_2", aec_var))
-    finally:
-        sys.stdout = sys.__stdout__
-
-    with open(os.path.join(_base, "run.log"), "w", encoding="utf-8") as f:
-        f.write(buf.getvalue())
-
     return results
 
 def _run_model2_lf(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
@@ -597,11 +646,9 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
     attention map 4종 + Grad-CAM 3종을 케이스 디렉토리에 저장. 로그는 run.log에 저장."""
     if aec_variants is None:
         aec_variants = AEC_VARIANTS
-    buf = io.StringIO()
-    sys.stdout = buf
     results = []
     _base = out_base_dir or RESULTS_MODEL_3_DIR
-    try:
+    with _capture_log(os.path.join(_base, "run.log")):
         print(f"{'='*60}")
         print(f"  MODEL 3 — Clinic + Scanner + AEC (aec{aec_size})  ({len(aec_variants)} AEC variants)")
         print(f"{'='*60}")
@@ -609,14 +656,8 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
         for aec_var in aec_variants:
             X_aec3_cv_v, mask_cv, scale_aec_v = aec_variant(X_aec3_cv, aec_var)
             X_aec3_te_v, mask_te, _            = aec_variant(X_aec3_te, aec_var)
-            X_clin3_cv_v = X_clin3_cv[mask_cv] if mask_cv is not None else X_clin3_cv
-            X_mfr3_cv_v  = X_mfr_cv[mask_cv]   if mask_cv is not None else X_mfr_cv
-            y3_cv_v      = y3_cv[mask_cv]       if mask_cv is not None else y3_cv
-            sex3_cv_v    = sex3_cv[mask_cv]     if mask_cv is not None else sex3_cv
-            X_clin3_te_v = X_clin3_te[mask_te] if mask_te is not None else X_clin3_te
-            X_mfr3_te_v  = X_mfr_te[mask_te]   if mask_te is not None else X_mfr_te
-            y3_te_v      = y3_te[mask_te]       if mask_te is not None else y3_te
-            sex3_te_v    = sex3_te[mask_te]     if mask_te is not None else sex3_te
+            X_clin3_cv_v, X_mfr3_cv_v, y3_cv_v, sex3_cv_v = _apply_mask([X_clin3_cv, X_mfr_cv, y3_cv, sex3_cv], mask_cv)
+            X_clin3_te_v, X_mfr3_te_v, y3_te_v, sex3_te_v = _apply_mask([X_clin3_te, X_mfr_te, y3_te, sex3_te], mask_te)
 
             print(f"\n{'#'*60}")
             print(f"  [M3 {aec_var}]  (scale_clinic=True, scale_aec={scale_aec_v})")
@@ -635,8 +676,8 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
             print_cv_summary("CrossAttn3", ca3_cv)
 
             med_epoch3 = int(np.median(ca3_best_epochs3))
-            med_thresh3 = float(np.median(ca3_best_thresholds3))
-            print(f"  [M3/{aec_var}] Evaluating on test set (med_epoch={med_epoch3}, thresh={med_thresh3:.3f}) ...", flush=True)
+            med_thresh3 = THRESH_M3 if THRESH_M3 is not None else float(np.median(ca3_best_thresholds3))
+            print(f"  [M3/{aec_var}] Evaluating on test set (med_epoch={med_epoch3}, thresh={med_thresh3:.3f}{' [override]' if THRESH_M3 is not None else ''}) ...", flush=True)
             (ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te3,
              model_te3, X_clin3_te_s, X_aec3_te_s) = evaluate_test_cross3(
                 X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v,
@@ -685,12 +726,6 @@ def _run_model3(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
             })
             if progress_queue is not None:
                 progress_queue.put(("M3", aec_var))
-    finally:
-        sys.stdout = sys.__stdout__
-
-    with open(os.path.join(_base, "run.log"), "w", encoding="utf-8") as f:
-        f.write(buf.getvalue())
-
     return results
 
 def _run_model4(X_aec_cv, y_cv, sex_cv,
@@ -700,11 +735,9 @@ def _run_model4(X_aec_cv, y_cv, sex_cv,
     """Model 4(AEC Only): AEC 변형별로 AECOnlyNet을 실행하고 결과 리스트를 반환."""
     if aec_variants is None:
         aec_variants = AEC_VARIANTS
-    buf = io.StringIO()
-    sys.stdout = buf
     results = []
     _base = out_base_dir or RESULTS_MODEL_4_DIR
-    try:
+    with _capture_log(os.path.join(_base, "run.log")):
         print(f"{'='*60}")
         print(f"  MODEL 4 — AEC Only (aec{aec_size})  ({len(aec_variants)} AEC variants)")
         print(f"{'='*60}")
@@ -712,10 +745,8 @@ def _run_model4(X_aec_cv, y_cv, sex_cv,
         for aec_var in aec_variants:
             X_aec_cv_v, mask_cv, scale_aec_v = aec_variant(X_aec_cv, aec_var)
             X_aec_te_v, mask_te, _            = aec_variant(X_aec_te, aec_var)
-            y_cv_v   = y_cv[mask_cv]   if mask_cv is not None else y_cv
-            sex_cv_v = sex_cv[mask_cv] if mask_cv is not None else sex_cv
-            y_te_v   = y_te[mask_te]   if mask_te is not None else y_te
-            sex_te_v = sex_te[mask_te] if mask_te is not None else sex_te
+            y_cv_v, sex_cv_v = _apply_mask([y_cv, sex_cv], mask_cv)
+            y_te_v, sex_te_v = _apply_mask([y_te, sex_te], mask_te)
 
             print(f"\n{'#'*60}")
             print(f"  [M4 {aec_var}]  (scale_aec={scale_aec_v})")
@@ -734,9 +765,9 @@ def _run_model4(X_aec_cv, y_cv, sex_cv,
             print_cv_summary("AECOnly", cv)
 
             med_epoch  = int(np.median(best_epochs))
-            med_thresh = float(np.median(best_thresholds))
+            med_thresh = THRESH_M4 if THRESH_M4 is not None else float(np.median(best_thresholds))
             print(f"  [M4/{aec_var}] Evaluating on test set "
-                  f"(med_epoch={med_epoch}, thresh={med_thresh:.3f}) ...", flush=True)
+                  f"(med_epoch={med_epoch}, thresh={med_thresh:.3f}{' [override]' if THRESH_M4 is not None else ''}) ...", flush=True)
             (pred_te, prob_te, true_te, stats_te,
              model_te4, X_aec_te_s4) = evaluate_test_aec_only(
                 X_aec_cv_v, y_cv_v,
@@ -775,13 +806,172 @@ def _run_model4(X_aec_cv, y_cv, sex_cv,
             })
             if progress_queue is not None:
                 progress_queue.put(("M4", aec_var))
-    finally:
-        sys.stdout = sys.__stdout__
-
-    with open(os.path.join(_base, "run.log"), "w", encoding="utf-8") as f:
-        f.write(buf.getvalue())
-
     return results
+
+def _run_model2_lf(X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
+                   X_clin_te, X_aec_te, y2_te, sex2_te,
+                   aec_size: int = 128, aec_variants: list | None = None,
+                   progress_queue=None, out_base_dir: str | None = None):
+    """Model 2_LF(Clinic+AEC Late Fusion): AEC 변형별로 LateFusion을 실행하고 결과 리스트를 반환.
+    Grad-CAM 3종을 케이스 디렉토리에 저장. 로그는 run.log에 저장."""
+    if aec_variants is None:
+        aec_variants = AEC_VARIANTS
+    results = []
+    _base = out_base_dir or RESULTS_MODEL_2_LF_DIR
+    with _capture_log(os.path.join(_base, "run.log")):
+        print(f"{'='*60}")
+        print(f"  MODEL 2_LF — Clinic + AEC Late Fusion (aec{aec_size})  ({len(aec_variants)} AEC variants)")
+        print(f"{'='*60}")
+
+        for aec_var in aec_variants:
+            X_aec_cv_v, mask_cv, scale_aec_v = aec_variant(X_aec_cv, aec_var)
+            X_aec_te_v, mask_te, _            = aec_variant(X_aec_te, aec_var)
+            X_clin_cv_v, y2_cv_v, sex2_cv_v  = _apply_mask([X_clin_cv, y2_cv, sex2_cv], mask_cv)
+            X_clin_te_v, y2_te_v, sex2_te_v  = _apply_mask([X_clin_te, y2_te, sex2_te], mask_te)
+
+            print(f"\n{'#'*60}")
+            print(f"  [M2_LF {aec_var}]  (scale_clinic=True, scale_aec={scale_aec_v})")
+            print(f"{'#'*60}")
+
+            out2_lf = os.path.join(_base, aec_var)
+
+            print(f"  [M2_LF/{aec_var}] Cross-validating LateFusion ...", flush=True)
+            (lf_cv, lf_roc_folds,
+             lf_histories, lf_best_epochs,
+             lf_best_thresholds) = run_cross_validation_late_fusion(
+                X_clin_cv_v, X_aec_cv_v, y2_cv_v, scale_aec=scale_aec_v,
+            )
+
+            print_cv_summary("LateFusion", lf_cv)
+
+            med_epoch_lf = int(np.median(lf_best_epochs))
+            med_thresh_lf = THRESH_M2_LF if THRESH_M2_LF is not None else float(np.median(lf_best_thresholds))
+            print(f"  [M2_LF/{aec_var}] Evaluating on test set (med_epoch={med_epoch_lf}, thresh={med_thresh_lf:.3f}{' [override]' if THRESH_M2_LF is not None else ''}) ...", flush=True)
+            (lf_pred_te, lf_prob_te, lf_true_te, stats_te_lf,
+             model_te_lf, X_clin_te_s_lf, X_aec_te_s_lf) = evaluate_test_late_fusion(
+                X_clin_cv_v, X_aec_cv_v, y2_cv_v,
+                X_clin_te_v, X_aec_te_v, y2_te_v, sex2_te_v,
+                med_epoch_lf, scale_aec=scale_aec_v,
+                threshold=med_thresh_lf,
+                weight_path=os.path.join(out2_lf, f"M2_LF_{aec_var}_weights.pt"),
+            )
+
+            os.makedirs(out2_lf, exist_ok=True)
+            print(f"  [M2_LF/{aec_var}] Saving figures ...", flush=True)
+            save_all_cross(
+                lf_cv, lf_roc_folds, lf_histories, med_epoch_lf,
+                X_clin_cv_v, y2_cv_v, sex2_cv_v,
+                X_clin_te_v, y2_te_v,
+                lf_pred_te, lf_true_te, sex2_te_v, lf_prob_te,
+                model_label=f"model 2_LF ({aec_var})", out_dir=out2_lf,
+                ci_dict=stats_te_lf.get("bootstrap_lf", {}),
+            )
+            print(f"  [M2_LF/{aec_var}] Plotting Grad-CAM ...", flush=True)
+            plot_cam_aec(
+                model_te_lf, X_clin_te_s_lf, X_aec_te_s_lf, lf_true_te,
+                out_dir=out2_lf, aec_var=aec_var,
+                model_label=f"Model 2_LF ({aec_var})",
+            )
+            print(f"  [M2_LF/{aec_var}] Done.", flush=True)
+
+            results.append({
+                "aec_var":     aec_var,
+                "case":        aec_var,
+                "out_dir":     out2_lf,
+                "m2_lf":       _metrics(lf_true_te, lf_pred_te, lf_prob_te),
+                "lf_cv_folds": lf_cv,
+                "test_stats":  stats_te_lf,
+                "y_true_te":   lf_true_te,
+                "lf_prob_te":  lf_prob_te,
+            })
+            if progress_queue is not None:
+                progress_queue.put(("M2_LF", aec_var))
+    return results
+
+
+def _run_model3_lf(X_clin3_cv, X_aec3_cv, X_mfr_cv, y3_cv, sex3_cv,
+                   X_clin3_te, X_aec3_te, X_mfr_te, y3_te, sex3_te, n_mfr,
+                   aec_size: int = 128, aec_variants: list | None = None,
+                   progress_queue=None, out_base_dir: str | None = None):
+    """Model 3_LF(Clinic+Scanner+AEC Late Fusion): AEC 변형별로 LateFusion3를 실행하고 결과 리스트를 반환.
+    Grad-CAM 3종을 케이스 디렉토리에 저장. 로그는 run.log에 저장."""
+    if aec_variants is None:
+        aec_variants = AEC_VARIANTS
+    results = []
+    _base = out_base_dir or RESULTS_MODEL_3_LF_DIR
+    with _capture_log(os.path.join(_base, "run.log")):
+        print(f"{'='*60}")
+        print(f"  MODEL 3_LF — Clinic + Scanner + AEC Late Fusion (aec{aec_size})  ({len(aec_variants)} AEC variants)")
+        print(f"{'='*60}")
+
+        for aec_var in aec_variants:
+            X_aec3_cv_v, mask_cv, scale_aec_v = aec_variant(X_aec3_cv, aec_var)
+            X_aec3_te_v, mask_te, _            = aec_variant(X_aec3_te, aec_var)
+            X_clin3_cv_v, X_mfr3_cv_v, y3_cv_v, sex3_cv_v = _apply_mask([X_clin3_cv, X_mfr_cv, y3_cv, sex3_cv], mask_cv)
+            X_clin3_te_v, X_mfr3_te_v, y3_te_v, sex3_te_v = _apply_mask([X_clin3_te, X_mfr_te, y3_te, sex3_te], mask_te)
+
+            print(f"\n{'#'*60}")
+            print(f"  [M3_LF {aec_var}]  (scale_clinic=True, scale_aec={scale_aec_v})")
+            print(f"{'#'*60}")
+
+            out3_lf = os.path.join(_base, aec_var)
+
+            print(f"  [M3_LF/{aec_var}] Cross-validating LateFusion3 ...", flush=True)
+            (lf3_cv, lf3_roc_folds,
+             lf3_histories, lf3_best_epochs,
+             lf3_best_thresholds) = run_cross_validation_late_fusion3(
+                X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v, n_mfr,
+                scale_aec=scale_aec_v,
+            )
+
+            print_cv_summary("LateFusion3", lf3_cv)
+
+            med_epoch_lf3 = int(np.median(lf3_best_epochs))
+            med_thresh_lf3 = THRESH_M3_LF if THRESH_M3_LF is not None else float(np.median(lf3_best_thresholds))
+            print(f"  [M3_LF/{aec_var}] Evaluating on test set (med_epoch={med_epoch_lf3}, thresh={med_thresh_lf3:.3f}{' [override]' if THRESH_M3_LF is not None else ''}) ...", flush=True)
+            (lf3_pred_te, lf3_prob_te, lf3_true_te, stats_te_lf3,
+             model_te_lf3, X_clin3_te_s, X_aec3_te_s) = evaluate_test_late_fusion3(
+                X_clin3_cv_v, X_aec3_cv_v, X_mfr3_cv_v, y3_cv_v,
+                X_clin3_te_v, X_aec3_te_v, X_mfr3_te_v, y3_te_v,
+                sex3_te_v, med_epoch_lf3, n_mfr,
+                scale_aec=scale_aec_v,
+                threshold=med_thresh_lf3,
+                weight_path=os.path.join(out3_lf, f"M3_LF_{aec_var}_weights.pt"),
+            )
+
+            os.makedirs(out3_lf, exist_ok=True)
+            print(f"  [M3_LF/{aec_var}] Saving figures ...", flush=True)
+            save_all_cross(
+                lf3_cv, lf3_roc_folds, lf3_histories, med_epoch_lf3,
+                X_clin3_cv_v, y3_cv_v, sex3_cv_v,
+                X_clin3_te_v, y3_te_v,
+                lf3_pred_te, lf3_true_te, sex3_te_v, lf3_prob_te,
+                model_label=f"model 3_LF ({aec_var})", out_dir=out3_lf,
+                ci_dict=stats_te_lf3.get("bootstrap_lf3", {}),
+            )
+            print(f"  [M3_LF/{aec_var}] Plotting Grad-CAM ...", flush=True)
+            plot_cam_aec(
+                model_te_lf3, X_clin3_te_s, X_aec3_te_s, lf3_true_te,
+                out_dir=out3_lf, aec_var=aec_var,
+                model_label=f"Model 3_LF ({aec_var})",
+                X_mfr_te=X_mfr3_te_v,
+            )
+            print(f"  [M3_LF/{aec_var}] Done.", flush=True)
+
+            results.append({
+                "aec_var":      aec_var,
+                "case":         aec_var,
+                "out_dir":      out3_lf,
+                "m3_lf":        _metrics(lf3_true_te, lf3_pred_te, lf3_prob_te),
+                "lf3_cv_folds": lf3_cv,
+                "test_stats":   stats_te_lf3,
+                "y_true_te":    lf3_true_te,
+                "lf3_prob_te":  lf3_prob_te,
+            })
+            if progress_queue is not None:
+                progress_queue.put(("M3_LF", aec_var))
+    return results
+
 
 def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, results_m4,
                               aec_size: int = 128, results_m5=None):
@@ -800,7 +990,7 @@ def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, 
     r2_dict   = {r["aec_var"]: r for r in results_m2}
 
     # ── M1 vs M2 ──────────────────────────────────────────────
-    if results_m1 and results_m2:
+    if results_m1 and results_m2 and m1_y is not None:
         print(f"\n  [M1 LR  vs  M2 CrossAttn]")
         for r2 in results_m2:
             y2 = r2["y_true_te"]
@@ -813,7 +1003,7 @@ def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, 
             )
 
     # ── M1 vs M3 ──────────────────────────────────────────────
-    if results_m1 and results_m3:
+    if results_m1 and results_m3 and m1_y is not None:
         print(f"\n  [M1 LR  vs  M3 CrossAttn3]")
         for r3 in results_m3:
             y3 = r3["y_true_te"]
@@ -826,7 +1016,7 @@ def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, 
             )
 
     # ── M1 vs M4 ──────────────────────────────────────────────
-    if results_m1 and results_m4:
+    if results_m1 and results_m4 and m1_y is not None:
         print(f"\n  [M1 LR  vs  M4 AECOnly]")
         for r4 in results_m4:
             y4 = r4["y_true_te"]
@@ -887,15 +1077,16 @@ def _print_delong_comparisons(results_m1, results_m2, results_m2_2, results_m3, 
             )
 
     # ── M1 vs M5 ──────────────────────────────────────────────
-    if results_m1 and results_m5:
-        print(f"\n  [M1 LR  vs  M5 LR+AECFeatures]")
+    if results_m1 and results_m5 and m1_y is not None:
+        print(f"\n  [M1 LR  vs  M5 CrossAttn-Feat]")
         for r5 in results_m5:
-            if len(r5["y_te"]) != len(m1_y):
-                print(f"    {r5['case']} — skip (sample size mismatch: M1={len(m1_y)}, M5={len(r5['y_te'])})")
+            y5 = r5["y_true_te"]
+            if len(y5) != len(m1_y):
+                print(f"    {_case_label(r5)} — skip (sample size mismatch: M1={len(m1_y)}, M5={len(y5)})")
                 continue
             print_delong_comparison(
-                "M1-LR", f"M5-{r5['case']}",
-                m1_y, m1_prob, r5["lr_prob"],
+                "M1-LR", f"M5-{_case_label(r5)}",
+                m1_y, m1_prob, r5["ca_prob_te"],
             )
 
 def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3, results_m4,
@@ -989,13 +1180,13 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
     if results_m5 and r1:
         for r5 in results_m5:
             plot_test_roc_with_baseline(
-                primary_true=r5["y_te"],
-                primary_prob=r5["lr_prob"],
-                primary_label=f"Model 5 LR+AECFeatures ({r5['case']})",
+                primary_true=r5["y_true_te"],
+                primary_prob=r5["ca_prob_te"],
+                primary_label=f"Model 5 CrossAttn-Feat ({_case_label(r5)})",
                 baseline_true=m1_y_te,
                 baseline_prob=m1_lr_prob,
                 baseline_label="Model 1 LR (baseline)",
-                out_path=os.path.join(RESULTS_MODEL_5_DIR, "test_roc_curves.png"),
+                out_path=os.path.join(r5["out_dir"], "test_roc_curves.png"),
             )
 
     for r in (results_m2_lf or []):
@@ -1023,7 +1214,7 @@ def _plot_comparison_roc_curves(results_m1, results_m2, results_m2_2, results_m3
     print(f"  Comparison ROC curves saved.")
 
 def run_all_cases():
-    """Model 1은 1회, Model 2/2_2/3/4는 AEC_VARIANTS(4종) 실행."""
+    """Model 1은 1회, Model 2/2_2/3/4/5는 AEC_VARIANTS(4종) 병렬 실행."""
     print(f"{'='*60}")
     print(f"  LR={LR_RATE}  HIDDEN={HIDDEN}  N_HEADS={N_HEADS}  "
           f"N_BLOCKS={N_BLOCKS}  GRAD_CLIP={GRAD_CLIP}  N_CA_LAYERS={N_CA_LAYERS}")
@@ -1093,6 +1284,8 @@ def run_all_cases():
 
     results_m2 = results_m2_2 = results_m3 = results_m4 = results_m5 = []
     results_m2_lf = results_m3_lf = []
+<<<<<<< HEAD
+=======
 
     # ── Model 5: Clinic + AEC hand-crafted features (LR, 단독 실행) ───────
     if RUN_M5:
@@ -1109,14 +1302,21 @@ def run_all_cases():
                 RESULTS_MODEL_5_DIR,
             ).result()
         print("[Model 5] Finished.\n")
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
 
     _active_cfg = [
         ("M2",    RUN_M2,    "M2    ", 0),
         ("M2_2",  RUN_M2_2,  "M2_2  ", 1),
         ("M3",    RUN_M3,    "M3    ", 2),
         ("M4",    RUN_M4,    "M4    ", 3),
+<<<<<<< HEAD
+        ("M5",    RUN_M5,    "M5    ", 4),
+        ("M2_LF", RUN_M2_LF, "M2_LF ", 5),
+        ("M3_LF", RUN_M3_LF, "M3_LF ", 6),
+=======
         ("M2_LF", RUN_M2_LF, "M2_LF ", 4),
         ("M3_LF", RUN_M3_LF, "M3_LF ", 5),
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
     ]
     _active_keys = [k for k, flag, _, _ in _active_cfg if flag]
     active_label = "/".join(_active_keys) or "(none)"
@@ -1158,6 +1358,16 @@ def run_all_cases():
                         X_aec_te, y2_te, sex2_te,
                         actual_size, aec_variants, q, RESULTS_MODEL_4_DIR,
                     )
+<<<<<<< HEAD
+                if RUN_M5:
+                    futures["M5"] = executor.submit(
+                        _run_model5,
+                        X_clin_cv, X_aec_cv, y2_cv, sex2_cv,
+                        X_clin_te, X_aec_te, y2_te, sex2_te,
+                        actual_size, aec_variants, q, RESULTS_MODEL_5_DIR,
+                    )
+=======
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
                 if RUN_M2_LF:
                     futures["M2_LF"] = executor.submit(
                         _run_model2_lf,
@@ -1187,6 +1397,10 @@ def run_all_cases():
                 if RUN_M2_2:  results_m2_2  = futures["M2_2"].result()
                 if RUN_M3:    results_m3    = futures["M3"].result()
                 if RUN_M4:    results_m4    = futures["M4"].result()
+<<<<<<< HEAD
+                if RUN_M5:    results_m5    = futures["M5"].result()
+=======
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
                 if RUN_M2_LF: results_m2_lf = futures["M2_LF"].result()
                 if RUN_M3_LF: results_m3_lf = futures["M3_LF"].result()
             for bar in bars.values():
@@ -1248,6 +1462,14 @@ def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, result
     print("  BEST CASES SUMMARY  (by Test overall AUC)")
     print(sep)
     entries = [
+<<<<<<< HEAD
+        ("M1",   "LR",             results_m1,          "m1_lr"),
+        ("M2",   "CrossAttn",      results_m2,          "m2_ca"),
+        ("M2_2", "CrossAttn",      results_m2_2,        "m2_2_ca"),
+        ("M3",   "CrossAttn3",     results_m3,          "m3_ca3"),
+        ("M4",   "AECOnly",        results_m4,          "m4_aec"),
+        ("M5",   "CrossAttn-Feat", results_m5 or [],    "m5_ca"),
+=======
         ("M1",    "LR",             results_m1,              "m1_lr"),
         ("M2",    "CrossAttn",      results_m2,              "m2_ca"),
         ("M2_2",  "CrossAttn",      results_m2_2,            "m2_2_ca"),
@@ -1256,6 +1478,7 @@ def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, result
         ("M5",    "LR+AECFeatures", results_m5 or [],        "m5_lr"),
         ("M2_LF", "LateFusion",     results_m2_lf or [],     "m2_lf"),
         ("M3_LF", "LateFusion3",    results_m3_lf or [],     "m3_lf"),
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
     ]
     col = 8
     hdr = f"  {'Model':<6} {'Sub-model':<12} {'Best Case':<32}"
@@ -1276,8 +1499,13 @@ def _print_best_summary(results_m1, results_m2, results_m2_2, results_m3, result
 def _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_m4,
                       aec_size: int = 128, results_m5=None,
                       results_m2_lf=None, results_m3_lf=None):
+<<<<<<< HEAD
+    """Model 1~5의 모든 case 결과를 콘솔 테이블로 출력하고, 마지막에 best case 요약을 출력."""
+    n_var = len({r["aec_var"] for r in results_m2})
+=======
     """Model 1~5/LF의 모든 case 결과를 콘솔 테이블로 출력하고, 마지막에 best case 요약을 출력."""
     n_var = len({r["aec_var"] for r in results_m2}) if results_m2 else 0
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
     sep = "=" * 70
     print(f"\n{sep}")
     print(f"  AEC {aec_size}pt — MODEL 1 — Test Set Performance  (1 scaling case)")
@@ -1310,11 +1538,28 @@ def _print_comparison(results_m1, results_m2, results_m2_2, results_m3, results_
     print(_model_table_str(results_m4, "m4_aec"))
 
     if results_m5:
+        n_var5 = len({r["aec_var"] for r in results_m5})
         print(f"\n{sep}")
-        print(f"  AEC {aec_size}pt — MODEL 5 — Clinic + AEC Hand-crafted Features  (1 case)")
+        print(f"  AEC {aec_size}pt — MODEL 5 — Clinic + AEC Hand-crafted Features CrossAttn  ({n_var5} AEC variants)")
         print(sep)
-        print(f"\n  [LR+AECFeatures]")
-        print(_model_table_str(results_m5, "m5_lr"))
+        print(f"\n  [CrossAttn-Feat]")
+        print(_model_table_str(results_m5, "m5_ca"))
+
+    if results_m2_lf:
+        n_var_lf = len({r["aec_var"] for r in results_m2_lf})
+        print(f"\n{sep}")
+        print(f"  AEC {aec_size}pt — MODEL 2_LF — Clinic + AEC Late Fusion  ({n_var_lf} AEC variants)")
+        print(sep)
+        print(f"\n  [LateFusion]")
+        print(_model_table_str(results_m2_lf, "m2_lf"))
+
+    if results_m3_lf:
+        n_var_lf3 = len({r["aec_var"] for r in results_m3_lf})
+        print(f"\n{sep}")
+        print(f"  AEC {aec_size}pt — MODEL 3_LF — Clinic + Scanner + AEC Late Fusion  ({n_var_lf3} AEC variants)")
+        print(sep)
+        print(f"\n  [LateFusion3]")
+        print(_model_table_str(results_m3_lf, "m3_lf"))
 
     if results_m2_lf:
         print(f"\n{sep}")
@@ -1399,6 +1644,14 @@ def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, res
                            results_m5=None, results_m2_lf=None, results_m3_lf=None):
     """각 모델별 best case(Test AUC 기준) 요약 markdown 테이블 반환."""
     entries = [
+<<<<<<< HEAD
+        ("M1",   "LR",             results_m1,       "m1_lr"),
+        ("M2",   "CrossAttn",      results_m2,       "m2_ca"),
+        ("M2_2", "CrossAttn",      results_m2_2,     "m2_2_ca"),
+        ("M3",   "CrossAttn3",     results_m3,       "m3_ca3"),
+        ("M4",   "AECOnly",        results_m4,       "m4_aec"),
+        ("M5",   "CrossAttn-Feat", results_m5 or [], "m5_ca"),
+=======
         ("M1",    "LR",             results_m1,              "m1_lr"),
         ("M2",    "CrossAttn",      results_m2,              "m2_ca"),
         ("M2_2",  "CrossAttn",      results_m2_2,            "m2_2_ca"),
@@ -1407,6 +1660,7 @@ def _best_cases_summary_md(results_m1, results_m2, results_m2_2, results_m3, res
         ("M5",    "LR+AECFeatures", results_m5 or [],        "m5_lr"),
         ("M2_LF", "LateFusion",     results_m2_lf or [],     "m2_lf"),
         ("M3_LF", "LateFusion3",    results_m3_lf or [],     "m3_lf"),
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
     ]
     col_hdr = " | ".join(mn for mn, _ in _METRICS_DEF)
     col_sep = " | ".join("------:" for _ in _METRICS_DEF)
@@ -1485,13 +1739,13 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         "",
         "---",
         "",
-        "## Model 5 — Clinic + AEC Hand-crafted Features  (1 case)",
+        f"## Model 5 — Clinic + AEC Hand-crafted Features CrossAttn  ({len(AEC_VARIANTS)} AEC variants)",
         "",
-        "> Age/Sex/BMI + AEC 통계 피처 11개(mean·std·max·min·peak_pos·auc·skew·kurt·early/mid/late mean) = 14차원 LR.",
+        "> Age/Sex/BMI + AEC 통계 피처 11개(mean·std·max·min·peak_pos·auc·skew·kurt·early/mid/late mean) → Cross Attention.",
         "",
-        "### LR+AECFeatures",
+        "### CrossAttn-Feat",
         "",
-        _md_table(results_m5 or [], "m5_lr"),
+        _md_table(results_m5 or [], "m5_ca"),
         "",
         "---",
         "",
@@ -1672,6 +1926,12 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         ts = r.get("test_stats", {})
         lbl = _case_label(r)
         lines += _ci_rows("M4", "AECOnly", lbl, ts.get("bootstrap_aec_only", {}))
+<<<<<<< HEAD
+    for r in (results_m5 or []):
+        ts = r.get("test_stats", {})
+        lbl = _case_label(r)
+        lines += _ci_rows("M5", "CrossAttn-Feat", lbl, ts.get("bootstrap_ca_feat", {}))
+=======
     for r in (results_m2_lf or []):
         ts = r.get("test_stats", {})
         lbl = _case_label(r)
@@ -1680,6 +1940,7 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
         ts = r.get("test_stats", {})
         lbl = _case_label(r)
         lines += _ci_rows("M3_LF", "LateFusion3", lbl, ts.get("bootstrap_lf3", {}))
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
     lines.append("")
 
     # ── Test Set: DeLong AUC 비교 ──────────────────────────────────────────────
@@ -1713,10 +1974,10 @@ def _save_comparison_md(results_m1, results_m2, results_m2_2, results_m3, result
     r2_dict_dl   = {r["aec_var"]: r for r in results_m2}
 
     for section_title, pairs in [
-        ("## M1 LR vs M5 LR+AECFeatures", [
-            ("M1-LR", f"M5-{r['case']}", m1_y_te, m1_lr_prob, r["lr_prob"], r["y_te"])
+        ("## M1 LR vs M5 CrossAttn-Feat", [
+            ("M1-LR", f"M5-{_case_label(r)}", m1_y_te, m1_lr_prob, r["ca_prob_te"], r["y_true_te"])
             for r in (results_m5 or [])
-            if m1_y_te is not None and len(r["y_te"]) == len(m1_y_te)
+            if m1_y_te is not None and len(r["y_true_te"]) == len(m1_y_te)
         ]),
         ("## M1 LR vs M2 CrossAttn", [
             (f"M1-LR", f"M2-{r['aec_var']}", m1_y_te, m1_lr_prob, r["ca_prob_te"], r["y_true_te"])

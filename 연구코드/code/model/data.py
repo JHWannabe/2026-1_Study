@@ -91,7 +91,7 @@ def extract_aec_features_batch(X_aec: np.ndarray) -> np.ndarray:
         X_aec.max(axis=1),
         X_aec.min(axis=1),
         X_aec.argmax(axis=1).astype(float) / T,
-        np.trapz(X_aec, axis=1),
+        np.trapezoid(X_aec, axis=1),
         _skew(X_aec, axis=1),
         _kurt(X_aec, axis=1),
         X_aec[:, :seg].mean(axis=1),

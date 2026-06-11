@@ -133,34 +133,38 @@ def make_loaders(X_tr, y_tr, X_val, y_val):
     return tr_dl, val_dl
 
 
-def train_one_epoch(model, loader, crit, opt):
-    """ResNet1D 모델을 한 epoch 학습하고 샘플 평균 loss를 반환."""
+def train_epoch(model, loader, crit, opt):
+    """모든 모델 타입에 공통 사용. batch 마지막 원소를 y로, 나머지를 입력으로 처리."""
     model.train()
     total = 0.0
-    for xb, yb in loader:
-        xb, yb = xb.to(DEVICE), yb.to(DEVICE)
+    for batch in loader:
+        *inputs, yb = [x.to(DEVICE) for x in batch]
         opt.zero_grad()
-        loss = crit(model(xb), yb)
+        loss = crit(model(*inputs), yb)
         loss.backward()
         if GRAD_CLIP > 0:
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=GRAD_CLIP)
         opt.step()
         total += loss.item() * len(yb)
-    return total / len(loader.dataset)
+    return total / len(loader.dataset)  # type: ignore[arg-type]
 
 
 @torch.no_grad()
-def eval_loader(model, loader, crit):
-    """ResNet1D 모델을 평가 모드로 실행해 (avg_loss, probs, trues)를 반환."""
+def eval_epoch(model, loader, crit):
+    """모든 모델 타입에 공통 사용. batch 마지막 원소를 y로, 나머지를 입력으로 처리."""
     model.eval()
     total, probs, trues = 0.0, [], []
-    for xb, yb in loader:
-        xb, yb = xb.to(DEVICE), yb.to(DEVICE)
-        logits = model(xb)
+    for batch in loader:
+        *inputs, yb = [x.to(DEVICE) for x in batch]
+        logits = model(*inputs)
         total += crit(logits, yb).item() * len(yb)
         probs.extend(torch.sigmoid(logits).cpu().numpy())
         trues.extend(yb.cpu().numpy())
-    return total / len(loader.dataset), np.array(probs), np.array(trues)
+    return total / len(loader.dataset), np.array(probs), np.array(trues)  # type: ignore[arg-type]
+
+
+train_one_epoch   = train_epoch
+eval_loader       = eval_epoch
 
 
 # ── AEC Only Model (M4) ──────────────────────────────────────
@@ -351,18 +355,16 @@ class ClinAECCrossAttn(nn.Module):
 def build_cross_attn(y_tr_arr, num_clinical_features=3, num_aec_features=128,
                      aec_encoder='resnet'):
     """ClinAECCrossAttn 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
-    pos_w = torch.tensor(
-        [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
-    ).to(DEVICE)
-    model = ClinAECCrossAttn(
+    return _build_simple_net(ClinAECCrossAttn(
         num_clinical_features=num_clinical_features,
         num_aec_features=num_aec_features,
         aec_encoder=aec_encoder,
-    ).to(DEVICE)
-    crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)
-    opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
-    return model, crit, opt, sched
+    ).to(DEVICE), y_tr_arr)
+
+
+def build_cross_attn_feat(y_tr_arr, num_clinical_features=3, num_aec_features=11):
+    """Clinic + AEC 11 hand-crafted features → ClinAECCrossAttn(scalar) 모델·손실·옵티마이저 반환."""
+    return build_cross_attn(y_tr_arr, num_clinical_features, num_aec_features, 'scalar')
 
 
 # ── Clinic + Scanner + AEC Model (Model 3) ───────────────────
@@ -482,16 +484,7 @@ class ClinAECScanCrossAttn(nn.Module):
 
 def build_cross_attn3(y_tr_arr, n_manufacturers):
     """ClinAECScanCrossAttn 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
-    pos_w = torch.tensor(
-        [(y_tr_arr == 0).sum() / y_tr_arr.sum()], dtype=torch.float32
-    ).to(DEVICE)
-    model = ClinAECScanCrossAttn(
-        n_manufacturers=n_manufacturers,
-    ).to(DEVICE)
-    crit  = FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight=pos_w)
-    opt   = torch.optim.AdamW(model.parameters(), lr=LR_RATE, weight_decay=1e-4)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
-    return model, crit, opt, sched
+    return _build_simple_net(ClinAECScanCrossAttn(n_manufacturers=n_manufacturers).to(DEVICE), y_tr_arr)
 
 
 # ── Late Fusion Models (M2_LF / M3_LF) ──────────────────────
@@ -539,6 +532,8 @@ class ClinAECLateFusion(nn.Module):
         if return_attention:
             return logits, {}
         return logits
+<<<<<<< HEAD
+=======
 
 
 def build_late_fusion(y_tr_arr, num_clinical_features=3, num_aec_features=128,
@@ -626,47 +621,65 @@ def train_cross3_epoch(model, loader, crit, opt):
         opt.step()
         total += loss.item() * len(yb)
     return total / len(loader.dataset)
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
 
 
-@torch.no_grad()
-def eval_cross3_loader(model, loader, crit):
-    """ClinAECScanCrossAttn 모델을 평가 모드로 실행해 (avg_loss, probs, trues)를 반환."""
-    model.eval()
-    total, probs, trues = 0.0, [], []
-    for xc, xa, xmfr, yb in loader:
-        xc, xa, xmfr, yb = xc.to(DEVICE), xa.to(DEVICE), xmfr.to(DEVICE), yb.to(DEVICE)
-        logits = model(xc, xa, xmfr)
-        total += crit(logits, yb).item() * len(yb)
-        probs.extend(torch.sigmoid(logits).cpu().numpy())
-        trues.extend(yb.cpu().numpy())
-    return total / len(loader.dataset), np.array(probs), np.array(trues)
+def build_late_fusion(y_tr_arr, num_clinical_features=3, num_aec_features=128,
+                      aec_encoder='resnet'):
+    """ClinAECLateFusion 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+    return _build_simple_net(ClinAECLateFusion(
+        num_clinical_features=num_clinical_features,
+        num_aec_features=num_aec_features,
+        aec_encoder=aec_encoder,
+    ).to(DEVICE), y_tr_arr)
 
 
-def train_cross_epoch(model, loader, crit, opt):
-    """ClinAECCrossAttn 모델을 한 epoch 학습하고 샘플 평균 loss를 반환."""
-    model.train()
-    total = 0.0
-    for xc, xa, yb in loader:
-        xc, xa, yb = xc.to(DEVICE), xa.to(DEVICE), yb.to(DEVICE)
-        opt.zero_grad()
-        loss = crit(model(xc, xa), yb)
-        loss.backward()
-        if GRAD_CLIP > 0:
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=GRAD_CLIP)
-        opt.step()
-        total += loss.item() * len(yb)
-    return total / len(loader.dataset)
+class ClinAECScanLateFusion(nn.Module):
+    """
+    Clinic + Scanner + AEC Late Fusion 분류 모델 (M3_LF).
+
+    임상·스캐너 토큰과 AEC 인코딩을 각각 mean-pool한 뒤 concat → classifier.
+    Cross-Attention 없이 최종 표현만 결합한다.
+    """
+    def __init__(
+        self,
+        n_manufacturers:       int,
+        num_clinical_features: int   = 3,
+        d_model:               int   = HIDDEN,
+        classifier_hidden_dim: int   = 128,
+        dropout:               float = 0.1,
+        n_aec_tokens:          int   = 32,
+    ):
+        super().__init__()
+        self.clinical_tokenizer = ScalarFeatureTokenizer(num_clinical_features, d_model)
+        self.mfr_tokenizer      = MfrTokenizer(n_manufacturers, d_model)
+        self.aec_encoder        = ResNet1DEncoder(d_model=d_model, n_tokens=n_aec_tokens)
+        self.classifier = nn.Sequential(
+            nn.Linear(d_model * 2, classifier_hidden_dim), nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(classifier_hidden_dim, 1),
+        )
+
+    def forward(self, clinical_x: torch.Tensor, aec_x: torch.Tensor,
+                mfr_x: torch.Tensor, return_attention: bool = False):
+        c_tokens = self.clinical_tokenizer(clinical_x)                # (B, 3, d_model)
+        s_tokens = self.mfr_tokenizer(mfr_x)                         # (B, 1, d_model)
+        cs_repr  = torch.cat([c_tokens, s_tokens], dim=1).mean(1)    # (B, d_model)
+        a_repr   = self.aec_encoder(aec_x).mean(1)                   # (B, d_model)
+        logits   = self.classifier(
+            torch.cat([cs_repr, a_repr], dim=-1)                     # (B, d_model*2)
+        ).squeeze(-1)
+        if return_attention:
+            return logits, {}
+        return logits
 
 
-@torch.no_grad()
-def eval_cross_loader(model, loader, crit):
-    """ClinAECCrossAttn 모델을 평가 모드로 실행해 (avg_loss, probs, trues)를 반환."""
-    model.eval()
-    total, probs, trues = 0.0, [], []
-    for xc, xa, yb in loader:
-        xc, xa, yb = xc.to(DEVICE), xa.to(DEVICE), yb.to(DEVICE)
-        logits = model(xc, xa)
-        total += crit(logits, yb).item() * len(yb)
-        probs.extend(torch.sigmoid(logits).cpu().numpy())
-        trues.extend(yb.cpu().numpy())
-    return total / len(loader.dataset), np.array(probs), np.array(trues)
+def build_late_fusion3(y_tr_arr, n_manufacturers):
+    """ClinAECScanLateFusion 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
+    return _build_simple_net(ClinAECScanLateFusion(n_manufacturers=n_manufacturers).to(DEVICE), y_tr_arr)
+
+
+train_cross_epoch    = train_epoch
+eval_cross_loader    = eval_epoch
+train_cross3_epoch   = train_epoch
+eval_cross3_loader   = eval_epoch

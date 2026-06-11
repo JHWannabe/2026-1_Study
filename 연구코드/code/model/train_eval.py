@@ -36,12 +36,18 @@ import torch
 
 from config import N_FOLDS, SEED, EPOCHS
 from models import (
-    build_resnet, make_loaders, train_one_epoch, eval_loader,
+    build_resnet, make_loaders, train_epoch, eval_epoch,
     build_aec_only,
+<<<<<<< HEAD
+    build_cross_attn, build_cross_attn_feat, make_dual_loaders,
+    build_cross_attn3, make_quad_loaders,
+=======
     build_cross_attn, make_dual_loaders, train_cross_epoch, eval_cross_loader,
     build_cross_attn3, make_quad_loaders, train_cross3_epoch, eval_cross3_loader,
+>>>>>>> 85e98357048347f31c593090de905f10997a7cde
     build_late_fusion, build_late_fusion3,
 )
+
 from metrics import group_metrics, print_bootstrap_ci
 from data import augment_aec
 
@@ -107,11 +113,165 @@ def _train_loop(model, tr_dl, val_dl, crit, opt, sched, train_fn, eval_fn):
     return best_epoch, best_state, hist
 
 
-def _final_train(model, loader, crit, opt, sched, n_epochs, train_fn):
+def _final_train(model, loader, crit, opt, sched, n_epochs, train_fn=None):
     """최종 모델을 n_epochs 동안 학습."""
+    if train_fn is None:
+        train_fn = train_epoch
     for _ in range(1, n_epochs + 1):
         train_fn(model, loader, crit, opt)
         sched.step()
+
+
+# ── Shared CV / test-eval internals ──────────────────────────
+
+def _print_test_stats(label, y_true, y_pred, y_prob, sex_te):
+    """test set 전체·성별 지표를 콘솔 출력."""
+    print(f"\n{label} — Test Set (Overall):"
+          f"  AUC: {roc_auc_score(y_true, y_prob):.4f}"
+          f"  AUPRC: {average_precision_score(y_true, y_prob):.4f}"
+          f"  Brier: {brier_score_loss(y_true, y_prob):.4f}"
+          f"  Acc: {accuracy_score(y_true, y_pred):.4f}"
+          f"  F1: {f1_score(y_true, y_pred, zero_division=0):.4f}")
+    print(f"\n{label} — Test Set (By Sex):")
+    _print_by_sex(y_true, y_pred, y_prob, sex_te)
+    print(f"\n{'─'*55}\nTest Set — Bootstrap CI\n{'─'*55}")
+
+
+def _cv_dual(build_fn, X_clin_cv, X_aec_cv, y_cv, scale_aec, label, augment=True):
+    """Dual-input (Clinic+AEC) 모델의 공통 N_FOLDS 교차검증."""
+    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
+    cv, roc_folds, histories, best_epochs, best_thresholds = [], [], [], [], []
+
+    print("=" * 55)
+    print(f"{N_FOLDS}-Fold CV  [{label} | scale_aec={scale_aec}]")
+    print("=" * 55)
+
+    for fold, (tr_i, val_i) in enumerate(skf.split(X_clin_cv, y_cv), 1):
+        print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
+        X_clin_tr, X_clin_val = _scale_clin(X_clin_cv[tr_i], X_clin_cv[val_i])
+        X_aec_tr,  X_aec_val  = _scale_aec(X_aec_cv[tr_i],  X_aec_cv[val_i], scale_aec)
+        if augment:
+            X_aec_tr = augment_aec(X_aec_tr, rng=np.random.default_rng(SEED + fold))
+        y_tr, y_val = y_cv[tr_i], y_cv[val_i]
+
+        tr_dl, val_dl = make_dual_loaders(X_clin_tr, X_aec_tr, y_tr, X_clin_val, X_aec_val, y_val)
+        model, crit, opt, sched = build_fn(y_tr)
+        best_epoch, best_state, hist = _train_loop(
+            model, tr_dl, val_dl, crit, opt, sched, train_epoch, eval_epoch
+        )
+        model.load_state_dict(best_state)
+        _, fprob, _ = eval_epoch(model, val_dl, crit)
+
+        best_thresh = _youden_threshold(y_val, fprob)
+        best_thresholds.append(best_thresh)
+        m = group_metrics(y_val, (fprob >= best_thresh).astype(int), fprob)
+        cv.append({"fold": fold, **m})
+        fpr, tpr, _ = roc_curve(y_val, fprob)
+        roc_folds.append({"fpr": fpr, "tpr": tpr, "auc": m["auc"]})
+        histories.append(hist)
+        best_epochs.append(best_epoch)
+        print(f"  {label[:4]:4} — AUC: {m['auc']:.4f}  AUPRC: {m['auprc']:.4f}"
+              f"  Brier: {m['brier']:.4f}  Acc: {m['acc']:.4f}  F1: {m['f1']:.4f}"
+              f"  (best ep={best_epoch}, thresh={best_thresh:.3f})")
+
+    return cv, roc_folds, histories, best_epochs, best_thresholds
+
+
+def _cv_quad(build_fn, X_clin_cv, X_aec_cv, X_mfr_cv, y_cv, n_mfr, scale_aec, label):
+    """Quad-input (Clinic+AEC+Scanner) 모델의 공통 N_FOLDS 교차검증."""
+    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
+    cv, roc_folds, histories, best_epochs, best_thresholds = [], [], [], [], []
+
+    print("=" * 65)
+    print(f"{N_FOLDS}-Fold CV  [{label} | scale_aec={scale_aec}]")
+    print("=" * 65)
+
+    for fold, (tr_i, val_i) in enumerate(skf.split(X_clin_cv, y_cv), 1):
+        print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
+        X_clin_tr, X_clin_val = _scale_clin(X_clin_cv[tr_i], X_clin_cv[val_i])
+        X_aec_tr,  X_aec_val  = _scale_aec(X_aec_cv[tr_i],  X_aec_cv[val_i], scale_aec)
+        X_aec_tr = augment_aec(X_aec_tr, rng=np.random.default_rng(SEED + fold))
+        X_mfr_tr, X_mfr_val   = X_mfr_cv[tr_i], X_mfr_cv[val_i]
+        y_tr, y_val = y_cv[tr_i], y_cv[val_i]
+
+        tr_dl, val_dl = make_quad_loaders(
+            X_clin_tr, X_aec_tr, X_mfr_tr, y_tr,
+            X_clin_val, X_aec_val, X_mfr_val, y_val,
+        )
+        model, crit, opt, sched = build_fn(y_tr, n_mfr)
+        best_epoch, best_state, hist = _train_loop(
+            model, tr_dl, val_dl, crit, opt, sched, train_epoch, eval_epoch
+        )
+        model.load_state_dict(best_state)
+        _, fprob, _ = eval_epoch(model, val_dl, crit)
+
+        best_thresh = _youden_threshold(y_val, fprob)
+        best_thresholds.append(best_thresh)
+        m = group_metrics(y_val, (fprob >= best_thresh).astype(int), fprob)
+        cv.append({"fold": fold, **m})
+        fpr, tpr, _ = roc_curve(y_val, fprob)
+        roc_folds.append({"fpr": fpr, "tpr": tpr, "auc": m["auc"]})
+        histories.append(hist)
+        best_epochs.append(best_epoch)
+        print(f"  {label[:4]:4} — AUC: {m['auc']:.4f}  AUPRC: {m['auprc']:.4f}"
+              f"  Brier: {m['brier']:.4f}  Acc: {m['acc']:.4f}  F1: {m['f1']:.4f}"
+              f"  (best ep={best_epoch}, thresh={best_thresh:.3f})")
+
+    return cv, roc_folds, histories, best_epochs, best_thresholds
+
+
+def _eval_dual(build_fn, label, ci_key,
+               X_clin_cv, X_aec_cv, y_cv,
+               X_clin_te, X_aec_te, y_te, sex_te,
+               med_epoch, scale_aec, threshold, weight_path):
+    """Dual-input 모델의 공통 최종 test set 평가."""
+    X_clin_cv_s, X_clin_te_s = _scale_clin(X_clin_cv, X_clin_te)
+    X_aec_cv_s,  X_aec_te_s  = _scale_aec(X_aec_cv, X_aec_te, scale_aec)
+
+    tr_dl, te_dl = make_dual_loaders(X_clin_cv_s, X_aec_cv_s, y_cv,
+                                     X_clin_te_s,  X_aec_te_s,  y_te)
+    model_f, crit_f, opt_f, sched_f = build_fn(y_cv)
+    print(f"{label} — training final model for {med_epoch} epochs on full CV set …")
+    _final_train(model_f, tr_dl, crit_f, opt_f, sched_f, med_epoch)
+
+    if weight_path:
+        os.makedirs(os.path.dirname(weight_path), exist_ok=True)
+        torch.save(model_f.state_dict(), weight_path)
+        print(f"  [{label}] weights → {weight_path}")
+
+    _, prob_te, true_te = eval_epoch(model_f, te_dl, crit_f)
+    pred_te = (prob_te >= threshold).astype(int)
+    _print_test_stats(label, true_te, pred_te, prob_te, sex_te)
+    ci = print_bootstrap_ci(label, true_te, pred_te, prob_te)
+    return pred_te, prob_te, true_te, {ci_key: ci}, model_f, X_clin_te_s, X_aec_te_s
+
+
+def _eval_quad(build_fn, label, ci_key,
+               X_clin_cv, X_aec_cv, X_mfr_cv, y_cv,
+               X_clin_te, X_aec_te, X_mfr_te, y_te,
+               sex_te, med_epoch, n_mfr, scale_aec, threshold, weight_path):
+    """Quad-input 모델의 공통 최종 test set 평가."""
+    X_clin_cv_s, X_clin_te_s = _scale_clin(X_clin_cv, X_clin_te)
+    X_aec_cv_s,  X_aec_te_s  = _scale_aec(X_aec_cv, X_aec_te, scale_aec)
+
+    tr_dl, te_dl = make_quad_loaders(
+        X_clin_cv_s, X_aec_cv_s, X_mfr_cv, y_cv,
+        X_clin_te_s, X_aec_te_s, X_mfr_te, y_te,
+    )
+    model_f, crit_f, opt_f, sched_f = build_fn(y_cv, n_mfr)
+    print(f"{label} — training final model for {med_epoch} epochs on full CV set …")
+    _final_train(model_f, tr_dl, crit_f, opt_f, sched_f, med_epoch)
+
+    if weight_path:
+        os.makedirs(os.path.dirname(weight_path), exist_ok=True)
+        torch.save(model_f.state_dict(), weight_path)
+        print(f"  [{label}] weights → {weight_path}")
+
+    _, prob_te, true_te = eval_epoch(model_f, te_dl, crit_f)
+    pred_te = (prob_te >= threshold).astype(int)
+    _print_test_stats(label, true_te, pred_te, prob_te, sex_te)
+    ci = print_bootstrap_ci(label, true_te, pred_te, prob_te)
+    return pred_te, prob_te, true_te, {ci_key: ci}, model_f, X_clin_te_s, X_aec_te_s
 
 
 # ── Print helper ──────────────────────────────────────────────
@@ -208,94 +368,21 @@ def run_cross_validation_combined(X_cv, y_cv):
 
 
 def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv, scale_aec="column"):
-    """ClinAECCrossAttn에 대해 N_FOLDS 교차검증.
-    Returns: (ca_cv, ca_roc_folds, ca_histories, ca_best_epochs, ca_best_thresholds)"""
-    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
-    ca_cv, ca_roc_folds, ca_histories, ca_best_epochs, ca_best_thresholds = [], [], [], [], []
-
-    print("=" * 55)
-    print(f"{N_FOLDS}-Fold CV  [CrossAttn | scale_aec={scale_aec}]")
-    print("=" * 55)
-
-    for fold, (tr_i, val_i) in enumerate(skf.split(X_clin_cv, y_cv), 1):
-        print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
-        X_clin_tr, X_clin_val = _scale_clin(X_clin_cv[tr_i], X_clin_cv[val_i])
-        X_aec_tr,  X_aec_val  = _scale_aec(X_aec_cv[tr_i],  X_aec_cv[val_i], scale_aec)
-        X_aec_tr = augment_aec(X_aec_tr, rng=np.random.default_rng(SEED + fold))
-        y_tr, y_val = y_cv[tr_i], y_cv[val_i]
-
-        tr_dl, val_dl = make_dual_loaders(X_clin_tr, X_aec_tr, y_tr, X_clin_val, X_aec_val, y_val)
-        model, crit, opt, sched = build_cross_attn(y_tr)
-        best_epoch, best_state, hist = _train_loop(
-            model, tr_dl, val_dl, crit, opt, sched, train_cross_epoch, eval_cross_loader
-        )
-        model.load_state_dict(best_state)
-        _, ca_fprob, _ = eval_cross_loader(model, val_dl, crit)
-
-        best_thresh = _youden_threshold(y_val, ca_fprob)
-        ca_fp = (ca_fprob >= best_thresh).astype(int)
-        ca_best_thresholds.append(best_thresh)
-
-        m_ca = group_metrics(y_val, ca_fp, ca_fprob)
-        ca_cv.append({"fold": fold, **m_ca})
-        fpr, tpr, _ = roc_curve(y_val, ca_fprob)
-        ca_roc_folds.append({"fpr": fpr, "tpr": tpr, "auc": m_ca["auc"]})
-        ca_histories.append(hist)
-        ca_best_epochs.append(best_epoch)
-
-        print(f"  CA   — AUC: {m_ca['auc']:.4f}  AUPRC: {m_ca['auprc']:.4f}"
-              f"  Brier: {m_ca['brier']:.4f}  Acc: {m_ca['acc']:.4f}  F1: {m_ca['f1']:.4f}"
-              f"  (best ep={best_epoch}, thresh={best_thresh:.3f})")
-
-    return ca_cv, ca_roc_folds, ca_histories, ca_best_epochs, ca_best_thresholds
+    """ClinAECCrossAttn에 대해 N_FOLDS 교차검증."""
+    return _cv_dual(build_cross_attn, X_clin_cv, X_aec_cv, y_cv, scale_aec, "CrossAttn")
 
 
 def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv, n_manufacturers,
                                  scale_aec="column"):
-    """ClinAECScanCrossAttn에 대해 N_FOLDS 교차검증.
-    Returns: (ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs, ca3_best_thresholds)"""
-    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
-    ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs, ca3_best_thresholds = [], [], [], [], []
+    """ClinAECScanCrossAttn에 대해 N_FOLDS 교차검증."""
+    return _cv_quad(build_cross_attn3, X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
+                    n_manufacturers, scale_aec, "CrossAttn3")
 
-    print("=" * 65)
-    print(f"{N_FOLDS}-Fold CV  [CrossAttn3 | scale_aec={scale_aec}]")
-    print("=" * 65)
 
-    for fold, (tr_i, val_i) in enumerate(skf.split(X_clin_cv, y_cv), 1):
-        print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
-        X_clin_tr, X_clin_val = _scale_clin(X_clin_cv[tr_i], X_clin_cv[val_i])
-        X_aec_tr,  X_aec_val  = _scale_aec(X_aec_cv[tr_i],  X_aec_cv[val_i], scale_aec)
-        X_aec_tr = augment_aec(X_aec_tr, rng=np.random.default_rng(SEED + fold))
-        X_mfr_tr,  X_mfr_val  = X_scan_mfr_cv[tr_i], X_scan_mfr_cv[val_i]
-        y_tr, y_val = y_cv[tr_i], y_cv[val_i]
-
-        tr_dl, val_dl = make_quad_loaders(
-            X_clin_tr, X_aec_tr, X_mfr_tr, y_tr,
-            X_clin_val, X_aec_val, X_mfr_val, y_val,
-        )
-        model, crit, opt, sched = build_cross_attn3(y_tr, n_manufacturers)
-        best_epoch, best_state, hist = _train_loop(
-            model, tr_dl, val_dl, crit, opt, sched, train_cross3_epoch, eval_cross3_loader
-        )
-        model.load_state_dict(best_state)
-        _, ca3_fprob, _ = eval_cross3_loader(model, val_dl, crit)
-
-        best_thresh = _youden_threshold(y_val, ca3_fprob)
-        ca3_fp = (ca3_fprob >= best_thresh).astype(int)
-        ca3_best_thresholds.append(best_thresh)
-
-        m_ca3 = group_metrics(y_val, ca3_fp, ca3_fprob)
-        ca3_cv.append({"fold": fold, **m_ca3})
-        fpr, tpr, _ = roc_curve(y_val, ca3_fprob)
-        ca3_roc_folds.append({"fpr": fpr, "tpr": tpr, "auc": m_ca3["auc"]})
-        ca3_histories.append(hist)
-        ca3_best_epochs.append(best_epoch)
-
-        print(f"  CA3  — AUC: {m_ca3['auc']:.4f}  AUPRC: {m_ca3['auprc']:.4f}"
-              f"  Brier: {m_ca3['brier']:.4f}  Acc: {m_ca3['acc']:.4f}  F1: {m_ca3['f1']:.4f}"
-              f"  (best ep={best_epoch}, thresh={best_thresh:.3f})")
-
-    return ca3_cv, ca3_roc_folds, ca3_histories, ca3_best_epochs, ca3_best_thresholds
+def run_cross_validation_cross_feat(X_clin_cv, X_feat_cv, y_cv):
+    """Clinic + AEC 11 hand-crafted features CrossAttn에 대해 N_FOLDS 교차검증."""
+    return _cv_dual(build_cross_attn_feat, X_clin_cv, X_feat_cv, y_cv, "column",
+                    "CrossAttn-Feat", augment=False)
 
 
 def run_cross_validation_aec_only(X_aec_cv, y_cv, scale_aec="column"):
@@ -317,10 +404,10 @@ def run_cross_validation_aec_only(X_aec_cv, y_cv, scale_aec="column"):
         tr_dl, val_dl = make_loaders(X_aec_tr, y_tr, X_aec_val, y_val)
         model, crit, opt, sched = build_aec_only(y_tr)
         best_epoch, best_state, hist = _train_loop(
-            model, tr_dl, val_dl, crit, opt, sched, train_one_epoch, eval_loader
+            model, tr_dl, val_dl, crit, opt, sched, train_epoch, eval_epoch
         )
         model.load_state_dict(best_state)
-        _, fprob, _ = eval_loader(model, val_dl, crit)
+        _, fprob, _ = eval_epoch(model, val_dl, crit)
 
         best_thresh = _youden_threshold(y_val, fprob)
         fp = (fprob >= best_thresh).astype(int)
@@ -360,7 +447,7 @@ def evaluate_test(X_cv, y_cv, X_te, y_te, sex_te, threshold=0.5):
           f"  AUPRC: {average_precision_score(y_te, lr_prob):.4f}"
           f"  Brier: {brier_score_loss(y_te, lr_prob):.4f}"
           f"  Acc: {accuracy_score(y_te, lr_pred):.4f}"
-          f"  F1: {f1_score(y_te, lr_pred):.4f}")
+          f"  F1: {f1_score(y_te, lr_pred, zero_division=0):.4f}")
     print("\nLR — Test Set (By Sex):")
     _print_by_sex(y_te, lr_pred, lr_prob, sex_te)
 
@@ -371,11 +458,11 @@ def evaluate_test(X_cv, y_cv, X_te, y_te, sex_te, threshold=0.5):
 
 def evaluate_test_combined(X_cv, y_cv, X_te, y_te, sex_te, threshold=0.5):
     """Clinic+AEC 결합 피처 LR 최종 모델 학습 후 test set 예측.
-    Returns: (lr_pred, lr_prob, stats_te)"""
+    Returns: (lr_pred, lr_prob, stats_te, lr_final, X_te_s)"""
     print(f"\n{'='*55}\nFinal Test Evaluation  [LR+AEC | threshold={threshold:.3f}]\n{'='*55}")
     X_cv_s, X_te_s = _scale_combined(X_cv, X_te)
 
-    lr_final = LogisticRegression(max_iter=1000, random_state=SEED, class_weight="balanced")
+    lr_final = LogisticRegression(max_iter=10000, random_state=SEED, class_weight="balanced")
     lr_final.fit(X_cv_s, y_cv)
     lr_prob = lr_final.predict_proba(X_te_s)[:, 1]
     lr_pred = (lr_prob >= threshold).astype(int)
@@ -385,93 +472,42 @@ def evaluate_test_combined(X_cv, y_cv, X_te, y_te, sex_te, threshold=0.5):
           f"  AUPRC: {average_precision_score(y_te, lr_prob):.4f}"
           f"  Brier: {brier_score_loss(y_te, lr_prob):.4f}"
           f"  Acc: {accuracy_score(y_te, lr_pred):.4f}"
-          f"  F1: {f1_score(y_te, lr_pred):.4f}")
+          f"  F1: {f1_score(y_te, lr_pred, zero_division=0):.4f}")
     print("\nLR+AEC — Test Set (By Sex):")
     _print_by_sex(y_te, lr_pred, lr_prob, sex_te)
 
     print(f"\n{'─'*55}\nTest Set — Bootstrap CI\n{'─'*55}")
     ci_lr = print_bootstrap_ci("LR+AEC", y_te, lr_pred, lr_prob)
-    return lr_pred, lr_prob, {"bootstrap_lr_aec": ci_lr}
+    return lr_pred, lr_prob, {"bootstrap_lr_aec": ci_lr}, lr_final, X_te_s
+
+
+def evaluate_test_cross_feat(X_clin_cv, X_feat_cv, y_cv,
+                             X_clin_te, X_feat_te, y_te, sex_te,
+                             med_epoch, threshold=0.5, weight_path=None):
+    """Clinic + AEC 11 hand-crafted features CrossAttn 최종 모델 학습 후 test set 예측."""
+    return _eval_dual(build_cross_attn_feat, "CrossAttn-Feat", "bootstrap_ca_feat",
+                      X_clin_cv, X_feat_cv, y_cv, X_clin_te, X_feat_te, y_te, sex_te,
+                      med_epoch, "column", threshold, weight_path)
 
 
 def evaluate_test_cross(X_clin_cv, X_aec_cv, y_cv,
                         X_clin_te, X_aec_te, y_te, sex_te,
-                        med_epoch, scale_aec="column",
-                        threshold=0.5, weight_path=None):
-    """전체 CV 세트로 CrossAttn 최종 모델 학습 후 test set 예측.
-    Returns: (ca_pred_te, ca_prob_te, ca_true_te, stats_te, model, X_clin_te_s, X_aec_te_s)"""
-    print(f"\n{'='*55}\nCrossAttn Test Evaluation"
-          f"  [scale_aec={scale_aec} | threshold={threshold:.3f}]\n{'='*55}")
-    X_clin_cv_s, X_clin_te_s = _scale_clin(X_clin_cv, X_clin_te)
-    X_aec_cv_s,  X_aec_te_s  = _scale_aec(X_aec_cv,  X_aec_te, scale_aec)
-
-    tr_dl, te_dl = make_dual_loaders(X_clin_cv_s, X_aec_cv_s, y_cv,
-                                     X_clin_te_s,  X_aec_te_s,  y_te)
-    model_f, crit_f, opt_f, sched_f = build_cross_attn(y_cv)
-    print(f"CrossAttn — training final model for {med_epoch} epochs on full CV set …")
-    _final_train(model_f, tr_dl, crit_f, opt_f, sched_f, med_epoch, train_cross_epoch)
-
-    if weight_path is not None:
-        os.makedirs(os.path.dirname(weight_path), exist_ok=True)
-        torch.save(model_f.state_dict(), weight_path)
-        print(f"  [CrossAttn] weights → {weight_path}")
-
-    _, ca_prob_te, ca_true_te = eval_cross_loader(model_f, te_dl, crit_f)
-    ca_pred_te = (ca_prob_te >= threshold).astype(int)
-
-    print(f"\nCrossAttn — Test Set (Overall):"
-          f"  AUC: {roc_auc_score(ca_true_te, ca_prob_te):.4f}"
-          f"  AUPRC: {average_precision_score(ca_true_te, ca_prob_te):.4f}"
-          f"  Brier: {brier_score_loss(ca_true_te, ca_prob_te):.4f}"
-          f"  Acc: {accuracy_score(ca_true_te, ca_pred_te):.4f}"
-          f"  F1: {f1_score(ca_true_te, ca_pred_te, zero_division=0):.4f}")
-    print("\nCrossAttn — Test Set (By Sex):")
-    _print_by_sex(ca_true_te, ca_pred_te, ca_prob_te, sex_te)
-
-    print(f"\n{'─'*55}\nTest Set — Bootstrap CI\n{'─'*55}")
-    ci_ca = print_bootstrap_ci("CrossAttn", ca_true_te, ca_pred_te, ca_prob_te)
-    return ca_pred_te, ca_prob_te, ca_true_te, {"bootstrap_ca": ci_ca}, model_f, X_clin_te_s, X_aec_te_s
+                        med_epoch, scale_aec="column", threshold=0.5, weight_path=None):
+    """전체 CV 세트로 CrossAttn 최종 모델 학습 후 test set 예측."""
+    return _eval_dual(build_cross_attn, "CrossAttn", "bootstrap_ca",
+                      X_clin_cv, X_aec_cv, y_cv, X_clin_te, X_aec_te, y_te, sex_te,
+                      med_epoch, scale_aec, threshold, weight_path)
 
 
 def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
                           X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
                           sex_te, med_epoch, n_manufacturers,
                           scale_aec="column", threshold=0.5, weight_path=None):
-    """전체 CV 세트로 CrossAttn3 최종 모델 학습 후 test set 예측.
-    Returns: (ca3_pred_te, ca3_prob_te, ca3_true_te, stats_te, model, X_clin_te_s, X_aec_te_s)"""
-    print(f"\n{'='*65}\nCrossAttn3 Test Evaluation"
-          f"  [scale_aec={scale_aec} | threshold={threshold:.3f}]\n{'='*65}")
-    X_clin_cv_s, X_clin_te_s = _scale_clin(X_clin_cv, X_clin_te)
-    X_aec_cv_s,  X_aec_te_s  = _scale_aec(X_aec_cv,  X_aec_te, scale_aec)
-
-    tr_dl, te_dl = make_quad_loaders(
-        X_clin_cv_s, X_aec_cv_s, X_scan_mfr_cv, y_cv,
-        X_clin_te_s, X_aec_te_s, X_scan_mfr_te, y_te,
-    )
-    model_f, crit_f, opt_f, sched_f = build_cross_attn3(y_cv, n_manufacturers)
-    print(f"CrossAttn3 — training final model for {med_epoch} epochs on full CV set …")
-    _final_train(model_f, tr_dl, crit_f, opt_f, sched_f, med_epoch, train_cross3_epoch)
-
-    if weight_path is not None:
-        os.makedirs(os.path.dirname(weight_path), exist_ok=True)
-        torch.save(model_f.state_dict(), weight_path)
-        print(f"  [CrossAttn3] weights → {weight_path}")
-
-    _, ca3_prob_te, ca3_true_te = eval_cross3_loader(model_f, te_dl, crit_f)
-    ca3_pred_te = (ca3_prob_te >= threshold).astype(int)
-
-    print(f"\nCrossAttn3 — Test Set (Overall):"
-          f"  AUC: {roc_auc_score(ca3_true_te, ca3_prob_te):.4f}"
-          f"  AUPRC: {average_precision_score(ca3_true_te, ca3_prob_te):.4f}"
-          f"  Brier: {brier_score_loss(ca3_true_te, ca3_prob_te):.4f}"
-          f"  Acc: {accuracy_score(ca3_true_te, ca3_pred_te):.4f}"
-          f"  F1: {f1_score(ca3_true_te, ca3_pred_te, zero_division=0):.4f}")
-    print("\nCrossAttn3 — Test Set (By Sex):")
-    _print_by_sex(ca3_true_te, ca3_pred_te, ca3_prob_te, sex_te)
-
-    print(f"\n{'─'*55}\nTest Set — Bootstrap CI\n{'─'*55}")
-    ci_ca3 = print_bootstrap_ci("CrossAttn3", ca3_true_te, ca3_pred_te, ca3_prob_te)
-    return ca3_pred_te, ca3_prob_te, ca3_true_te, {"bootstrap_ca3": ci_ca3}, model_f, X_clin_te_s, X_aec_te_s
+    """전체 CV 세트로 CrossAttn3 최종 모델 학습 후 test set 예측."""
+    return _eval_quad(build_cross_attn3, "CrossAttn3", "bootstrap_ca3",
+                      X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
+                      X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
+                      sex_te, med_epoch, n_manufacturers, scale_aec, threshold, weight_path)
 
 
 def run_cross_validation_late_fusion(X_clin_cv, X_aec_cv, y_cv, scale_aec="column"):
@@ -646,36 +682,52 @@ def evaluate_test_late_fusion3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
 
 
 def evaluate_test_aec_only(X_aec_cv, y_cv, X_aec_te, y_te, sex_te,
-                           med_epoch, scale_aec="column",
-                           threshold=0.5, weight_path=None):
-    """전체 CV 세트로 AECOnlyNet 최종 모델 학습 후 test set 예측.
-    Returns: (pred_te, prob_te, true_te, stats_te, model, X_aec_te_s)"""
-    print(f"\n{'='*55}\nAECOnly Test Evaluation"
-          f"  [scale_aec={scale_aec} | threshold={threshold:.3f}]\n{'='*55}")
+                           med_epoch, scale_aec="column", threshold=0.5, weight_path=None):
+    """전체 CV 세트로 AECOnlyNet 최종 모델 학습 후 test set 예측."""
+    print(f"\n{'='*55}\nAECOnly Test Evaluation  [scale_aec={scale_aec} | threshold={threshold:.3f}]\n{'='*55}")
     X_aec_cv_s, X_aec_te_s = _scale_aec(X_aec_cv, X_aec_te, scale_aec)
-
     tr_dl, te_dl = make_loaders(X_aec_cv_s, y_cv, X_aec_te_s, y_te)
     model_f, crit_f, opt_f, sched_f = build_aec_only(y_cv)
     print(f"AECOnly — training final model for {med_epoch} epochs on full CV set …")
-    _final_train(model_f, tr_dl, crit_f, opt_f, sched_f, med_epoch, train_one_epoch)
-
-    if weight_path is not None:
+    _final_train(model_f, tr_dl, crit_f, opt_f, sched_f, med_epoch)
+    if weight_path:
         os.makedirs(os.path.dirname(weight_path), exist_ok=True)
         torch.save(model_f.state_dict(), weight_path)
         print(f"  [AECOnly] weights → {weight_path}")
-
-    _, prob_te, true_te = eval_loader(model_f, te_dl, crit_f)
+    _, prob_te, true_te = eval_epoch(model_f, te_dl, crit_f)
     pred_te = (prob_te >= threshold).astype(int)
-
-    print(f"\nAECOnly — Test Set (Overall):"
-          f"  AUC: {roc_auc_score(true_te, prob_te):.4f}"
-          f"  AUPRC: {average_precision_score(true_te, prob_te):.4f}"
-          f"  Brier: {brier_score_loss(true_te, prob_te):.4f}"
-          f"  Acc: {accuracy_score(true_te, pred_te):.4f}"
-          f"  F1: {f1_score(true_te, pred_te, zero_division=0):.4f}")
-    print("\nAECOnly — Test Set (By Sex):")
-    _print_by_sex(true_te, pred_te, prob_te, sex_te)
-
-    print(f"\n{'─'*55}\nTest Set — Bootstrap CI\n{'─'*55}")
+    _print_test_stats("AECOnly", true_te, pred_te, prob_te, sex_te)
     ci = print_bootstrap_ci("AECOnly", true_te, pred_te, prob_te)
     return pred_te, prob_te, true_te, {"bootstrap_aec_only": ci}, model_f, X_aec_te_s
+
+
+def run_cross_validation_late_fusion(X_clin_cv, X_aec_cv, y_cv, scale_aec="column"):
+    """ClinAECLateFusion에 대해 N_FOLDS 교차검증."""
+    return _cv_dual(build_late_fusion, X_clin_cv, X_aec_cv, y_cv, scale_aec, "LateFusion")
+
+
+def run_cross_validation_late_fusion3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv, n_manufacturers,
+                                      scale_aec="column"):
+    """ClinAECScanLateFusion에 대해 N_FOLDS 교차검증."""
+    return _cv_quad(build_late_fusion3, X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
+                    n_manufacturers, scale_aec, "LateFusion3")
+
+
+def evaluate_test_late_fusion(X_clin_cv, X_aec_cv, y_cv,
+                              X_clin_te, X_aec_te, y_te, sex_te,
+                              med_epoch, scale_aec="column", threshold=0.5, weight_path=None):
+    """전체 CV 세트로 LateFusion 최종 모델 학습 후 test set 예측."""
+    return _eval_dual(build_late_fusion, "LateFusion", "bootstrap_lf",
+                      X_clin_cv, X_aec_cv, y_cv, X_clin_te, X_aec_te, y_te, sex_te,
+                      med_epoch, scale_aec, threshold, weight_path)
+
+
+def evaluate_test_late_fusion3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
+                               X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
+                               sex_te, med_epoch, n_manufacturers,
+                               scale_aec="column", threshold=0.5, weight_path=None):
+    """전체 CV 세트로 LateFusion3 최종 모델 학습 후 test set 예측."""
+    return _eval_quad(build_late_fusion3, "LateFusion3", "bootstrap_lf3",
+                      X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
+                      X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
+                      sex_te, med_epoch, n_manufacturers, scale_aec, threshold, weight_path)

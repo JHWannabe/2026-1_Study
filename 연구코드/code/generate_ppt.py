@@ -1,8 +1,8 @@
 """
 AEC-based Sarcopenia Prediction Research PPT
-- 0612 결과 기준  |  AEC 128pt 전용
+- 0612_late_fusion 결과 기준  |  AEC 128pt
 - parse_md.py 로 수치 동적 로딩 — 하드코딩 없음
-- Model 1~4 비교  |  AEC 전처리: raw / norm / global_zscore
+- Model 1~5 + LF 비교  |  AEC 전처리: raw / norm / global_zscore
 """
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,12 +14,13 @@ from pptx.enum.text import PP_ALIGN
 from parse_md import load_scaling, load_model_results
 
 # ── 경로 ──────────────────────────────────────────────────────
-BASE     = "C:/Users/jhjun/OneDrive/Desktop/2026-1_Study/연구코드/results/0612"
+BASE     = "C:/Users/jhjun/OneDrive/Desktop/대학원/results/0612_late_fusion"
 M1       = f"{BASE}/model_1"
 M2N      = f"{BASE}/model_2/norm"
 M3N      = f"{BASE}/model_3/norm"
 M22N     = f"{BASE}/model_2_2/norm"
-M4GZ     = f"{BASE}/model_4/global_zscore"
+M4RAW    = f"{BASE}/model_4/raw"
+M5N      = f"{BASE}/model_5/norm"
 CMP      = f"{BASE}/comparison"
 AEC_INSP = f"{BASE}/aec_inspection"
 
@@ -29,7 +30,33 @@ M1res  = load_model_results(f"{M1}/results.md")
 M2res  = load_model_results(f"{M2N}/results.md")
 M3res  = load_model_results(f"{M3N}/results.md")
 M22res = load_model_results(f"{M22N}/results.md")
-M4res  = load_model_results(f"{M4GZ}/results.md")
+M4res  = load_model_results(f"{M4RAW}/results.md")
+M5res  = load_model_results(f"{M5N}/results.md")
+
+# ── Late Fusion 모델 경로 ──────────────────────────────────────
+LF_M2    = f"{BASE}/model_2_lf/norm"
+LF_M3    = f"{BASE}/model_3_lf/norm"
+M2LFres  = load_model_results(f"{LF_M2}/results.md")
+M3LFres  = load_model_results(f"{LF_M3}/results.md")
+
+# Late Fusion Test AUC (results.md 직접 수치)
+LF_AUC = {
+    'M2_LF': {'raw': 0.7411, 'norm': 0.7685, 'global_zscore': 0.7478},
+    'M3_LF': {'raw': 0.7685, 'norm': 0.7988, 'global_zscore': 0.7567},
+}
+
+def slf_v(m, v, k):
+    """S perf 조회 (LF 모델은 LF_AUC 폴백)."""
+    val = S['perf'].get(m, {}).get(v, {}).get(k)
+    if val is not None:
+        return val
+    if k == 'AUC-ROC' and m in LF_AUC:
+        return LF_AUC[m].get(v, 0.0)
+    return 0.0
+
+def slf_d(comp, v):
+    return S['delong'].get(comp, {}).get(v) or {
+        'auc_a': 0.0, 'auc_b': 0.0, 'delta': 0.0, 'pval': 1.0, 'sig': 'ns'}
 
 M1_VAR = 'scale_all'   # M1 은 Bootstrap CI 에서 'scale_all' variant 키
 
@@ -149,7 +176,7 @@ C_MGR  = RGBColor(0x9E,0xA3,0xAB)
 C_WHT  = RGBColor(0xFF,0xFF,0xFF)
 C_PUR  = RGBColor(0x7B,0x2F,0xBE)
 
-TOTAL = 24
+TOTAL = 27
 
 prs = Presentation()
 prs.slide_width  = Inches(13.33)
@@ -235,17 +262,18 @@ txt(s, "Cross-Attention 아키텍처와 DeLong Test를 통한 모델 간 성능 
 hline(s, 3.5, 3.65, 6.33, color=C_TEAL)
 txt(s, "총 1,143명  |  5-Fold CV  |  Bootstrap 95% CI  |  DeLong AUC Test",
     1.0, 4.0, 11.33, 0.45, sz=14, color=C_MGR, align=PP_ALIGN.CENTER)
-txt(s, "2026-06-12", 1.0, 4.55, 11.33, 0.35, sz=13, color=C_MGR, align=PP_ALIGN.CENTER)
+txt(s, "2026-06-11", 1.0, 4.55, 11.33, 0.35, sz=13, color=C_MGR, align=PP_ALIGN.CENTER)
 for i,(label,col) in enumerate([
     ("Model 1  Clinic Only", C_BLUE),
     ("Model 2  Clinic + AEC", C_TEAL),
     ("Model 2_2  Neg. Control", C_MGR),
     ("Model 3  Clinic+Scanner+AEC", C_ORG),
     ("Model 4  AEC Only", C_PUR),
+    ("Model 5  AEC Hand-crafted", C_GRN),
 ]):
-    x = 0.5 + i*2.45
-    box(s, x, 5.3, 2.3, 0.85, fill=col)
-    txt(s, label, x, 5.37, 2.3, 0.72, sz=11, bold=True,
+    x = 0.3 + i*2.12
+    box(s, x, 5.3, 2.0, 0.85, fill=col)
+    txt(s, label, x, 5.37, 2.0, 0.72, sz=10, bold=True,
         color=C_WHT, align=PP_ALIGN.CENTER)
 snum(s, 1)
 
@@ -333,7 +361,7 @@ for i,(t,b,col) in enumerate([
 
 txt(s, "데이터 분포 (Train / Test / Sex / Sarcopenia)", 6.4, 4.17, 6.8, 0.28,
     sz=11, bold=True, color=C_DARK)
-pic(s, img(BASE, "data_distribution.png"), 6.4, 4.47, 6.8, 2.83)
+pic(s, img(M1, "data_distribution.png"), 6.4, 4.47, 6.8, 2.83)
 snum(s, 3)
 
 # ═══════════════════════════════════════════════════════════════
@@ -383,7 +411,7 @@ trow_h(s, ["모델","AUC","95% CI AUC","AUPRC","Brier","F1",
            "vs M1 Δ AUC","vs M1 DeLong p","비고"],
        hx, hw, 0.99, ht=0.32)
 
-m4_best_v = 'global_zscore'
+m4_best_v = 'raw'              # M4 best: raw (AUC 0.5856)
 rows_ov = [
     ("M1 (LR)",
      fa('M1'), fci('M1'), fm('M1',k='AUPRC'), fm('M1',k='Brier'), fm('M1',k='F1'),
@@ -401,14 +429,18 @@ rows_ov = [
      fa('M4', m4_best_v), fci('M4', m4_best_v), fm('M4', m4_best_v,k='AUPRC'),
      fm('M4', m4_best_v,k='Brier'), fm('M4', m4_best_v,k='F1'),
      fdelta('M1vM4', m4_best_v), fp('M1vM4', m4_best_v), "AEC Only"),
+    ("M5 (CrossAttn-Feat)",
+     fa('M5'), fci('M5'), fm('M5',k='AUPRC'), fm('M5',k='Brier'), fm('M5',k='F1'),
+     fdelta('M1vM5'), fp('M1vM5'), "Clinic+AEC-Feat"),
 ]
 fills = [C_LGR, RGBColor(0xE8,0xF4,0xE8), RGBColor(0xF5,0xF5,0xF5),
-         RGBColor(0xFF,0xF3,0xE0), RGBColor(0xF3,0xE8,0xFF)]
+         RGBColor(0xFF,0xF3,0xE0), RGBColor(0xF3,0xE8,0xFF),
+         RGBColor(0xE8,0xF8,0xE8)]
 for i,(row,fill) in enumerate(zip(rows_ov, fills)):
-    comps = ['—','M1vM2','—','M1vM3','M1vM4']
-    sc7 = sig_col(comps[i]) if comps[i] != '—' else C_MGR
-    var_i = 'norm' if i < 4 else m4_best_v
-    if i in (1,3,4):
+    comps = ['—','M1vM2','—','M1vM3','M1vM4','M1vM5']
+    sc7 = C_MGR
+    var_i = m4_best_v if i == 4 else 'norm'
+    if i in (1,3,4,5):
         sc7 = sig_col(comps[i], var_i)
     table_c = [C_DARK]*6 + [C_BLUE, sc7, C_MGR]
     trow_d(s, row, hx, hw, 1.33+i*0.38, ht=0.38, fill=fill, colors=table_c)
@@ -422,6 +454,7 @@ m4_best_auc = _v('M4', m4_best_v, 'AUC-ROC')
 f_m1 = M1res['sex'].get('F',{}).get('AUC-ROC', 0.0)
 f_m3 = M3res['sex'].get('F',{}).get('AUC-ROC', 0.0)
 
+m5_norm_auc = _v('M5', 'norm', 'AUC-ROC')
 txt(s, "ROC 비교 (M1·M2·M2₂·M3·M4 / norm)", 0.3, 3.95, 4.5, 0.3, sz=12, bold=True)
 pic(s, img(CMP, "roc_all_models_norm.png"), 0.3, 4.27, 4.5, 3.03)
 
@@ -431,12 +464,12 @@ txt(s, "비교 핵심", 5.2, 4.03, 3.7, 0.32, sz=14, bold=True, color=C_GRN)
 for i,t in enumerate([
     f"• M1→M2 norm: Δ AUC {fdelta('M1vM2')}, {fp('M1vM2')}",
     f"• M1→M3 norm: Δ AUC {fdelta('M1vM3')}, {fp('M1vM3')}",
+    f"• M5(AEC-Feat) norm: AUC={m5_norm_auc:.3f}, {fp('M1vM5')}",
     f"• M2 norm({m2_norm_auc:.3f}) vs M2_2({m22_norm_auc:.3f}) Δ={(m2_norm_auc-m22_norm_auc):+.3f}",
-    f"• AUPRC: M1({m1_aupr:.3f})→M2({m2_aupr:.3f}) {aupr_pct:+.1f}%",
     f"• M4 AEC Only ({m4_best_v}): AUC={m4_best_auc:.3f} — 임상 없이 한계 확인",
     f"• 여성 AUC: M1({f_m1:.3f})→M3({f_m3:.3f}) 개선",
 ]):
-    txt(s, t, 5.2, 4.44+i*0.42, 3.7, 0.40, sz=11.5, color=C_DARK)
+    txt(s, t, 5.2, 4.44+i*0.38, 3.7, 0.36, sz=11.5, color=C_DARK)
 
 calib_banner(s, 9.25, 3.95, 3.85, f"M3 norm  (Brier {fm('M3',k='Brier')})")
 pic(s, img(M3N, "calibration_.png"), 9.25, 4.30, 3.85, 3.00)
@@ -633,7 +666,7 @@ for i,(v,fill) in enumerate(zip(['raw','norm','global_zscore'],
              f"{_v('M4',v,'F1'):.4f}")
     trow_d(s, cells, m4x, m4w, 1.79+i*0.38, ht=0.38, fill=fill)
 
-txt(s, "Bootstrap 95% CI  (global_zscore — best)",
+txt(s, f"Bootstrap 95% CI  ({m4_best_v} — best)",
     0.5, 2.94, 5.2, 0.30, sz=12, bold=True, color=C_DARK)
 hline(s, 0.5, 3.26, 5.2, color=C_PUR, h=0.03)
 cx4 = [0.45, 1.75, 3.15, 4.5]; cw4 = [1.25, 1.35, 1.30, 1.00]
@@ -653,19 +686,19 @@ for i,(k,fill) in enumerate(zip(['AUC-ROC','AUPRC','Brier','F1'],
 card(s, 0.3, 4.92, 5.6, 1.73, fill=RGBColor(0xF3,0xE8,0xFF))
 box(s, 0.3, 4.92, 0.1, 1.73, fill=C_PUR)
 txt(s, "AEC Only 한계", 0.5, 5.00, 5.2, 0.30, sz=13, bold=True, color=C_PUR)
-m4_best_auc2 = _v('M4','global_zscore','AUC-ROC')
+m4_best_auc2 = _v('M4', m4_best_v, 'AUC-ROC')
 m1_auc = _v('M1', M1_VAR, 'AUC-ROC')
 for i,t in enumerate([
-    f"• 최고 AUC {m4_best_auc2:.3f} (global_zscore) — M1({m1_auc:.3f}) 대비 크게 열세",
-    f"• M1 vs M4 global_zscore: {fp('M1vM4','global_zscore')} — 통계적 유의",
+    f"• 최고 AUC {m4_best_auc2:.3f} ({m4_best_v}) — M1({m1_auc:.3f}) 대비 크게 열세",
+    f"• M1 vs M4 {m4_best_v}: {fp('M1vM4', m4_best_v)} — 통계적 유의",
     "• AEC 단독으로는 Clinic(Age·Sex·BMI) 대체 불가",
     "• AEC는 Clinic 보조 신호로서 의미 있음",
 ]):
     txt(s, t, 0.5, 5.35+i*0.30, 5.3, 0.28, sz=11.5, color=C_DARK)
 
 # 중앙: ROC curves
-txt(s, "M4 ROC 곡선  (global_zscore, vs M1 baseline)", 6.1, 0.99, 4.1, 0.30, sz=11, bold=True)
-pic(s, img(M4GZ, "test_roc_curves.png"), 6.1, 1.31, 4.1, 2.75)
+txt(s, f"M4 ROC 곡선  ({m4_best_v}, vs M1 baseline)", 6.1, 0.99, 4.1, 0.30, sz=11, bold=True)
+pic(s, img(M4RAW, "test_roc_curves.png"), 6.1, 1.31, 4.1, 2.75)
 txt(s, "M1 vs M4 AUC 비교", 6.1, 4.20, 4.1, 0.26, sz=10.5, bold=True, color=C_DARK)
 txt(s, f"  M1(LR)  : AUC {m1_auc:.3f}\n"
         f"  M4(global_zscore): AUC {m4_best_auc2:.3f}  (Δ{m4_best_auc2-m1_auc:+.3f})\n"
@@ -673,15 +706,15 @@ txt(s, f"  M1(LR)  : AUC {m1_auc:.3f}\n"
     6.1, 4.50, 4.1, 0.70, sz=11, color=C_DARK)
 
 # 우측: CV summary + Grad-CAM
-txt(s, "5-Fold CV 결과  (global_zscore)", 10.4, 0.99, 2.7, 0.30, sz=11, bold=True)
+txt(s, f"5-Fold CV 결과  ({m4_best_v})", 10.4, 0.99, 2.7, 0.30, sz=11, bold=True)
 m4_cv = [
     ("Fold","AUC-ROC","AUPRC","F1"),
-    ("1","0.5920","0.1573","0.2517"),
-    ("2","0.6935","0.3005","0.2857"),
-    ("3","0.7327","0.2662","0.4000"),
-    ("4","0.6720","0.2366","0.3095"),
-    ("5","0.6561","0.1883","0.2933"),
-    ("Mean","0.6693","0.2298","0.3080"),
+    ("1","0.6325","0.1794","0.2564"),
+    ("2","0.6868","0.2216","0.2656"),
+    ("3","0.7076","0.2175","0.3415"),
+    ("4","0.6996","0.2732","0.3000"),
+    ("5","0.6697","0.3068","0.3279"),
+    ("Mean","0.6792","0.2397","0.2983"),
 ]
 cvx = [10.4,11.1,11.85,12.55]; cvw = [0.65,0.70,0.65,0.70]
 trow_h(s, ["Fold","AUC","AUPRC","F1"], cvx, cvw, 1.31, ht=0.24)
@@ -689,8 +722,8 @@ for k,(fold,auc,aupr,f1) in enumerate(m4_cv[1:]):
     fill = RGBColor(0xF3,0xE8,0xFF) if fold == "Mean" else (C_LGR if k%2==0 else C_WHT)
     trow_d(s, (fold,auc,aupr,f1), cvx, cvw, 1.57+k*0.24, ht=0.24, fill=fill)
 
-txt(s, "Grad-CAM (global_zscore)", 10.4, 3.55, 2.7, 0.26, sz=10.5, bold=True)
-pic(s, img(M4GZ, "cam_aec_mean.png"), 10.4, 3.83, 2.7, 2.95)
+txt(s, f"Grad-CAM ({m4_best_v})", 10.4, 3.55, 2.7, 0.26, sz=10.5, bold=True)
+pic(s, img(M4RAW, "cam_aec_mean.png"), 10.4, 3.83, 2.7, 2.95)
 snum(s, 10)
 
 # ═══════════════════════════════════════════════════════════════
@@ -936,7 +969,7 @@ s = add_slide()
 hdr(s, "종합 결론 및 임상적 함의",
     "AEC 신호의 근감소증 예측 기여 — 비교 연구 결과 요약")
 
-m4_best_str = f"AUC {_v('M4','global_zscore','AUC-ROC'):.3f}"
+m4_best_str = f"AUC {_v('M4', m4_best_v, 'AUC-ROC'):.3f}"
 m1_auc_str  = f"{_v('M1', M1_VAR, 'AUC-ROC'):.3f}"
 
 for i,(col,title,items) in enumerate([
@@ -959,8 +992,8 @@ for i,(col,title,items) in enumerate([
     (C_ORG,
      f"③ Model 4 (AEC Only): AUC {m4_best_str} — Clinic 없이 단독 예측 한계 확인",
      [
-         f"M4 global_zscore: AUC {m4_best_str} vs M1({m1_auc_str}) Δ{_v('M4','global_zscore','AUC-ROC')-_v('M1',M1_VAR,'AUC-ROC'):+.3f}",
-         f"M1 vs M4: {fp('M1vM4','global_zscore')} — 통계적 유의",
+         f"M4 {m4_best_v}: {m4_best_str} vs M1({m1_auc_str}) Δ{_v('M4', m4_best_v,'AUC-ROC')-_v('M1',M1_VAR,'AUC-ROC'):+.3f}",
+         f"M1 vs M4: {fp('M1vM4', m4_best_v)} — 통계적 유의",
          "AEC는 임상 정보(Age/Sex/BMI) 대체 불가",
          "→ AEC는 Clinic의 보조 신호로서 의미",
      ]),
@@ -994,7 +1027,7 @@ for i,(t,b) in enumerate([
     ("소표본 비교","Test n=229, Sarco 24명 → DeLong 검출력 제한, CI 넓음"),
     ("단일 기관","단일 센터 데이터 → 외부 검증 미실시"),
     (f"M1→M2/M3 유의차 미달", f"norm: {fp('M1vM2')}, {fp('M1vM3')} — AUC 향상 통계 미달"),
-    (f"M4 AEC Only 성능 열세", f"AUC {_v('M4','global_zscore','AUC-ROC'):.3f} — Clinic 대체 불가"),
+    (f"M4 AEC Only 성능 열세", f"AUC {_v('M4', m4_best_v,'AUC-ROC'):.3f} ({m4_best_v}) — Clinic 대체 불가"),
     ("M2 vs M3 조건별 혼재",f"norm {fp('M2vM3','norm')}, raw {fp('M2vM3','raw')} — 방향 불일치"),
 ]):
     txt(s, f"  ▶ {t}", 0.5, 1.57+i*1.0, 5.5, 0.34, sz=13, bold=True)
@@ -1017,7 +1050,245 @@ txt(s, "감사합니다  |  Questions & Discussion",
 snum(s, 17)
 
 # ═══════════════════════════════════════════════════════════════
-# SLIDE 18 — 부록 섹션 디바이더
+# SLIDE 18 — AEC Correlation 분석
+# ═══════════════════════════════════════════════════════════════
+CORR_DIR = f"{BASE}/correlation"
+
+s = add_slide()
+hdr(s, "AEC 신호 — 임상 변수 Correlation 분석",
+    "Raw AEC vs Norm AEC  |  128 슬라이스 × 7개 변수  |  Pearson r 포인트별 프로파일")
+
+# 좌: Raw AEC 상관관계 해석
+card(s, 0.3, 0.99, 5.9, 3.26)
+txt(s, "Raw AEC 상관계수  (절대 선량 수준)", 0.5, 1.07, 5.5, 0.33, sz=14, bold=True)
+hline(s, 0.5, 1.42, 5.5, color=C_BLUE)
+raw_hx = [0.4, 2.3, 3.35, 4.3, 5.25]; raw_hw = [1.85, 1.0, 0.9, 0.9, 0.75]
+trow_h(s, ["변수", "평균 r", "최대 |r|", "위치", "해석"], raw_hx, raw_hw, 1.47, ht=0.28)
+raw_rows = [
+    ("BMI",        "+0.500", "+0.616", "pt80", "체중·체격 주반영", C_ORG),
+    ("TAMA",       "+0.308", "+0.489", "pt107","근육단면적 중간 상관", C_TEAL),
+    ("SMI",        "+0.268", "+0.435", "pt107","근육지수 양의 상관", C_TEAL),
+    ("Sex(M=1)",   "+0.123", "+0.362", "pt109","남성 선량↑ (체격)", C_MGR),
+    ("Age",        "+0.111", "+0.242", "pt88", "약한 양의 상관", C_MGR),
+    ("Sarcopenia", "-0.129", "-0.158", "pt10", "근감소증→선량↓ (약함)", C_RED),
+]
+for i, (var, mn, mx, pt, interp, col) in enumerate(raw_rows):
+    fill = C_LGR if i % 2 == 0 else C_WHT
+    trow_d(s, (var, mn, mx, pt, interp), raw_hx, raw_hw, 1.77+i*0.33, ht=0.33, fill=fill,
+           colors=[col, C_DARK, C_DARK, C_MGR, C_DARK])
+
+card(s, 0.3, 4.37, 5.9, 2.44, fill=RGBColor(0xFF,0xF0,0xE8))
+box(s, 0.3, 4.37, 0.1, 2.44, fill=C_ORG)
+txt(s, "Raw AEC 핵심 발견", 0.5, 4.45, 5.5, 0.30, sz=13, bold=True, color=C_ORG)
+for i, t in enumerate([
+    "• AEC raw값은 BMI(r=0.50)와 가장 강하게 상관 → 주로 체격 반영",
+    "• Sarcopenia 직접 신호: r=-0.13 (약함) → Clinic의 BMI와 중복 정보 많음",
+    "• 복부 초반 슬라이스(pt10)에서 Sarcopenia 상관이 가장 높음",
+    "• TAMA/SMI는 중간 상관 → AEC에 근육 정보가 간접 포함",
+]):
+    txt(s, t, 0.5, 4.80+i*0.44, 5.5, 0.42, sz=12, color=C_DARK)
+
+# 우: Norm AEC 상관관계
+card(s, 6.5, 0.99, 6.5, 3.26)
+txt(s, "Norm AEC 상관계수  (개인별 z-score 후)", 6.7, 1.07, 6.1, 0.33, sz=14, bold=True)
+hline(s, 6.7, 1.42, 6.1, color=C_TEAL)
+nm_hx = [6.55, 8.5, 9.55, 10.55, 11.55]; nm_hw = [1.9, 1.0, 0.95, 0.95, 0.95]
+trow_h(s, ["변수", "평균 r", "최대 |r|", "위치", "해석"], nm_hx, nm_hw, 1.47, ht=0.28)
+norm_rows = [
+    ("Sex(M=1)",   "-0.028", "+0.652", "pt105","성별 곡선 형태 차이 大", C_ORG),
+    ("SMI",        "-0.019", "+0.501", "pt102","특정 구간에서만 상관", C_TEAL),
+    ("TAMA",       "-0.021", "+0.554", "pt102","골반/복부 하부 중요", C_TEAL),
+    ("BMI",        "-0.010", "+0.452", "pt85", "허리 부위 BMI 상관", C_MGR),
+    ("Age",        "-0.009", "-0.341", "pt13", "초반 슬라이스 Age 상관", C_MGR),
+    ("Sarcopenia", "-0.002", "+0.064", "pt119","정규화 후 신호 소실!", C_RED),
+]
+for i, (var, mn, mx, pt, interp, col) in enumerate(norm_rows):
+    fill = C_LGR if i % 2 == 0 else C_WHT
+    trow_d(s, (var, mn, mx, pt, interp), nm_hx, nm_hw, 1.77+i*0.33, ht=0.33, fill=fill,
+           colors=[col, C_DARK, C_DARK, C_MGR, C_DARK])
+
+card(s, 6.5, 4.37, 6.5, 2.44, fill=RGBColor(0xE8,0xF0,0xFF))
+box(s, 6.5, 4.37, 0.1, 2.44, fill=C_BLUE)
+txt(s, "Norm AEC 핵심 발견 — 모델 성능 해석에 결정적", 6.7, 4.45, 6.1, 0.30, sz=13, bold=True, color=C_BLUE)
+for i, t in enumerate([
+    "• 평균 r ≈ 0 → 정규화로 개인 절대 선량 제거됨 (의도한 효과)",
+    "• 특정 슬라이스(pt102-105)에서 성별/TAMA/SMI와 강한 상관 잔존",
+    "• Sarcopenia 상관: mean=-0.002, max=+0.064 → 거의 소실",
+    "• 이것이 M2 norm 성능이 M2 raw보다 낮은 이유를 설명",
+    "• norm이 BMI 정보를 제거하면서 Sarcopenia 신호도 같이 줄어듦",
+]):
+    txt(s, t, 6.7, 4.80+i*0.40, 6.1, 0.38, sz=12, color=C_DARK)
+
+txt(s, "Pointwise Correlation Profile", 0.3, 6.90, 6.0, 0.28, sz=11, bold=True)
+pic(s, img(CORR_DIR, "pointwise_corr_profile.png"), 0.3, 7.10, 5.8, 0.35)
+snum(s, 18)
+
+# ═══════════════════════════════════════════════════════════════
+# SLIDE 19 — AEC 신호의 진단적 유의미성
+# ═══════════════════════════════════════════════════════════════
+s = add_slide()
+hdr(s, "AEC 신호의 진단적 유의미성 — 무엇을 포착하는가?",
+    "AEC 물리적 의미 | M4(AEC only) · M5(AEC 통계 피처) · 매칭 vs 비매칭 비교")
+
+# 좌: AEC 개요
+card(s, 0.3, 0.99, 5.9, 3.0)
+txt(s, "AEC(자동노출제어)란?", 0.5, 1.07, 5.5, 0.33, sz=15, bold=True)
+hline(s, 0.5, 1.42, 5.5, color=C_BLUE)
+for i, t in enumerate([
+    "• CT 촬영 시 tube current(mAs)를 체형·조직에 따라 자동 조절",
+    "• 체지방↑ → AEC 선량↑  /  근육량↑ → 감쇠 패턴 변화",
+    "• 128 슬라이스 위치별 mAs 값 → 신체 구성의 종단 프로파일",
+    "• 추가 검사 없이 기존 CT DICOM에 자동 기록 — Zero-cost",
+    "• M5 추출 피처: mean·std·max·peak_pos·auc·skew·kurt·\n  early/mid/late mean (11종)",
+]):
+    txt(s, t, 0.5, 1.52+i*0.42, 5.6, 0.40, sz=12.5, color=C_DARK)
+
+# 좌 하단: 성능 요약 테이블
+card(s, 0.3, 4.12, 5.9, 3.13)
+txt(s, "모델별 AEC 기여 비교  (각 모델 best 조건)", 0.5, 4.20, 5.5, 0.30, sz=13, bold=True)
+hline(s, 0.5, 4.52, 5.5, color=C_TEAL)
+mac_x = [0.4, 2.5, 3.5, 4.45, 5.35]
+mac_w = [2.05, 0.95, 0.90, 0.85, 0.75]
+trow_h(s, ["모델 (best 조건)", "AUC", "AUPRC", "Brier", "F1"],
+       mac_x, mac_w, 4.57, ht=0.28)
+_lf_rows = [
+    ("M1  Clinic Only (LR)",
+     slf_v('M1','scale_all','AUC-ROC'), slf_v('M1','scale_all','AUPRC'),
+     slf_v('M1','scale_all','Brier'), slf_v('M1','scale_all','F1'), C_BLUE, C_LGR),
+    ("M4  AEC Only (raw)",
+     slf_v('M4','raw','AUC-ROC'), slf_v('M4','raw','AUPRC'),
+     slf_v('M4','raw','Brier'), slf_v('M4','raw','F1'), C_RED, C_WHT),
+    ("M2  CrossAttn (raw)",
+     slf_v('M2','raw','AUC-ROC'), slf_v('M2','raw','AUPRC'),
+     slf_v('M2','raw','Brier'), slf_v('M2','raw','F1'), C_TEAL, C_LGR),
+    ("M5  CrossAttn-Feat (norm)",
+     slf_v('M5','norm','AUC-ROC'), slf_v('M5','norm','AUPRC'),
+     slf_v('M5','norm','Brier'), slf_v('M5','norm','F1'), C_GRN, C_WHT),
+]
+for i, (mod, auc, aupr, brier, f1, col, fill) in enumerate(_lf_rows):
+    trow_d(s, (mod, f"{auc:.4f}", f"{aupr:.4f}", f"{brier:.4f}", f"{f1:.4f}"),
+           mac_x, mac_w, 4.87+i*0.36, ht=0.36, fill=fill, colors=[col]+[C_DARK]*4)
+
+# 우: 유의미성 분석 3개 포인트
+card(s, 6.5, 0.99, 6.5, 3.0)
+txt(s, "유의미성 분석 — 3가지 근거", 6.7, 1.07, 6.1, 0.33, sz=15, bold=True)
+hline(s, 6.7, 1.42, 6.1, color=C_ORG)
+_m5d = slf_d('M1vM5', 'norm')
+_m5_sig = _m5d['sig']
+_m5_pstr = fp('M1vM5')
+_m22d_norm = _d('M2vM22', 'norm')
+_m22_pstr = f"p<0.001 {_m22d_norm['sig']}" if _m22d_norm['pval'] < 0.001 else f"p={_m22d_norm['pval']:.3f} {_m22d_norm['sig']}"
+for i, (title, body, col) in enumerate([
+    ("① AEC 단독 예측력 (M4) 한계 확인",
+     f"AUC {slf_v('M4', m4_best_v,'AUC-ROC'):.3f} vs M1({slf_v('M1','scale_all','AUC-ROC'):.3f})\n"
+     f"DeLong {fp('M1vM4', m4_best_v)} → AEC가 Clinic을 대체할 수 없음\n"
+     "AEC는 반드시 임상 변수와 조합 필요", C_RED),
+    ("② AEC 통계 피처(M5) — M3와 유사한 성능 수준",
+     f"M5 norm AUC {slf_v('M5','norm','AUC-ROC'):.4f}  |  M3 norm {slf_v('M3','norm','AUC-ROC'):.4f}\n"
+     f"M1 vs M5-norm: DeLong {_m5_pstr} — {'경계 유의' if _m5_sig == '†' else '유의차 없음'}\n"
+     "통계 피처(11종)로도 raw 시퀀스와 유사 성능 달성", C_GRN),
+    ("③ 매칭(M2) vs 비매칭(M2_2): 개인별 고유성",
+     f"norm: M2({slf_v('M2','norm','AUC-ROC'):.3f}) vs M2_2({slf_v('M2_2','norm','AUC-ROC'):.3f})\n"
+     f"DeLong {_m22_pstr} — 개인별 AEC 대응의 유의미한 기여 없음\n"
+     "CrossAttn이 128pt raw sequence 완전 활용 어려울 수 있음", C_ORG),
+]):
+    box(s, 6.6, 1.52+i*1.0, 0.08, 0.86, fill=col)
+    txt(s, title, 6.75, 1.54+i*1.0, 6.1, 0.28, sz=12.5, bold=True, color=col)
+    txt(s, body, 6.75, 1.83+i*1.0, 6.1, 0.55, sz=11.5, color=C_DARK)
+
+# 우 하단: 결론
+card(s, 6.5, 4.12, 6.5, 3.13, fill=RGBColor(0xE8,0xF8,0xE8))
+box(s, 6.5, 4.12, 0.1, 3.13, fill=C_GRN)
+txt(s, "AEC의 역할 요약", 6.7, 4.20, 6.1, 0.30, sz=14, bold=True, color=C_GRN)
+for i, t in enumerate([
+    "• AEC는 신체 구성 정보를 담은 의미 있는 보조 신호",
+    f"• M5(AEC 통계 피처 11종): AUC {slf_v('M5','norm','AUC-ROC'):.4f} ({_m5_pstr}) — M3와 유사 수준",
+    "• raw 시퀀스(128pt) 직접 입력(M2/M3)과 통계 피처(M5) 모두 DeLong 유의차 미달",
+    "• 핵심: M4(AEC only)는 Clinic 대체 불가 — AEC는 보조 신호로서 의미",
+    "• 향후 방향: AEC 피처 확장 + 더 나은 시퀀스 인코더 + 다기관 검증",
+]):
+    txt(s, t, 6.7, 4.55+i*0.49, 6.1, 0.46, sz=12, color=C_DARK)
+snum(s, 19)
+
+# ═══════════════════════════════════════════════════════════════
+# SLIDE 20 — CrossAttention vs Late Fusion 아키텍처 비교
+# ═══════════════════════════════════════════════════════════════
+s = add_slide()
+hdr(s, "CrossAttention vs Late Fusion — 아키텍처 비교",
+    "M2/M3(CrossAttn) vs M2_LF/M3_LF(LateFusion) | 통합 방식별 성능 차이 분석")
+
+# 아키텍처 설명 두 칸
+for i, (title, desc_lines, col) in enumerate([
+    ("CrossAttention (M2, M3)",
+     [
+         "AEC 시퀀스(128pt) → Transformer Encoder → Key/Value",
+         "Clinic 벡터(Age/Sex/BMI) → Linear → Query",
+         "Cross-Attention: AEC↔Clinic 양방향 정보 교환",
+         "출력: Attention-weighted 표현 → MLP → 분류",
+         "장점: 해석 가능한 Attention Map 제공",
+         "단점: 파라미터 多, 긴 AEC 시퀀스에 민감",
+     ], C_BLUE),
+    ("Late Fusion (M2_LF, M3_LF)",
+     [
+         "AEC 시퀀스(128pt) → 독립 인코더(GRU) → AEC 임베딩",
+         "Clinic 벡터 → 독립 MLP → Clinic 임베딩",
+         "최종 단계에서 Concatenation → MLP → 분류",
+         "각 modality가 독립적으로 표현 학습",
+         "장점: 구조 단순, modality별 독립 최적화",
+         "단점: 조기 상호작용 없음, Attention Map 없음",
+     ], C_ORG),
+]):
+    x0 = 0.3 + i * 6.55
+    card(s, x0, 0.99, 6.25, 3.26)
+    box(s, x0, 0.99, 6.25, 0.48, fill=col)
+    txt(s, title, x0+0.15, 1.03, 5.95, 0.40, sz=15, bold=True, color=C_WHT)
+    for j, line in enumerate(desc_lines):
+        bullet = "  ▶ " if j < 4 else "  ✓ " if j == 4 else "  ✗ "
+        c = C_DARK if j < 4 else (C_GRN if j == 4 else C_RED)
+        txt(s, f"{bullet}{line}", x0+0.15, 1.56+j*0.38, 5.95, 0.36, sz=12.5, color=c)
+
+# 성능 비교 테이블
+card(s, 0.3, 4.40, 12.7, 2.0)
+txt(s, "CrossAttn vs Late Fusion — 전처리 조건별 AUC 비교  (Test Set)",
+    0.5, 4.48, 12.3, 0.30, sz=14, bold=True)
+hline(s, 0.5, 4.80, 12.3, color=C_MGR)
+calf_x = [0.4, 2.2, 3.95, 5.65, 7.05, 9.05, 10.75, 12.15]
+calf_w = [1.75, 1.70, 1.65, 1.35, 1.95, 1.65, 1.35, 1.0]
+trow_h(s, ["전처리", "M2 CrossAttn", "M2_LF Late Fusion", "Δ(LF-CA)",
+           "M3 CrossAttn3", "M3_LF LateFusion3", "Δ(LF-CA3)", "우세"],
+       calf_x, calf_w, 4.85, ht=0.30)
+for vi, (vr, fill) in enumerate(zip(['raw','norm','global_zscore'],
+                                     [C_WHT, C_LGR, C_WHT])):
+    m2ca = slf_v('M2', vr, 'AUC-ROC')
+    m2lf = LF_AUC['M2_LF'][vr]
+    m3ca = slf_v('M3', vr, 'AUC-ROC')
+    m3lf = LF_AUC['M3_LF'][vr]
+    d2, d3 = m2lf - m2ca, m3lf - m3ca
+    d2s = f"+{d2:.3f}" if d2 >= 0 else f"−{abs(d2):.3f}"
+    d3s = f"+{d3:.3f}" if d3 >= 0 else f"−{abs(d3):.3f}"
+    c2  = C_GRN if d2 > 0 else C_RED
+    c3  = C_GRN if d3 > 0 else C_RED
+    win2 = "LF" if d2 > 0 else "CrossAttn"
+    win3 = "LF3" if d3 > 0 else "CrossAttn3"
+    winner = f"2M:{win2} / 3M:{win3}"
+    trow_d(s, (vr, f"{m2ca:.4f}", f"{m2lf:.4f}", d2s, f"{m3ca:.4f}", f"{m3lf:.4f}", d3s, winner),
+           calf_x, calf_w, 5.17+vi*0.36, ht=0.36, fill=fill,
+           colors=[C_DARK, C_BLUE, C_ORG, c2, C_TEAL, C_ORG, c3, C_MGR])
+
+# 결론 카드
+card(s, 0.3, 6.52, 12.7, 0.78, fill=RGBColor(0xF0,0xF4,0xFF))
+box(s, 0.3, 6.52, 0.1, 0.78, fill=C_BLUE)
+_ca2 = _v('M2','norm','AUC-ROC'); _lf2 = LF_AUC['M2_LF']['norm']
+_ca3 = _v('M3','norm','AUC-ROC'); _lf3 = LF_AUC['M3_LF']['norm']
+txt(s,
+    f"2-modal(Clinic+AEC): norm 조건에서 CrossAttn({_ca2:.4f})>LF({_lf2:.4f}) — CrossAttn 우세  "
+    f"|  3-modal(Clinic+Scanner+AEC): CrossAttn3({_ca3:.4f})>LF3({_lf3:.4f}) — 다중 모달에서 Cross-Attention 우세  "
+    "|  CrossAttn의 Attention Map 해석 가능성은 LF 대비 추가 이점",
+    0.5, 6.57, 12.4, 0.66, sz=11.5, bold=True, color=C_DARK)
+snum(s, 20)
+
+# ═══════════════════════════════════════════════════════════════
+# SLIDE 20 — 부록 섹션 디바이더
 # ═══════════════════════════════════════════════════════════════
 s = add_slide()
 box(s, 0, 0, 13.33, 7.5, fill=C_DARK)
@@ -1037,10 +1308,10 @@ for i,(var,desc) in enumerate([
         fill=C_BLUE if i==0 else (C_TEAL if i==1 else C_ORG))
     txt(s, f"  {var}   →  {desc}",
         1.05, 4.37+i*0.62, 11.2, 0.48, sz=12, bold=True, color=C_WHT)
-snum(s, 18)
+snum(s, 21)
 
 # ═══════════════════════════════════════════════════════════════
-# 조건별 슬라이드 (19~21)
+# 조건별 슬라이드 (22~24)
 # ═══════════════════════════════════════════════════════════════
 VAR_COL = {
     "raw":           C_BLUE,
@@ -1098,11 +1369,11 @@ def condition_slide(variant, sn):
 
 
 AEC128_VARIANTS = ["raw", "norm", "global_zscore"]
-for sn, variant in enumerate(AEC128_VARIANTS, start=19):
+for sn, variant in enumerate(AEC128_VARIANTS, start=22):
     condition_slide(variant, sn)
 
 # ═══════════════════════════════════════════════════════════════
-# Grad-CAM AEC 슬라이드 (22~24)
+# Grad-CAM AEC 슬라이드 (25~27)
 # ═══════════════════════════════════════════════════════════════
 CAM_VAR_COL = VAR_COL
 
@@ -1143,13 +1414,13 @@ def cam_aec_slide(variant, sn):
             pic(s, img(mdir, fname), cx[j] + 0.32, y0, cw[j] - 0.32, 2.75)
 
 
-for sn, variant in enumerate(AEC128_VARIANTS, start=22):
+for sn, variant in enumerate(AEC128_VARIANTS, start=25):
     cam_aec_slide(variant, sn)
 
 # ═══════════════════════════════════════════════════════════════
 # 저장
 # ═══════════════════════════════════════════════════════════════
-OUT = ("C:/Users/jhjun/OneDrive/Desktop/2026-1_Study/연구코드/results/0612/"
+OUT = ("C:/Users/jhjun/OneDrive/Desktop/대학원/results/0612_late_fusion/"
        "AEC_Sarcopenia_Research_Presentation.pptx")
 prs.save(OUT)
 print(f"Saved  → {OUT}")

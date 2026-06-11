@@ -1,0 +1,285 @@
+============================================================
+  MODEL 2_LF — Clinic + AEC Late Fusion (aec128)  (3 AEC variants)
+============================================================
+
+############################################################
+  [M2_LF raw]  (scale_clinic=True, scale_aec=none)
+############################################################
+  [M2_LF/raw] Cross-validating LateFusion ...
+=======================================================
+5-Fold CV  [LateFusion | scale_aec=none]
+=======================================================
+
+── Fold 1/5 ──────────────────────────────
+  Late — AUC: 0.8227  AUPRC: 0.3488  Brier: 0.2789  Acc: 0.6667  F1: 0.3711  (best ep=372, thresh=0.601)
+
+── Fold 2/5 ──────────────────────────────
+  Late — AUC: 0.8463  AUPRC: 0.4963  Brier: 0.2581  Acc: 0.8798  F1: 0.5417  (best ep=428, thresh=0.643)
+
+── Fold 3/5 ──────────────────────────────
+  Late — AUC: 0.7481  AUPRC: 0.3576  Brier: 0.2985  Acc: 0.6995  F1: 0.3373  (best ep=313, thresh=0.623)
+
+── Fold 4/5 ──────────────────────────────
+  Late — AUC: 0.7792  AUPRC: 0.3217  Brier: 0.2589  Acc: 0.6230  F1: 0.3301  (best ep=162, thresh=0.540)
+
+── Fold 5/5 ──────────────────────────────
+  Late — AUC: 0.8285  AUPRC: 0.5495  Brier: 0.2842  Acc: 0.8736  F1: 0.5306  (best ep=418, thresh=0.686)
+
+===========================================================================
+LateFusion  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8227     0.3488     0.2789     0.6667     0.3711
+  2          0.8463     0.4963     0.2581     0.8798     0.5417
+  3          0.7481     0.3576     0.2985     0.6995     0.3373
+  4          0.7792     0.3217     0.2589     0.6230     0.3301
+  5          0.8285     0.5495     0.2842     0.8736     0.5306
+  ──────────────────────────────────────────────────────────
+  Mean       0.8050     0.4148     0.2757     0.7485     0.4222
+  ±Std       0.0360     0.0906     0.0155     0.1075     0.0941
+  [M2_LF/raw] Evaluating on test set (med_epoch=372, thresh=0.623) ...
+LateFusion — training final model for 372 epochs on full CV set …
+  [LateFusion] weights → C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw\M2_LF_raw_weights.pt
+
+LateFusion — Test Set (Overall):  AUC: 0.7411  AUPRC: 0.3190  Brier: 0.2859  Acc: 0.7293  F1: 0.2619
+
+LateFusion — Test Set (By Sex):
+  [M] n=82  AUC: 0.6934  AUPRC: 0.3144  Brier: 0.2717  Acc: 0.6829  F1: 0.3158
+              precision    recall  f1-score   support
+
+      Normal       0.88      0.72      0.79        69
+  Sarcopenia       0.24      0.46      0.32        13
+
+    accuracy                           0.68        82
+   macro avg       0.56      0.59      0.55        82
+weighted avg       0.78      0.68      0.72        82
+
+  [F] n=147  AUC: 0.8028  AUPRC: 0.3733  Brier: 0.2938  Acc: 0.7551  F1: 0.2174
+              precision    recall  f1-score   support
+
+      Normal       0.95      0.78      0.85       136
+  Sarcopenia       0.14      0.45      0.22        11
+
+    accuracy                           0.76       147
+   macro avg       0.54      0.62      0.54       147
+weighted avg       0.89      0.76      0.81       147
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — LateFusion  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.7411         0.6427         0.8289
+  AUPRC            0.3190         0.1692         0.4956
+  Brier            0.2859         0.2672         0.3027
+  Accuracy         0.7293         0.6725         0.7860
+  F1               0.2619         0.1395         0.3830
+  [M2_LF/raw] Saving figures ...
+
+Saved (model 2_LF (raw)):
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/data_distribution.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/cv_roc_curves.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/cv_metric_distribution.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/training_curves.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/test_roc_curves.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/test_roc_by_sex.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/confusion_matrices.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/calibration.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/results.md
+  [M2_LF/raw] Plotting Grad-CAM ...
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/cam_aec_mean.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/cam_aec_lines.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\raw/cam_aec_heatmap.png
+  [M2_LF/raw] Done.
+
+############################################################
+  [M2_LF norm]  (scale_clinic=True, scale_aec=none)
+############################################################
+  [M2_LF/norm] Cross-validating LateFusion ...
+=======================================================
+5-Fold CV  [LateFusion | scale_aec=none]
+=======================================================
+
+── Fold 1/5 ──────────────────────────────
+  Late — AUC: 0.8276  AUPRC: 0.3992  Brier: 0.2782  Acc: 0.7760  F1: 0.4384  (best ep=397, thresh=0.619)
+
+── Fold 2/5 ──────────────────────────────
+  Late — AUC: 0.8437  AUPRC: 0.4938  Brier: 0.2454  Acc: 0.8415  F1: 0.5085  (best ep=193, thresh=0.607)
+
+── Fold 3/5 ──────────────────────────────
+  Late — AUC: 0.7378  AUPRC: 0.3105  Brier: 0.2936  Acc: 0.7322  F1: 0.3288  (best ep=176, thresh=0.604)
+
+── Fold 4/5 ──────────────────────────────
+  Late — AUC: 0.7452  AUPRC: 0.2850  Brier: 0.2532  Acc: 0.6667  F1: 0.3441  (best ep=422, thresh=0.536)
+
+── Fold 5/5 ──────────────────────────────
+  Late — AUC: 0.8318  AUPRC: 0.4704  Brier: 0.2989  Acc: 0.7967  F1: 0.4478  (best ep=40, thresh=0.581)
+
+===========================================================================
+LateFusion  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.8276     0.3992     0.2782     0.7760     0.4384
+  2          0.8437     0.4938     0.2454     0.8415     0.5085
+  3          0.7378     0.3105     0.2936     0.7322     0.3288
+  4          0.7452     0.2850     0.2532     0.6667     0.3441
+  5          0.8318     0.4704     0.2989     0.7967     0.4478
+  ──────────────────────────────────────────────────────────
+  Mean       0.7972     0.3918     0.2739     0.7626     0.4135
+  ±Std       0.0459     0.0833     0.0213     0.0595     0.0675
+  [M2_LF/norm] Evaluating on test set (med_epoch=193, thresh=0.604) ...
+LateFusion — training final model for 193 epochs on full CV set …
+  [LateFusion] weights → C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm\M2_LF_norm_weights.pt
+
+LateFusion — Test Set (Overall):  AUC: 0.7685  AUPRC: 0.3495  Brier: 0.2909  Acc: 0.7205  F1: 0.3469
+
+LateFusion — Test Set (By Sex):
+  [M] n=82  AUC: 0.7035  AUPRC: 0.3954  Brier: 0.3025  Acc: 0.6341  F1: 0.3750
+              precision    recall  f1-score   support
+
+      Normal       0.91      0.62      0.74        69
+  Sarcopenia       0.26      0.69      0.38        13
+
+    accuracy                           0.63        82
+   macro avg       0.59      0.66      0.56        82
+weighted avg       0.81      0.63      0.68        82
+
+  [F] n=147  AUC: 0.8088  AUPRC: 0.3486  Brier: 0.2844  Acc: 0.7687  F1: 0.3200
+              precision    recall  f1-score   support
+
+      Normal       0.97      0.77      0.86       136
+  Sarcopenia       0.21      0.73      0.32        11
+
+    accuracy                           0.77       147
+   macro avg       0.59      0.75      0.59       147
+weighted avg       0.91      0.77      0.82       147
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — LateFusion  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.7685         0.6669         0.8541
+  AUPRC            0.3495         0.1968         0.5218
+  Brier            0.2909         0.2755         0.3058
+  Accuracy         0.7205         0.6638         0.7773
+  F1               0.3469         0.2245         0.4630
+  [M2_LF/norm] Saving figures ...
+
+Saved (model 2_LF (norm)):
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/data_distribution.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/cv_roc_curves.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/cv_metric_distribution.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/training_curves.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/test_roc_curves.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/test_roc_by_sex.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/confusion_matrices.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/calibration.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/results.md
+  [M2_LF/norm] Plotting Grad-CAM ...
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/cam_aec_mean.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/cam_aec_lines.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\norm/cam_aec_heatmap.png
+  [M2_LF/norm] Done.
+
+############################################################
+  [M2_LF global_zscore]  (scale_clinic=True, scale_aec=global)
+############################################################
+  [M2_LF/global_zscore] Cross-validating LateFusion ...
+=======================================================
+5-Fold CV  [LateFusion | scale_aec=global]
+=======================================================
+
+── Fold 1/5 ──────────────────────────────
+  Late — AUC: 0.7767  AUPRC: 0.3053  Brier: 0.2927  Acc: 0.6230  F1: 0.3429  (best ep=366, thresh=0.593)
+
+── Fold 2/5 ──────────────────────────────
+  Late — AUC: 0.8386  AUPRC: 0.5137  Brier: 0.2605  Acc: 0.8361  F1: 0.4643  (best ep=469, thresh=0.632)
+
+── Fold 3/5 ──────────────────────────────
+  Late — AUC: 0.7725  AUPRC: 0.3712  Brier: 0.3011  Acc: 0.6612  F1: 0.3404  (best ep=398, thresh=0.594)
+
+── Fold 4/5 ──────────────────────────────
+  Late — AUC: 0.7506  AUPRC: 0.3024  Brier: 0.2806  Acc: 0.7760  F1: 0.3881  (best ep=320, thresh=0.621)
+
+── Fold 5/5 ──────────────────────────────
+  Late — AUC: 0.8127  AUPRC: 0.4947  Brier: 0.2741  Acc: 0.7857  F1: 0.4179  (best ep=498, thresh=0.640)
+
+===========================================================================
+LateFusion  —  5-Fold CV Summary
+===========================================================================
+  Fold      AUC-ROC      AUPRC      Brier   Accuracy         F1
+  ----------------------------------------------------------
+  1          0.7767     0.3053     0.2927     0.6230     0.3429
+  2          0.8386     0.5137     0.2605     0.8361     0.4643
+  3          0.7725     0.3712     0.3011     0.6612     0.3404
+  4          0.7506     0.3024     0.2806     0.7760     0.3881
+  5          0.8127     0.4947     0.2741     0.7857     0.4179
+  ──────────────────────────────────────────────────────────
+  Mean       0.7902     0.3975     0.2818     0.7364     0.3907
+  ±Std       0.0313     0.0908     0.0142     0.0806     0.0469
+  [M2_LF/global_zscore] Evaluating on test set (med_epoch=398, thresh=0.621) ...
+LateFusion — training final model for 398 epochs on full CV set …
+  [LateFusion] weights → C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore\M2_LF_global_zscore_weights.pt
+
+LateFusion — Test Set (Overall):  AUC: 0.7478  AUPRC: 0.2896  Brier: 0.2882  Acc: 0.7031  F1: 0.2766
+
+LateFusion — Test Set (By Sex):
+  [M] n=82  AUC: 0.7090  AUPRC: 0.3214  Brier: 0.2687  Acc: 0.6951  F1: 0.3590
+              precision    recall  f1-score   support
+
+      Normal       0.89      0.72      0.80        69
+  Sarcopenia       0.27      0.54      0.36        13
+
+    accuracy                           0.70        82
+   macro avg       0.58      0.63      0.58        82
+weighted avg       0.79      0.70      0.73        82
+
+  [F] n=147  AUC: 0.8148  AUPRC: 0.3281  Brier: 0.2991  Acc: 0.7075  F1: 0.2182
+              precision    recall  f1-score   support
+
+      Normal       0.95      0.72      0.82       136
+  Sarcopenia       0.14      0.55      0.22        11
+
+    accuracy                           0.71       147
+   macro avg       0.54      0.63      0.52       147
+weighted avg       0.89      0.71      0.78       147
+
+
+───────────────────────────────────────────────────────
+Test Set — Bootstrap CI
+───────────────────────────────────────────────────────
+
+  Bootstrap 95% CI — LateFusion  (n_boot=2000)
+  Metric         Estimate   95% CI Lower   95% CI Upper
+  ----------------------------------------------------
+  AUC-ROC          0.7478         0.6501         0.8331
+  AUPRC            0.2896         0.1565         0.4555
+  Brier            0.2882         0.2675         0.3071
+  Accuracy         0.7031         0.6419         0.7598
+  F1               0.2766         0.1628         0.3922
+  [M2_LF/global_zscore] Saving figures ...
+
+Saved (model 2_LF (global_zscore)):
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/data_distribution.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/cv_roc_curves.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/cv_metric_distribution.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/training_curves.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/test_roc_curves.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/test_roc_by_sex.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/confusion_matrices.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/calibration.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/results.md
+  [M2_LF/global_zscore] Plotting Grad-CAM ...
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/cam_aec_mean.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/cam_aec_lines.png
+  C:\Users\jhjun\OneDrive\Desktop\대학원\results/0612_late_fusion/model_2_lf\global_zscore/cam_aec_heatmap.png
+  [M2_LF/global_zscore] Done.

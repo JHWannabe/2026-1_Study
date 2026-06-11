@@ -90,6 +90,7 @@ def load_scaling(md_path):
         ('## M2 Matched vs M2_2 Unmatched',  'M2vM22'),
         ('## M2 CrossAttn vs M3 CrossAttn3', 'M2vM3'),
         ('## M4 AECOnly vs M2 CrossAttn',    'M4vM2'),
+        ('## M1 LR vs M5 CrossAttn-Feat',    'M1vM5'),
     ]:
         for row in _table_rows(text, marker):
             if len(row) < 7:
