@@ -1761,9 +1761,39 @@ def plot_cam_aec_only(model, X_aec_te_s, y_true_te,
 
 _M5_FEATURE_NAMES = [
     "Age", "Sex", "BMI",
+    # 기본 통계 (0-7)
     "mean", "std", "max", "min",
     "peak_pos", "auc", "skew", "kurt",
+    # 구간 평균 1/3 (8-10)
     "early_mean", "mid_mean", "late_mean",
+    # 구간 평균 1/4 (11-14)
+    "q1_mean", "q2_mean", "q3_mean", "q4_mean",
+    # 백분위 (15-20)
+    "p10", "p25", "p50", "p75", "p90", "iqr",
+    # 형태·변동성 (21-24)
+    "range", "cv", "rms", "energy",
+    # 위치 (25-27)
+    "valley_pos", "first_val", "last_val",
+    # 기울기·면적 (28-31)
+    "slope_rise", "slope_fall", "rise_auc", "fall_auc",
+    # 1차 차분 (32-34)
+    "diff_abs_mean", "diff_std", "diff_abs_max",
+    # 비율 (35-37)
+    "above_mean_ratio", "p5", "p95",
+    # 2차 차분 (38-40)
+    "diff2_abs_mean", "diff2_std", "diff2_abs_max",
+    # 자기상관 (41-42)
+    "autocorr_lag1", "autocorr_lag2",
+    # FFT (43-46)
+    "fft_power_low", "fft_power_mid", "fft_power_high", "spectral_centroid",
+    # 구간 표준편차 (47-49)
+    "early_std", "mid_std", "late_std",
+    # 임계 비율 (50-51)
+    "above_p75_ratio", "below_p25_ratio",
+    # 파생 비율 (52-56)
+    "auc_ratio", "symmetry_index", "mean_to_max", "late_to_early", "start_to_end",
+    # 곡선 형태 (57-59)
+    "peak_half_dur", "valley_depth", "tail_mean",
 ]
 
 

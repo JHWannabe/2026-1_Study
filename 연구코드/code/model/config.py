@@ -39,15 +39,13 @@ N_CA_LAYERS = 2
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 PARENT_DIR            = r"C:\Users\jhjun\OneDrive\Desktop\대학원\results"
-RESULTS_DIR           = f"{PARENT_DIR}/0612_late_fusion/"
+RESULTS_DIR           = f"{PARENT_DIR}/0619/"
 RESULTS_MODEL_1_DIR   = RESULTS_DIR + "model_1"
 RESULTS_MODEL_2_DIR   = RESULTS_DIR + "model_2"
 RESULTS_MODEL_2_2_DIR = RESULTS_DIR + "model_2_2"
 RESULTS_MODEL_3_DIR   = RESULTS_DIR + "model_3"
 RESULTS_MODEL_4_DIR   = RESULTS_DIR + "model_4"
 RESULTS_MODEL_5_DIR   = RESULTS_DIR + "model_5"
-RESULTS_MODEL_2_LF_DIR = RESULTS_DIR + "model_2_lf"
-RESULTS_MODEL_3_LF_DIR = RESULTS_DIR + "model_3_lf"
 
 # ── Sarcopenia 진단 기준 (SMI, cm²/m²) ───────────────────────
 SMI_THRESH_M = 40.96
@@ -62,28 +60,15 @@ THRESH_M2_2  = COMMON_THRESH
 THRESH_M3    = COMMON_THRESH
 THRESH_M4    = COMMON_THRESH
 THRESH_M5    = COMMON_THRESH
-THRESH_M2_LF = COMMON_THRESH
-THRESH_M3_LF = COMMON_THRESH
 
 
 # ── 초기화 ────────────────────────────────────────────────────
-<<<<<<< HEAD
-os.makedirs(RESULTS_DIR,           exist_ok=True)
-os.makedirs(RESULTS_MODEL_1_DIR,   exist_ok=True)
-os.makedirs(RESULTS_MODEL_2_DIR,   exist_ok=True)
-os.makedirs(RESULTS_MODEL_2_2_DIR, exist_ok=True)
-os.makedirs(RESULTS_MODEL_3_DIR,   exist_ok=True)
-os.makedirs(RESULTS_MODEL_4_DIR,   exist_ok=True)
-=======
 os.makedirs(RESULTS_DIR,            exist_ok=True)
 os.makedirs(RESULTS_MODEL_1_DIR,    exist_ok=True)
 os.makedirs(RESULTS_MODEL_2_DIR,    exist_ok=True)
 os.makedirs(RESULTS_MODEL_2_2_DIR,  exist_ok=True)
 os.makedirs(RESULTS_MODEL_3_DIR,    exist_ok=True)
 os.makedirs(RESULTS_MODEL_4_DIR,    exist_ok=True)
->>>>>>> 85e98357048347f31c593090de905f10997a7cde
 os.makedirs(RESULTS_MODEL_5_DIR,    exist_ok=True)
-os.makedirs(RESULTS_MODEL_2_LF_DIR, exist_ok=True)
-os.makedirs(RESULTS_MODEL_3_LF_DIR, exist_ok=True)
 np.random.seed(SEED)
 torch.manual_seed(SEED)

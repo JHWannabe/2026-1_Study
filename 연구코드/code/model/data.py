@@ -67,36 +67,211 @@ def load_data():
     return X, y, sex
 
 def extract_aec_features_batch(X_aec: np.ndarray) -> np.ndarray:
-    """AEC 시퀀스 배치 (N, T)에서 통계 피처 11개를 추출해 (N, 11) float32 배열로 반환.
+    """AEC 시퀀스 배치 (N, T)에서 통계 피처 60개를 추출해 (N, 60) float32 배열로 반환.
 
     피처 순서:
-      0  mean       — 전체 평균 (절대 감쇠 수준)
-      1  std        — 전체 표준편차 (곡선 변동성)
-      2  max        — 최댓값 (peak 감쇠)
-      3  min        — 최솟값 (기저 감쇠)
-      4  peak_pos   — argmax / T (정규화된 peak 시점)
-      5  auc        — trapz 면적 (총 조영제 통과량)
-      6  skew       — 왜도
-      7  kurt       — 첨도
-      8  early_mean — 앞 1/3 구간 평균 (동맥기)
-      9  mid_mean   — 중간 1/3 구간 평균 (문맥기)
-      10 late_mean  — 뒤 1/3 구간 평균 (평형기)
+      ── 기본 통계 ──
+      [ 0] mean           — 전체 평균
+      [ 1] std            — 전체 표준편차
+      [ 2] max            — 최댓값 (peak)
+      [ 3] min            — 최솟값
+      [ 4] peak_pos       — argmax / T
+      [ 5] auc            — trapz 면적
+      [ 6] skew           — 왜도
+      [ 7] kurt           — 첨도
+      ── 구간 평균 (1/3) ──
+      [ 8] early_mean     — 앞 1/3
+      [ 9] mid_mean       — 중간 1/3
+      [10] late_mean      — 뒤 1/3
+      ── 구간 평균 (1/4) ──
+      [11] q1_mean        — 앞 1/4
+      [12] q2_mean        — 2/4
+      [13] q3_mean        — 3/4
+      [14] q4_mean        — 뒤 1/4
+      ── 백분위 ──
+      [15] p10
+      [16] p25
+      [17] p50  (median)
+      [18] p75
+      [19] p90
+      [20] iqr            — p75 - p25
+      ── 형태·변동성 ──
+      [21] range          — max - min
+      [22] cv             — std / (|mean| + 1e-8)
+      [23] rms            — root mean square
+      [24] energy         — sum(x²) / T
+      ── 위치 ──
+      [25] valley_pos     — argmin / T
+      [26] first_val      — 시작점 값
+      [27] last_val       — 종료점 값
+      ── 기울기·면적 분할 ──
+      [28] slope_rise     — (max - first) / (peak_idx + 1)
+      [29] slope_fall     — (last - max) / (T - peak_idx)
+      [30] rise_auc       — peak 이전 trapz
+      [31] fall_auc       — peak 이후 trapz
+      ── 1차 차분 ──
+      [32] diff_abs_mean  — mean(|Δx|)
+      [33] diff_std       — std(Δx)
+      [34] diff_abs_max   — max(|Δx|)
+      ── 비율·임계 ──
+      [35] above_mean_ratio — (x > mean) 비율
+      ── 확장: 백분위 추가 ──
+      [36] p5
+      [37] p95
+      ── 확장: 2차 차분 ──
+      [38] diff2_abs_mean — mean(|Δ²x|)
+      [39] diff2_std      — std(Δ²x)
+      [40] diff2_abs_max  — max(|Δ²x|)
+      ── 확장: 자기상관 ──
+      [41] autocorr_lag1  — lag-1 정규화 자기상관
+      [42] autocorr_lag2  — lag-2 정규화 자기상관
+      ── 확장: FFT 주파수 분석 ──
+      [43] fft_power_low  — 저주파 대역 파워
+      [44] fft_power_mid  — 중주파 대역 파워
+      [45] fft_power_high — 고주파 대역 파워
+      [46] spectral_centroid — FFT 스펙트럼 무게중심
+      ── 확장: 구간 표준편차 ──
+      [47] early_std      — 앞 1/3 표준편차
+      [48] mid_std        — 중간 1/3 표준편차
+      [49] late_std       — 뒤 1/3 표준편차
+      ── 확장: 임계 비율 ──
+      [50] above_p75_ratio — (x > p75) 비율
+      [51] below_p25_ratio — (x < p25) 비율
+      ── 확장: 파생 비율 ──
+      [52] auc_ratio      — rise_auc / (fall_auc + 1e-8)
+      [53] symmetry_index — |peak_pos - 0.5|
+      [54] mean_to_max    — mean / (max + 1e-8)
+      [55] late_to_early  — late_mean / (early_mean + 1e-8)
+      [56] start_to_end   — first_val / (last_val + 1e-8)
+      ── 확장: 곡선 형태 ──
+      [57] peak_half_dur  — (x > 0.5*max) 비율 (반최댓값 폭)
+      [58] valley_depth   — min / (max + 1e-8)
+      [59] tail_mean      — 뒤 10% 구간 평균
     """
     from scipy.stats import skew as _skew, kurtosis as _kurt
-    T = X_aec.shape[1]
-    seg = T // 3
+    N, T = X_aec.shape
+    seg  = T // 3
+    qrt  = T // 4
+    tail = max(1, int(T * 0.9))
+
+    peak_idxs   = X_aec.argmax(axis=1)
+    valley_idxs = X_aec.argmin(axis=1)
+    peak_vals   = X_aec.max(axis=1)
+    min_vals    = X_aec.min(axis=1)
+    mean_vals   = X_aec.mean(axis=1)
+    std_vals    = X_aec.std(axis=1)
+    first_vals  = X_aec[:, 0]
+    last_vals   = X_aec[:, -1]
+
+    slope_rise = (peak_vals - first_vals) / (peak_idxs.astype(float) + 1)
+    slope_fall = (last_vals - peak_vals) / (T - peak_idxs.astype(float))
+
+    rise_aucs = np.array([np.trapz(X_aec[i, :peak_idxs[i] + 1]) for i in range(N)], dtype=np.float32)
+    fall_aucs = np.array([np.trapz(X_aec[i, peak_idxs[i]:])     for i in range(N)], dtype=np.float32)
+
+    diffs  = np.diff(X_aec, axis=1)          # (N, T-1)
+    diffs2 = np.diff(diffs,  axis=1)          # (N, T-2)
+
+    p5  = np.percentile(X_aec, 5,  axis=1)
+    p10 = np.percentile(X_aec, 10, axis=1)
+    p25 = np.percentile(X_aec, 25, axis=1)
+    p50 = np.percentile(X_aec, 50, axis=1)
+    p75 = np.percentile(X_aec, 75, axis=1)
+    p90 = np.percentile(X_aec, 90, axis=1)
+    p95 = np.percentile(X_aec, 95, axis=1)
+
+    var_vals = std_vals ** 2 + 1e-8
+    x_c = X_aec - mean_vals[:, None]
+    autocorr1 = (x_c[:, :-1] * x_c[:, 1:]).mean(axis=1) / var_vals
+    autocorr2 = (x_c[:, :-2] * x_c[:, 2:]).mean(axis=1) / var_vals
+
+    fft_mag  = np.abs(np.fft.rfft(X_aec, axis=1))   # (N, T//2+1)
+    n_fft    = fft_mag.shape[1]
+    lb1, lb2 = max(1, n_fft // 3), max(1, 2 * n_fft // 3)
+    power    = fft_mag ** 2
+    total_p  = power[:, 1:].sum(axis=1) + 1e-8
+    fft_power_low  = power[:, 1:lb1].sum(axis=1) / total_p
+    fft_power_mid  = power[:, lb1:lb2].sum(axis=1) / total_p
+    fft_power_high = power[:, lb2:].sum(axis=1) / total_p
+    freq_idx = np.arange(n_fft, dtype=float)
+    spec_cent = (freq_idx * fft_mag).sum(axis=1) / (fft_mag.sum(axis=1) + 1e-8)
+
+    early_mean = X_aec[:, :seg].mean(axis=1)
+    late_mean  = X_aec[:, 2 * seg:].mean(axis=1)
+
     return np.column_stack([
-        X_aec.mean(axis=1),
-        X_aec.std(axis=1),
-        X_aec.max(axis=1),
-        X_aec.min(axis=1),
-        X_aec.argmax(axis=1).astype(float) / T,
+        # 0-7: 기본 통계
+        mean_vals,
+        std_vals,
+        peak_vals,
+        min_vals,
+        peak_idxs.astype(float) / T,
         np.trapezoid(X_aec, axis=1),
         _skew(X_aec, axis=1),
         _kurt(X_aec, axis=1),
-        X_aec[:, :seg].mean(axis=1),
+        # 8-10: 구간 평균 (1/3)
+        early_mean,
         X_aec[:, seg:2 * seg].mean(axis=1),
-        X_aec[:, 2 * seg:].mean(axis=1),
+        late_mean,
+        # 11-14: 구간 평균 (1/4)
+        X_aec[:, :qrt].mean(axis=1),
+        X_aec[:, qrt:2 * qrt].mean(axis=1),
+        X_aec[:, 2 * qrt:3 * qrt].mean(axis=1),
+        X_aec[:, 3 * qrt:].mean(axis=1),
+        # 15-20: 백분위
+        p10, p25, p50, p75, p90,
+        p75 - p25,
+        # 21-24: 형태·변동성
+        peak_vals - min_vals,
+        std_vals / (np.abs(mean_vals) + 1e-8),
+        np.sqrt((X_aec ** 2).mean(axis=1)),
+        (X_aec ** 2).sum(axis=1) / T,
+        # 25-27: 위치
+        valley_idxs.astype(float) / T,
+        first_vals,
+        last_vals,
+        # 28-31: 기울기·면적 분할
+        slope_rise,
+        slope_fall,
+        rise_aucs,
+        fall_aucs,
+        # 32-34: 1차 차분
+        np.abs(diffs).mean(axis=1),
+        diffs.std(axis=1),
+        np.abs(diffs).max(axis=1),
+        # 35: 비율
+        (X_aec > mean_vals[:, None]).sum(axis=1).astype(float) / T,
+        # 36-37: 확장 백분위
+        p5, p95,
+        # 38-40: 2차 차분
+        np.abs(diffs2).mean(axis=1),
+        diffs2.std(axis=1),
+        np.abs(diffs2).max(axis=1),
+        # 41-42: 자기상관
+        autocorr1,
+        autocorr2,
+        # 43-46: FFT 주파수 분석
+        fft_power_low,
+        fft_power_mid,
+        fft_power_high,
+        spec_cent / (n_fft + 1e-8),
+        # 47-49: 구간 표준편차
+        X_aec[:, :seg].std(axis=1),
+        X_aec[:, seg:2 * seg].std(axis=1),
+        X_aec[:, 2 * seg:].std(axis=1),
+        # 50-51: 임계 비율
+        (X_aec > p75[:, None]).sum(axis=1).astype(float) / T,
+        (X_aec < p25[:, None]).sum(axis=1).astype(float) / T,
+        # 52-56: 파생 비율
+        rise_aucs / (fall_aucs + 1e-8),
+        np.abs(peak_idxs.astype(float) / T - 0.5),
+        mean_vals / (peak_vals + 1e-8),
+        late_mean / (early_mean + 1e-8),
+        first_vals / (last_vals + 1e-8),
+        # 57-59: 곡선 형태
+        (X_aec > 0.5 * peak_vals[:, None]).sum(axis=1).astype(float) / T,
+        min_vals / (peak_vals + 1e-8),
+        X_aec[:, tail:].mean(axis=1),
     ]).astype(np.float32)
 
 

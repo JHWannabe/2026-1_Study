@@ -10,12 +10,14 @@
   run_cross_validation_cross    — M2/M2_2: CrossAttn
   run_cross_validation_cross3   — M3: CrossAttn3
   run_cross_validation_aec_only — M4: AECOnlyNet
+  run_cross_validation_cross_feat — M5: CrossAttn-Feat
 
 Test Set 최종 평가:
   evaluate_test          — M1: LR
   evaluate_test_cross    — M2/M2_2: CrossAttn
   evaluate_test_cross3   — M3: CrossAttn3
   evaluate_test_aec_only — M4: AECOnlyNet
+  evaluate_test_cross_feat — M5: CrossAttn-Feat
 
 스케일링 정책:
   Clinical (Age·BMI): _scale_clin — sex_enc(col 1)은 StandardScaler 제외
@@ -35,17 +37,13 @@ from sklearn.metrics import (
 import torch
 
 from config import N_FOLDS, SEED, EPOCHS
+from functools import partial
+
 from models import (
     build_resnet, make_loaders, train_epoch, eval_epoch,
     build_aec_only,
-<<<<<<< HEAD
     build_cross_attn, build_cross_attn_feat, make_dual_loaders,
     build_cross_attn3, make_quad_loaders,
-=======
-    build_cross_attn, make_dual_loaders, train_cross_epoch, eval_cross_loader,
-    build_cross_attn3, make_quad_loaders, train_cross3_epoch, eval_cross3_loader,
->>>>>>> 85e98357048347f31c593090de905f10997a7cde
-    build_late_fusion, build_late_fusion3,
 )
 
 from metrics import group_metrics, print_bootstrap_ci
@@ -380,8 +378,10 @@ def run_cross_validation_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv, n_manu
 
 
 def run_cross_validation_cross_feat(X_clin_cv, X_feat_cv, y_cv):
-    """Clinic + AEC 11 hand-crafted features CrossAttn에 대해 N_FOLDS 교차검증."""
-    return _cv_dual(build_cross_attn_feat, X_clin_cv, X_feat_cv, y_cv, "column",
+    """Clinic + AEC hand-crafted features CrossAttn에 대해 N_FOLDS 교차검증."""
+    n_feat = X_feat_cv.shape[1]
+    build_fn = partial(build_cross_attn_feat, num_aec_features=n_feat)
+    return _cv_dual(build_fn, X_clin_cv, X_feat_cv, y_cv, "column",
                     "CrossAttn-Feat", augment=False)
 
 
@@ -484,8 +484,10 @@ def evaluate_test_combined(X_cv, y_cv, X_te, y_te, sex_te, threshold=0.5):
 def evaluate_test_cross_feat(X_clin_cv, X_feat_cv, y_cv,
                              X_clin_te, X_feat_te, y_te, sex_te,
                              med_epoch, threshold=0.5, weight_path=None):
-    """Clinic + AEC 11 hand-crafted features CrossAttn 최종 모델 학습 후 test set 예측."""
-    return _eval_dual(build_cross_attn_feat, "CrossAttn-Feat", "bootstrap_ca_feat",
+    """Clinic + AEC hand-crafted features CrossAttn 최종 모델 학습 후 test set 예측."""
+    n_feat = X_feat_cv.shape[1]
+    build_fn = partial(build_cross_attn_feat, num_aec_features=n_feat)
+    return _eval_dual(build_fn, "CrossAttn-Feat", "bootstrap_ca_feat",
                       X_clin_cv, X_feat_cv, y_cv, X_clin_te, X_feat_te, y_te, sex_te,
                       med_epoch, "column", threshold, weight_path)
 
@@ -510,177 +512,6 @@ def evaluate_test_cross3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
                       sex_te, med_epoch, n_manufacturers, scale_aec, threshold, weight_path)
 
 
-def run_cross_validation_late_fusion(X_clin_cv, X_aec_cv, y_cv, scale_aec="column"):
-    """ClinAECLateFusion에 대해 N_FOLDS 교차검증.
-    Returns: (lf_cv, lf_roc_folds, lf_histories, lf_best_epochs, lf_best_thresholds)"""
-    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
-    lf_cv, lf_roc_folds, lf_histories, lf_best_epochs, lf_best_thresholds = [], [], [], [], []
-
-    print("=" * 55)
-    print(f"{N_FOLDS}-Fold CV  [LateFusion | scale_aec={scale_aec}]")
-    print("=" * 55)
-
-    for fold, (tr_i, val_i) in enumerate(skf.split(X_clin_cv, y_cv), 1):
-        print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
-        X_clin_tr, X_clin_val = _scale_clin(X_clin_cv[tr_i], X_clin_cv[val_i])
-        X_aec_tr,  X_aec_val  = _scale_aec(X_aec_cv[tr_i],  X_aec_cv[val_i], scale_aec)
-        X_aec_tr = augment_aec(X_aec_tr, rng=np.random.default_rng(SEED + fold))
-        y_tr, y_val = y_cv[tr_i], y_cv[val_i]
-
-        tr_dl, val_dl = make_dual_loaders(X_clin_tr, X_aec_tr, y_tr, X_clin_val, X_aec_val, y_val)
-        model, crit, opt, sched = build_late_fusion(y_tr)
-        best_epoch, best_state, hist = _train_loop(
-            model, tr_dl, val_dl, crit, opt, sched, train_cross_epoch, eval_cross_loader
-        )
-        model.load_state_dict(best_state)
-        _, lf_fprob, _ = eval_cross_loader(model, val_dl, crit)
-
-        best_thresh = _youden_threshold(y_val, lf_fprob)
-        lf_fp = (lf_fprob >= best_thresh).astype(int)
-        lf_best_thresholds.append(best_thresh)
-
-        m_lf = group_metrics(y_val, lf_fp, lf_fprob)
-        lf_cv.append({"fold": fold, **m_lf})
-        fpr, tpr, _ = roc_curve(y_val, lf_fprob)
-        lf_roc_folds.append({"fpr": fpr, "tpr": tpr, "auc": m_lf["auc"]})
-        lf_histories.append(hist)
-        lf_best_epochs.append(best_epoch)
-
-        print(f"  LF   — AUC: {m_lf['auc']:.4f}  AUPRC: {m_lf['auprc']:.4f}"
-              f"  Brier: {m_lf['brier']:.4f}  Acc: {m_lf['acc']:.4f}  F1: {m_lf['f1']:.4f}"
-              f"  (best ep={best_epoch}, thresh={best_thresh:.3f})")
-
-    return lf_cv, lf_roc_folds, lf_histories, lf_best_epochs, lf_best_thresholds
-
-
-def run_cross_validation_late_fusion3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv, n_manufacturers,
-                                      scale_aec="column"):
-    """ClinAECScanLateFusion에 대해 N_FOLDS 교차검증.
-    Returns: (lf3_cv, lf3_roc_folds, lf3_histories, lf3_best_epochs, lf3_best_thresholds)"""
-    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
-    lf3_cv, lf3_roc_folds, lf3_histories, lf3_best_epochs, lf3_best_thresholds = [], [], [], [], []
-
-    print("=" * 65)
-    print(f"{N_FOLDS}-Fold CV  [LateFusion3 | scale_aec={scale_aec}]")
-    print("=" * 65)
-
-    for fold, (tr_i, val_i) in enumerate(skf.split(X_clin_cv, y_cv), 1):
-        print(f"\n── Fold {fold}/{N_FOLDS} ──────────────────────────────")
-        X_clin_tr, X_clin_val = _scale_clin(X_clin_cv[tr_i], X_clin_cv[val_i])
-        X_aec_tr,  X_aec_val  = _scale_aec(X_aec_cv[tr_i],  X_aec_cv[val_i], scale_aec)
-        X_aec_tr = augment_aec(X_aec_tr, rng=np.random.default_rng(SEED + fold))
-        X_mfr_tr, X_mfr_val   = X_scan_mfr_cv[tr_i], X_scan_mfr_cv[val_i]
-        y_tr, y_val = y_cv[tr_i], y_cv[val_i]
-
-        tr_dl, val_dl = make_quad_loaders(
-            X_clin_tr, X_aec_tr, X_mfr_tr, y_tr,
-            X_clin_val, X_aec_val, X_mfr_val, y_val,
-        )
-        model, crit, opt, sched = build_late_fusion3(y_tr, n_manufacturers)
-        best_epoch, best_state, hist = _train_loop(
-            model, tr_dl, val_dl, crit, opt, sched, train_cross3_epoch, eval_cross3_loader
-        )
-        model.load_state_dict(best_state)
-        _, lf3_fprob, _ = eval_cross3_loader(model, val_dl, crit)
-
-        best_thresh = _youden_threshold(y_val, lf3_fprob)
-        lf3_fp = (lf3_fprob >= best_thresh).astype(int)
-        lf3_best_thresholds.append(best_thresh)
-
-        m_lf3 = group_metrics(y_val, lf3_fp, lf3_fprob)
-        lf3_cv.append({"fold": fold, **m_lf3})
-        fpr, tpr, _ = roc_curve(y_val, lf3_fprob)
-        lf3_roc_folds.append({"fpr": fpr, "tpr": tpr, "auc": m_lf3["auc"]})
-        lf3_histories.append(hist)
-        lf3_best_epochs.append(best_epoch)
-
-        print(f"  LF3  — AUC: {m_lf3['auc']:.4f}  AUPRC: {m_lf3['auprc']:.4f}"
-              f"  Brier: {m_lf3['brier']:.4f}  Acc: {m_lf3['acc']:.4f}  F1: {m_lf3['f1']:.4f}"
-              f"  (best ep={best_epoch}, thresh={best_thresh:.3f})")
-
-    return lf3_cv, lf3_roc_folds, lf3_histories, lf3_best_epochs, lf3_best_thresholds
-
-
-def evaluate_test_late_fusion(X_clin_cv, X_aec_cv, y_cv,
-                              X_clin_te, X_aec_te, y_te, sex_te,
-                              med_epoch, scale_aec="column",
-                              threshold=0.5, weight_path=None):
-    """전체 CV 세트로 LateFusion 최종 모델 학습 후 test set 예측.
-    Returns: (lf_pred_te, lf_prob_te, lf_true_te, stats_te, model, X_clin_te_s, X_aec_te_s)"""
-    print(f"\n{'='*55}\nLateFusion Test Evaluation"
-          f"  [scale_aec={scale_aec} | threshold={threshold:.3f}]\n{'='*55}")
-    X_clin_cv_s, X_clin_te_s = _scale_clin(X_clin_cv, X_clin_te)
-    X_aec_cv_s,  X_aec_te_s  = _scale_aec(X_aec_cv,  X_aec_te, scale_aec)
-
-    tr_dl, te_dl = make_dual_loaders(X_clin_cv_s, X_aec_cv_s, y_cv,
-                                     X_clin_te_s,  X_aec_te_s,  y_te)
-    model_f, crit_f, opt_f, sched_f = build_late_fusion(y_cv)
-    print(f"LateFusion — training final model for {med_epoch} epochs on full CV set …")
-    _final_train(model_f, tr_dl, crit_f, opt_f, sched_f, med_epoch, train_cross_epoch)
-
-    if weight_path is not None:
-        os.makedirs(os.path.dirname(weight_path), exist_ok=True)
-        torch.save(model_f.state_dict(), weight_path)
-        print(f"  [LateFusion] weights → {weight_path}")
-
-    _, lf_prob_te, lf_true_te = eval_cross_loader(model_f, te_dl, crit_f)
-    lf_pred_te = (lf_prob_te >= threshold).astype(int)
-
-    print(f"\nLateFusion — Test Set (Overall):"
-          f"  AUC: {roc_auc_score(lf_true_te, lf_prob_te):.4f}"
-          f"  AUPRC: {average_precision_score(lf_true_te, lf_prob_te):.4f}"
-          f"  Brier: {brier_score_loss(lf_true_te, lf_prob_te):.4f}"
-          f"  Acc: {accuracy_score(lf_true_te, lf_pred_te):.4f}"
-          f"  F1: {f1_score(lf_true_te, lf_pred_te, zero_division=0):.4f}")
-    print("\nLateFusion — Test Set (By Sex):")
-    _print_by_sex(lf_true_te, lf_pred_te, lf_prob_te, sex_te)
-
-    print(f"\n{'─'*55}\nTest Set — Bootstrap CI\n{'─'*55}")
-    ci_lf = print_bootstrap_ci("LateFusion", lf_true_te, lf_pred_te, lf_prob_te)
-    return lf_pred_te, lf_prob_te, lf_true_te, {"bootstrap_lf": ci_lf}, model_f, X_clin_te_s, X_aec_te_s
-
-
-def evaluate_test_late_fusion3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
-                               X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
-                               sex_te, med_epoch, n_manufacturers,
-                               scale_aec="column", threshold=0.5, weight_path=None):
-    """전체 CV 세트로 LateFusion3 최종 모델 학습 후 test set 예측.
-    Returns: (lf3_pred_te, lf3_prob_te, lf3_true_te, stats_te, model, X_clin_te_s, X_aec_te_s)"""
-    print(f"\n{'='*65}\nLateFusion3 Test Evaluation"
-          f"  [scale_aec={scale_aec} | threshold={threshold:.3f}]\n{'='*65}")
-    X_clin_cv_s, X_clin_te_s = _scale_clin(X_clin_cv, X_clin_te)
-    X_aec_cv_s,  X_aec_te_s  = _scale_aec(X_aec_cv,  X_aec_te, scale_aec)
-
-    tr_dl, te_dl = make_quad_loaders(
-        X_clin_cv_s, X_aec_cv_s, X_scan_mfr_cv, y_cv,
-        X_clin_te_s, X_aec_te_s, X_scan_mfr_te, y_te,
-    )
-    model_f, crit_f, opt_f, sched_f = build_late_fusion3(y_cv, n_manufacturers)
-    print(f"LateFusion3 — training final model for {med_epoch} epochs on full CV set …")
-    _final_train(model_f, tr_dl, crit_f, opt_f, sched_f, med_epoch, train_cross3_epoch)
-
-    if weight_path is not None:
-        os.makedirs(os.path.dirname(weight_path), exist_ok=True)
-        torch.save(model_f.state_dict(), weight_path)
-        print(f"  [LateFusion3] weights → {weight_path}")
-
-    _, lf3_prob_te, lf3_true_te = eval_cross3_loader(model_f, te_dl, crit_f)
-    lf3_pred_te = (lf3_prob_te >= threshold).astype(int)
-
-    print(f"\nLateFusion3 — Test Set (Overall):"
-          f"  AUC: {roc_auc_score(lf3_true_te, lf3_prob_te):.4f}"
-          f"  AUPRC: {average_precision_score(lf3_true_te, lf3_prob_te):.4f}"
-          f"  Brier: {brier_score_loss(lf3_true_te, lf3_prob_te):.4f}"
-          f"  Acc: {accuracy_score(lf3_true_te, lf3_pred_te):.4f}"
-          f"  F1: {f1_score(lf3_true_te, lf3_pred_te, zero_division=0):.4f}")
-    print("\nLateFusion3 — Test Set (By Sex):")
-    _print_by_sex(lf3_true_te, lf3_pred_te, lf3_prob_te, sex_te)
-
-    print(f"\n{'─'*55}\nTest Set — Bootstrap CI\n{'─'*55}")
-    ci_lf3 = print_bootstrap_ci("LateFusion3", lf3_true_te, lf3_pred_te, lf3_prob_te)
-    return lf3_pred_te, lf3_prob_te, lf3_true_te, {"bootstrap_lf3": ci_lf3}, model_f, X_clin_te_s, X_aec_te_s
-
-
 def evaluate_test_aec_only(X_aec_cv, y_cv, X_aec_te, y_te, sex_te,
                            med_epoch, scale_aec="column", threshold=0.5, weight_path=None):
     """전체 CV 세트로 AECOnlyNet 최종 모델 학습 후 test set 예측."""
@@ -701,33 +532,3 @@ def evaluate_test_aec_only(X_aec_cv, y_cv, X_aec_te, y_te, sex_te,
     return pred_te, prob_te, true_te, {"bootstrap_aec_only": ci}, model_f, X_aec_te_s
 
 
-def run_cross_validation_late_fusion(X_clin_cv, X_aec_cv, y_cv, scale_aec="column"):
-    """ClinAECLateFusion에 대해 N_FOLDS 교차검증."""
-    return _cv_dual(build_late_fusion, X_clin_cv, X_aec_cv, y_cv, scale_aec, "LateFusion")
-
-
-def run_cross_validation_late_fusion3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv, n_manufacturers,
-                                      scale_aec="column"):
-    """ClinAECScanLateFusion에 대해 N_FOLDS 교차검증."""
-    return _cv_quad(build_late_fusion3, X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
-                    n_manufacturers, scale_aec, "LateFusion3")
-
-
-def evaluate_test_late_fusion(X_clin_cv, X_aec_cv, y_cv,
-                              X_clin_te, X_aec_te, y_te, sex_te,
-                              med_epoch, scale_aec="column", threshold=0.5, weight_path=None):
-    """전체 CV 세트로 LateFusion 최종 모델 학습 후 test set 예측."""
-    return _eval_dual(build_late_fusion, "LateFusion", "bootstrap_lf",
-                      X_clin_cv, X_aec_cv, y_cv, X_clin_te, X_aec_te, y_te, sex_te,
-                      med_epoch, scale_aec, threshold, weight_path)
-
-
-def evaluate_test_late_fusion3(X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
-                               X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
-                               sex_te, med_epoch, n_manufacturers,
-                               scale_aec="column", threshold=0.5, weight_path=None):
-    """전체 CV 세트로 LateFusion3 최종 모델 학습 후 test set 예측."""
-    return _eval_quad(build_late_fusion3, "LateFusion3", "bootstrap_lf3",
-                      X_clin_cv, X_aec_cv, X_scan_mfr_cv, y_cv,
-                      X_clin_te, X_aec_te, X_scan_mfr_te, y_te,
-                      sex_te, med_epoch, n_manufacturers, scale_aec, threshold, weight_path)
