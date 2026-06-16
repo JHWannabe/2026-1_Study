@@ -1,15 +1,16 @@
 """
-AEC 스케일링 검사 — 4종 변환(raw / std_scaled / norm / global_zscore)을
+AEC 스케일링 검사 — 3종 변환(raw / norm / global_zscore)을
 xlsx로 저장하고 분포·평균 곡선 시각화.
+(std_scaled는 SCALING_CASES에서 주석 처리 — 열 방향 표준화는 실험 제외)
 
 실행:
   python 연구코드/code/aec_inspect.py
 
 출력: RESULTS_DIR/aec_inspection/
-  aec_scaling_compare_aec{N}.xlsx  — 4종 스케일링 데이터 (PatientID·label·sex 포함)
-  aec{N}_dist_hist.png             — 값 분포 히스토그램 (2×2)
-  aec{N}_boxplot.png               — 박스플롯 비교 (4종)
-  aec{N}_mean_curves.png           — label × sex 4그룹 평균 ± std 곡선 (1×4)
+  aec_scaling_compare_aec{N}.xlsx  — 3종 스케일링 데이터 (PatientID·label·sex 포함)
+  aec{N}_dist_hist.png             — 값 분포 히스토그램 (1×3)
+  aec{N}_boxplot.png               — 박스플롯 비교 (3종)
+  aec{N}_mean_curves.png           — label × sex 4그룹 평균 ± std 곡선 (1×3)
 """
 
 import os

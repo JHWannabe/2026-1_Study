@@ -2,17 +2,20 @@
 PyTorch 모델 정의 및 학습·평가 유틸리티.
 
 모델 계층:
-  ResNet1D         — tabular 특징을 1D Conv로 처리 (M1 베이스라인)
-  ClinAECCrossAttn — Clinic + AEC Bidirectional Cross-Attention (M2/M5)
+  ResNet1D         — 1D Conv 잔차 네트워크 (ResNet1DEncoder 내부용; 독립 분류기로는 미사용)
+  ClinAECCrossAttn — Clinic + AEC Bidirectional Cross-Attention (M2/M3/M4/M5 공통)
 
 서브모듈:
   ResBlock1D             — Conv1d×2 + BN + ReLU 잔차 블록
   ResNet1DEncoder        — AEC 시퀀스 → (B, n_tokens, d_model) 인코더
-  ScalarFeatureTokenizer — 각 scalar feature → d_model 독립 토큰
+  ScalarFeatureTokenizer — 각 scalar feature → d_model 독립 토큰 (M3/M4/M5 AEC 피처 입력용)
   CrossAttentionBlock    — Pre-norm Cross-Attention + FFN + Dropout
 
 손실함수: 모든 모델에 FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight) 사용.
 build_* 함수는 모델·손실함수·옵티마이저·스케줄러를 묶어 반환한다.
+  build_resnet          — ResNet1D (현재 파이프라인 미사용, 레거시)
+  build_cross_attn      — ClinAECCrossAttn(aec_encoder='resnet')  → M2
+  build_cross_attn_feat — ClinAECCrossAttn(aec_encoder='scalar')  → M3/M4/M5
 """
 import numpy as np
 from typing import cast, Optional

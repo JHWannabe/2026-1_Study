@@ -4,18 +4,21 @@
 Model 1 (Clinic Only, LR):
   save_all()            — 7종 PNG + results.md 를 out_dir에 일괄 저장
 
-Model 2/2_2/3 (Clinic + AEC / Scanner):
+Model 2~5 (Clinic + AEC 시퀀스/피처, CrossAttn):
   save_all_cross()      — 8종 PNG + results.md 를 out_dir에 일괄 저장
-  plot_attention_maps() — CrossAttn 모델의 Clinical→AEC attention 시각화
-                          attention_map_c2a.png : 클래스별 토큰 평균 bar + AEC 신호 오버레이
-                          attention_heatmap.png : 샘플별 heatmap (Sarco→Normal 순 정렬)
+  plot_attention_maps() — ClinAECCrossAttn 양방향(Clinical↔AEC) attention 시각화
+                          attention_map_c2a.png     : Clinical→AEC 클래스별 토큰 평균 bar + AEC 오버레이
+                          attention_heatmap_c2a.png : Clinical→AEC 샘플별 heatmap (Sarco→Normal 순)
+                          attention_map_a2c.png     : AEC→Clinical 클래스별 임상 토큰 attention bar
+                          attention_heatmap_a2c.png : AEC→Clinical 샘플별 heatmap
+  plot_cam_aec()        — ResNet1DEncoder 마지막 블록에 Grad-CAM 적용 후 3종 시각화
 
 출력 경로 관리:
   _dir1, _dir2 전역 변수를 save_all/save_all_cross 호출 시 갱신한다.
   ProcessPoolExecutor 환경에서는 프로세스마다 전역 상태가 독립적으로 유지된다.
 
 보고서 함수 (내부):
-  _dist_table, _feature_table  — 데이터 분포 Markdown 테이블
+  _dist_table, _feature_table     — 데이터 분포 Markdown 테이블
   _cv_table, _sex_rows, _cm_block — CV/성별/혼동행렬 Markdown 블록
   save_report_md, _save_report_md_cross — results.md 생성
 """
@@ -1350,7 +1353,7 @@ def save_all_cross(ca_cv, ca_roc_folds, ca_histories, med_epoch,
                    X_clin_te, y_te,
                    ca_pred_te, ca_true_te, sex_te, ca_prob_te,
                    model_label="model 2", out_dir=None, ci_dict=None):
-    """Model 2/M5용 시각화 전체(8종 png)와 results.md를 out_dir에 저장."""
+    """Model 2~5 공통 시각화 전체(8종 png)와 results.md를 out_dir에 저장."""
     global _dir2
     _dir2 = out_dir or RESULTS_MODEL_2_DIR
     plot_data_distribution(X_clin_cv, y_cv, sex_cv, X_clin_te, y_te, sex_te,

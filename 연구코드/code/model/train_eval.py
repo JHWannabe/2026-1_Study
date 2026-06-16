@@ -7,18 +7,17 @@
 
 5-Fold Stratified CV:
   run_cross_validation            — M1: LR
-  run_cross_validation_cross      — M2: CrossAttn
-  run_cross_validation_cross_feat — M5: CrossAttn-Feat
+  run_cross_validation_cross      — M2: CrossAttn (AEC 128pt 원시 시퀀스)
+  run_cross_validation_cross_feat — M3/M4/M5: CrossAttn-Feat (AEC 수공 피처)
 
 Test Set 최종 평가:
   evaluate_test            — M1: LR
   evaluate_test_cross      — M2: CrossAttn
-  evaluate_test_cross_feat — M5: CrossAttn-Feat
+  evaluate_test_cross_feat — M3/M4/M5: CrossAttn-Feat
 
 스케일링 정책:
   Clinical (Age·BMI): _scale_clin — sex_enc(col 1)은 StandardScaler 제외
   AEC              : _scale_aec  — mode에 따라 column/global/none
-  MFR index        : 스케일링 없음 (nn.Embedding index)
   Fold/CV 누수 방지: X_a(train/CV)에서 fit, X_b(val/test)에 transform만 적용
 """
 import os
@@ -251,7 +250,7 @@ def run_cross_validation_cross(X_clin_cv, X_aec_cv, y_cv, scale_aec="column"):
 
 
 def run_cross_validation_cross_feat(X_clin_cv, X_feat_cv, y_cv):
-    """Clinic + AEC hand-crafted features CrossAttn에 대해 N_FOLDS 교차검증."""
+    """Clinic + AEC 수공 피처(M3/M4/M5) CrossAttn에 대해 N_FOLDS 교차검증."""
     n_feat = X_feat_cv.shape[1]
     build_fn = partial(build_cross_attn_feat, num_aec_features=n_feat)
     return _cv_dual(build_fn, X_clin_cv, X_feat_cv, y_cv, "column",
@@ -292,7 +291,7 @@ def evaluate_test(X_cv, y_cv, X_te, y_te, sex_te, threshold=0.5):
 def evaluate_test_cross_feat(X_clin_cv, X_feat_cv, y_cv,
                              X_clin_te, X_feat_te, y_te, sex_te,
                              med_epoch, threshold=0.5, weight_path=None):
-    """Clinic + AEC hand-crafted features CrossAttn 최종 모델 학습 후 test set 예측."""
+    """Clinic + AEC 수공 피처(M3/M4/M5) CrossAttn 최종 모델 학습 후 test set 예측."""
     n_feat = X_feat_cv.shape[1]
     build_fn = partial(build_cross_attn_feat, num_aec_features=n_feat)
     return _eval_dual(build_fn, "CrossAttn-Feat", "bootstrap_ca_feat",
