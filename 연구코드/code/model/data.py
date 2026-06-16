@@ -348,21 +348,6 @@ def load_data_with_aec(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
     sex    = df["PatientSex"].values
     return X_clin, X_aec, y, sex
 
-def load_data_with_aec_unmatched(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
-                                 crop_points: int | None = None):
-    """
-    Model 2_2용: load_data_with_aec()와 동일한 데이터를 로드하되
-    X_aec 행 순서를 AEC_SHUFFLE_SEED로 무작위 permutation하여
-    Clinic-AEC 환자 대응을 의도적으로 해제한다.
-
-    label(y)과 sex는 Clinic 데이터(X_clin) 기준으로 유지.
-    AEC_SHUFFLE_SEED != SEED 이므로 우연한 재정렬이 발생하지 않는다.
-    """
-    X_clin, X_aec, y, sex = load_data_with_aec(aec_len=aec_len, aec_sheet=aec_sheet,
-                                                crop_points=crop_points)
-    rng  = np.random.default_rng(AEC_SHUFFLE_SEED)
-    perm = rng.permutation(len(y))
-    return X_clin, X_aec[perm], y, sex
 
 def split_data_dual(X_clin, X_aec, y, sex):
     """Clinic + AEC 배열을 label × sex × age × bmi stratified split. CV/test 8개 배열을 반환."""
@@ -374,57 +359,6 @@ def split_data_dual(X_clin, X_aec, y, sex):
     return (
         X_clin[cv_idx], X_aec[cv_idx], y[cv_idx], sex[cv_idx],
         X_clin[te_idx], X_aec[te_idx], y[te_idx], sex[te_idx],
-    )
-
-def load_data_with_aec_meta(aec_len: int = AEC_LEN, aec_sheet: str = AEC_SHEET,
-                            crop_points: int | None = None):
-    """
-    Clinic (Age, Sex, BMI) + Scanner (kVp, ManufacturerModelName) + AEC 결합.
-
-    Returns
-    -------
-    X_clin      : (N, 3) float  — PatientAge, sex_enc, BMI
-    X_aec       : (N, aec_len or crop_points) float
-    X_scan_mfr  : (N,) int64    — ManufacturerModelName (1-indexed 정수 인코딩)
-    y, sex, n_manufacturers
-    """
-    df_meta = _load_filtered_meta()
-
-    df_aec = pd.read_excel(DATA_PATH, sheet_name=aec_sheet)
-    df_aec["PatientID"] = df_aec["PatientID"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-    aec_cols = sorted(
-        [c for c in df_aec.columns if str(c).startswith("aec_")],
-        key=lambda x: int(str(x).split("_")[1]),
-    )[:aec_len]
-
-    df = pd.merge(df_meta, df_aec[["PatientID"] + aec_cols], on="PatientID", how="inner").reset_index(drop=True)
-
-    df["label"]   = df.apply(_make_label, axis=1)
-    df["sex_enc"] = (df["PatientSex"] == "M").astype(int)
-
-    le = LabelEncoder()
-    # 1-indexed: 1, 2, 3, ... n  (0은 Embedding padding 슬롯으로 예약)
-    mfr_encoded: np.ndarray = np.array(le.fit_transform(df["ManufacturerModelName"]), dtype=int) + 1
-    df["mfr_enc"] = mfr_encoded
-    n_manufacturers = len(le.classes_)
-
-    X_clin     = df[["PatientAge", "sex_enc", "BMI"]].values.astype(np.float32)
-    X_aec      = _apply_crop(df[aec_cols].values.astype(np.float32), aec_len, crop_points)
-    X_scan_mfr = df["mfr_enc"].values.astype(np.int64)
-    y          = df["label"].values.astype(np.int64)
-    sex        = df["PatientSex"].values
-    return X_clin, X_aec, X_scan_mfr, y, sex, n_manufacturers
-
-def split_data_quad(X_clin, X_aec, X_scan_mfr, y, sex):
-    """Clinic + AEC + Scanner(mfr) 배열을 label × sex × age × bmi stratified split. CV/test 10개 배열을 반환."""
-    idx = np.arange(len(y))
-    cv_idx, te_idx = train_test_split(
-        idx, test_size=TEST_SIZE, random_state=SEED,
-        stratify=_safe_strat_key(y, sex, age=X_clin[:, 0], bmi=X_clin[:, 2]),
-    )
-    return (
-        X_clin[cv_idx], X_aec[cv_idx], X_scan_mfr[cv_idx], y[cv_idx], sex[cv_idx],
-        X_clin[te_idx], X_aec[te_idx], X_scan_mfr[te_idx], y[te_idx], sex[te_idx],
     )
 
 def aec_variant(X_aec: np.ndarray, variant: str):
@@ -449,10 +383,6 @@ def aec_variant(X_aec: np.ndarray, variant: str):
     if variant == "raw":
         return X_aec.copy(), None, "none"
 
-    # if variant == "std_scaled":
-    #     # StandardScaler(열 방향) — cross_val/evaluate에서 train fold 기준으로 적용
-    #     return X_aec.copy(), None, "column"
-
     if variant == "norm":
         # 행 방향 z-score (환자별 절대 선량 수준 제거, 곡선 형태 보존)
         mu = X_aec.mean(axis=1, keepdims=True)
@@ -464,55 +394,6 @@ def aec_variant(X_aec: np.ndarray, variant: str):
         return X_aec.copy(), None, "global"
 
     raise ValueError(f"Unknown AEC variant: {variant!r}")
-
-def augment_aec(
-    X_aec: np.ndarray,
-    p_noise: float = 0.5,
-    p_mask: float = 0.5,
-    p_freq: float = 0.5,
-    noise_std_ratio: float = 0.02,
-    mask_ratio: float = 0.10,
-    freq_perturb_std: float = 0.05,
-    rng: np.random.Generator | None = None,
-) -> np.ndarray:
-    """
-    AEC 신호 배치 (N, T)에 랜덤 augmentation을 적용한다.
-    각 기법은 샘플별·독립적으로 p 확률로 적용된다. train split에만 사용할 것.
-
-    Gaussian noise : 신호 std의 noise_std_ratio 배 크기 노이즈 (기본 2%)
-    Masking        : 연속 구간(mask_ratio × T)을 해당 샘플 평균으로 치환 (기본 10%)
-    Frequency      : FFT magnitude에 (1 + N(0, freq_perturb_std)) 곱 (기본 5%)
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-    X = X_aec.copy()
-    N, T = X.shape
-
-    # Gaussian noise
-    idxs_noise = np.where(rng.random(N) < p_noise)[0]
-    if len(idxs_noise):
-        row_std = X[idxs_noise].std(axis=1, keepdims=True) + 1e-8
-        noise = rng.standard_normal((len(idxs_noise), T)).astype(np.float32)
-        X[idxs_noise] += noise * row_std * noise_std_ratio
-
-    # Masking — 연속 구간을 샘플 평균으로 채움
-    idxs_mask = np.where(rng.random(N) < p_mask)[0]
-    if len(idxs_mask):
-        mask_len = max(1, int(T * mask_ratio))
-        row_means = X[idxs_mask].mean(axis=1)
-        starts = rng.integers(0, max(1, T - mask_len + 1), size=len(idxs_mask))
-        for k, i in enumerate(idxs_mask):
-            X[i, starts[k]:starts[k] + mask_len] = row_means[k]
-
-    # Frequency domain — rfft magnitude에 소폭 곱셈 노이즈
-    idxs_freq = np.where(rng.random(N) < p_freq)[0]
-    if len(idxs_freq):
-        specs = np.fft.rfft(X[idxs_freq].astype(np.float64), axis=1)
-        mag_scale = 1.0 + rng.standard_normal(specs.shape) * freq_perturb_std
-        X[idxs_freq] = np.fft.irfft(specs * mag_scale, n=T, axis=1).astype(np.float32)
-
-    return X
-
 
 def describe_dataset() -> None:
     """Train/Test split 전 전체 데이터셋의 분포를 출력한다.

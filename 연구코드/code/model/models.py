@@ -2,17 +2,14 @@
 PyTorch 모델 정의 및 학습·평가 유틸리티.
 
 모델 계층:
-  ResNet1D              — tabular 특징을 1D Conv로 처리 (M1 베이스라인)
-  AECOnlyNet            — AEC 시퀀스만 입력하는 분류 모델 (M4)
-  ClinAECCrossAttn      — Clinic + AEC Bidirectional Cross-Attention (M2)
-  ClinAECScanCrossAttn  — Clinic + Scanner(MFR Embedding) + AEC Cross-Attention (M3)
+  ResNet1D         — tabular 특징을 1D Conv로 처리 (M1 베이스라인)
+  ClinAECCrossAttn — Clinic + AEC Bidirectional Cross-Attention (M2/M5)
 
 서브모듈:
-  ResBlock1D            — Conv1d×2 + BN + ReLU 잔차 블록
-  ResNet1DEncoder       — AEC 시퀀스 → (B, n_tokens, d_model) 인코더
+  ResBlock1D             — Conv1d×2 + BN + ReLU 잔차 블록
+  ResNet1DEncoder        — AEC 시퀀스 → (B, n_tokens, d_model) 인코더
   ScalarFeatureTokenizer — 각 scalar feature → d_model 독립 토큰
-  CrossAttentionBlock   — Pre-norm Cross-Attention + FFN + Dropout
-  MfrTokenizer          — ManufacturerModelName 정수 → Embedding 토큰
+  CrossAttentionBlock    — Pre-norm Cross-Attention + FFN + Dropout
 
 손실함수: 모든 모델에 FocalLossWithLogits(gamma=FOCAL_GAMMA, pos_weight) 사용.
 build_* 함수는 모델·손실함수·옵티마이저·스케줄러를 묶어 반환한다.
@@ -163,21 +160,6 @@ def eval_epoch(model, loader, crit):
 
 train_one_epoch   = train_epoch
 eval_loader       = eval_epoch
-
-
-# ── AEC Only Model (M4) ──────────────────────────────────────
-
-class AECOnlyNet(ResNet1D):
-    """AEC 시퀀스만을 입력으로 하는 ResNet1D 기반 분류 모델 (Model 4).
-
-    임상 특징 없이 AEC 128 포인트에서 직접 sarcopenia를 분류한다.
-    ResNet1D와 동일한 아키텍처를 사용하며 입력 도메인만 다르다.
-    """
-
-
-def build_aec_only(y_tr_arr):
-    """AECOnlyNet 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
-    return _build_simple_net(AECOnlyNet().to(DEVICE), y_tr_arr)
 
 
 # ── Clinic + AEC Cross-Attention Model ───────────────────────
@@ -363,123 +345,3 @@ def build_cross_attn(y_tr_arr, num_clinical_features=3, num_aec_features=128,
 def build_cross_attn_feat(y_tr_arr, num_clinical_features=3, num_aec_features=60):
     """Clinic + AEC hand-crafted features → ClinAECCrossAttn(scalar) 모델·손실·옵티마이저 반환."""
     return build_cross_attn(y_tr_arr, num_clinical_features, num_aec_features, 'scalar')
-
-
-# ── Clinic + Scanner + AEC Model (Model 3) ───────────────────
-
-class QuadDataset(Dataset):
-    """Clinic·AEC·ManufacturerModelName·레이블을 텐서로 래핑하는 Dataset."""
-
-    def __init__(self, X_clin, X_aec, X_scan_mfr, y):
-        self.X_clin     = torch.tensor(X_clin,     dtype=torch.float32)
-        self.X_aec      = torch.tensor(X_aec,      dtype=torch.float32)
-        self.X_scan_mfr = torch.tensor(X_scan_mfr, dtype=torch.long)
-        self.y          = torch.tensor(y,           dtype=torch.float32)
-
-    def __len__(self):
-        return len(self.y)
-
-    def __getitem__(self, idx):
-        return (self.X_clin[idx], self.X_aec[idx], self.X_scan_mfr[idx], self.y[idx])
-
-
-def make_quad_loaders(X_clin_tr, X_aec_tr, X_scan_mfr_tr, y_tr,
-                      X_clin_val, X_aec_val, X_scan_mfr_val, y_val):
-    """QuadDataset으로 train/val DataLoader를 생성해 반환."""
-    tr_dl  = DataLoader(
-        QuadDataset(X_clin_tr, X_aec_tr, X_scan_mfr_tr, y_tr),
-        batch_size=BATCH_SIZE, shuffle=True,
-    )
-    val_dl = DataLoader(
-        QuadDataset(X_clin_val, X_aec_val, X_scan_mfr_val, y_val),
-        batch_size=BATCH_SIZE,
-    )
-    return tr_dl, val_dl
-
-
-class MfrTokenizer(nn.Module):
-    """ManufacturerModelName (1-indexed 정수) → (B, 1, d_model) 토큰."""
-    def __init__(self, n_manufacturers: int, d_model: int):
-        super().__init__()
-        self.mfr_emb = nn.Embedding(n_manufacturers + 1, d_model, padding_idx=0)
-        self.feature_embedding = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
-
-    def forward(self, mfr: torch.Tensor) -> torch.Tensor:
-        return self.mfr_emb(mfr).unsqueeze(1) + self.feature_embedding  # (B, 1, d_model)
-
-
-class ClinAECScanCrossAttn(nn.Module):
-    """
-    Clinic (Age, Sex, BMI) + Scanner (ManufacturerModelName) + AEC 결합 모델.
-
-    임상 데이터와 스캐너 파라미터를 별도 토크나이저로 처리한 뒤
-    Bidirectional Cross-Attention으로 AEC와 결합한다.
-
-      clinical_tokenizer : ScalarFeatureTokenizer(3)  → (B, 3, d_model)
-      mfr_tokenizer      : MfrTokenizer(n_mfr)        → (B, 1, d_model)
-      [clinical | mfr] concat                         → (B, 4, d_model)
-      aec_encoder        : ResNet1DEncoder            → (B, n_aec_tokens, d_model)
-
-    Cross-Attention (bidirectional):
-      cs_to_aec : [clin|mfr] → Query,  AEC → Key/Value
-      aec_to_cs : AEC        → Query,  [clin|mfr] → Key/Value
-    """
-    def __init__(
-        self,
-        n_manufacturers:       int,
-        num_clinical_features: int   = 3,
-        d_model:               int   = HIDDEN,
-        num_heads:             int   = N_HEADS,
-        ff_hidden_dim:         int   = 128,
-        classifier_hidden_dim: int   = 128,
-        dropout:               float = 0.1,
-        n_aec_tokens:          int   = 32,
-    ):
-        super().__init__()
-        self.clinical_tokenizer = ScalarFeatureTokenizer(num_clinical_features, d_model)
-        self.mfr_tokenizer      = MfrTokenizer(n_manufacturers, d_model)
-        self.aec_encoder        = ResNet1DEncoder(d_model=d_model, n_tokens=n_aec_tokens)
-
-        self.cs_to_aec_layers = nn.ModuleList([
-            CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
-            for _ in range(N_CA_LAYERS)
-        ])
-        self.aec_to_cs_layers = nn.ModuleList([
-            CrossAttentionBlock(d_model, num_heads, ff_hidden_dim, dropout)
-            for _ in range(N_CA_LAYERS)
-        ])
-
-        self.classifier = nn.Sequential(
-            nn.Linear(d_model * 2, classifier_hidden_dim), nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(classifier_hidden_dim, 1),
-        )
-
-    def forward(self, clinical_x: torch.Tensor, aec_x: torch.Tensor,
-                mfr_x: torch.Tensor, return_attention: bool = False):
-        c_tokens  = self.clinical_tokenizer(clinical_x)    # (B, 3, d_model)
-        s_tokens  = self.mfr_tokenizer(mfr_x)              # (B, 1, d_model)
-        a_tokens  = self.aec_encoder(aec_x)                # (B, n_aec_tokens, d_model)
-        cs_tokens = torch.cat([c_tokens, s_tokens], dim=1) # (B, 4, d_model)
-
-        attn_cs2a = attn_a2cs = None
-        for i, (cs2a, a2cs) in enumerate(zip(self.cs_to_aec_layers, self.aec_to_cs_layers)):
-            last = (i == len(self.cs_to_aec_layers) - 1)
-            if return_attention and last:
-                cs_tokens, attn_cs2a = cs2a(cs_tokens, a_tokens, return_attention=True)
-                a_tokens,  attn_a2cs = a2cs(a_tokens, cs_tokens, return_attention=True)
-            else:
-                cs_tokens = cs2a(cs_tokens, a_tokens)
-                a_tokens  = a2cs(a_tokens, cs_tokens)
-
-        fused  = torch.cat([cs_tokens.mean(1), a_tokens.mean(1)], dim=-1)  # (B, d_model*2)
-        logits = self.classifier(fused).squeeze(-1)
-
-        if return_attention:
-            return logits, {"cs_to_aec": attn_cs2a, "aec_to_cs": attn_a2cs}
-        return logits
-
-
-def build_cross_attn3(y_tr_arr, n_manufacturers):
-    """ClinAECScanCrossAttn 모델·FocalLossWithLogits(pos_weight)·AdamW·CosineAnnealingLR을 생성해 반환."""
-    return _build_simple_net(ClinAECScanCrossAttn(n_manufacturers=n_manufacturers).to(DEVICE), y_tr_arr)
