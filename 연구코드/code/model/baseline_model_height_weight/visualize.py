@@ -104,6 +104,35 @@ def plot_test_roc_by_sex(y_te, lr_prob, sex_te, out_dir):
     fig.savefig(f"{out_dir}/test_roc_by_sex.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
 
+
+def plot_test_roc_comparison(y_te, lr_prob, sex_te, out_dir):
+    """전체·남성·여성 ROC 곡선을 한 그래프에 겹쳐 AUC 비교."""
+    groups = [
+        ("Overall",  np.ones(len(y_te), dtype=bool), "dimgray"),
+        ("Male",     sex_te == "M",                   "steelblue"),
+        ("Female",   sex_te == "F",                   "tomato"),
+    ]
+    fig, ax = plt.subplots(figsize=(7, 6))
+    fig.suptitle("Test Set ROC — Overall vs Male vs Female  [Logistic Regression]",
+                 fontsize=12, fontweight="bold")
+    for label, mask, col in groups:
+        if not mask.any():
+            continue
+        yt, ypr = y_te[mask], lr_prob[mask]
+        if len(np.unique(yt)) < 2:
+            continue
+        fpr, tpr, _ = roc_curve(yt, ypr)
+        auc = roc_auc_score(yt, ypr)
+        ax.plot(fpr, tpr, color=col, linewidth=2,
+                label=f"{label} (n={mask.sum()}, AUC={auc:.3f})")
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.4, label="Chance")
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.legend(fontsize=10)
+    fig.tight_layout()
+    fig.savefig(f"{out_dir}/test_roc_comparison.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
 def plot_data_distribution(X_cv, y_cv, sex_cv, X_te, y_te, sex_te, out_dir):
     cls_colors = {"Normal": "steelblue", "Sarco": "tomato"}
     fig, axes = plt.subplots(2, 3, figsize=(13.5, 9))
@@ -318,6 +347,7 @@ Generated: {now}  |  {N_FOLDS}-Fold CV  |  Model 1 (Clinic Only, LR)
 | `confusion_matrices.png` | Test-set confusion matrices (overall + by sex) |
 | `test_roc_curves.png` | Test-set ROC curve (overall) |
 | `test_roc_by_sex.png` | Test-set ROC curves by sex |
+| `test_roc_comparison.png` | Test-set ROC — Overall vs Male vs Female 비교 |
 | `calibration.png` | Calibration plot + Precision-Recall curve |
 """
     md_path = f"{out_dir}/results.md"
@@ -336,6 +366,7 @@ def save_all(lr_roc_folds, lr_cv, X_cv, y_cv, sex_cv,
     plot_confusion_matrices(y_te, lr_pred, sex_te, out_dir)
     plot_test_roc(y_te, lr_prob, out_dir)
     plot_test_roc_by_sex(y_te, lr_prob, sex_te, out_dir)
+    plot_test_roc_comparison(y_te, lr_prob, sex_te, out_dir)
     plot_calibration(
         [("Log. Reg.", y_te, lr_prob, "steelblue")],
         out_path=f"{out_dir}/calibration.png",

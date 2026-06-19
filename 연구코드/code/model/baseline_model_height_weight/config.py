@@ -7,9 +7,6 @@ N_FOLDS   = 5
 PARENT_DIR          = "연구코드/results/"
 RESULTS_MODEL_1_DIR = PARENT_DIR + "baseline_height_weight"
 
-SMI_THRESH_M = 40.96
-SMI_THRESH_F = 30.6
-
 SPLIT_TRAIN_ID_PATH = PARENT_DIR + "train_patient_ids.txt"
 SPLIT_TEST_ID_PATH  = PARENT_DIR + "test_patient_ids.txt"
 
