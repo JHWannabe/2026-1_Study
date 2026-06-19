@@ -581,86 +581,79 @@ def plot_cam_by_sex(saliency, y_te, prob, sex_te, out_dir):
 # ── Direction 5: 80번째 슬라이스 교차 패턴 분석 ───────────────────────────────
 
 def plot_aec_crossing_pattern(X_aec_raw, y_te, sex_te, out_dir, cross_idx=79):
-    """남성/여성 Normal vs Sarcopenia AEC 교차 패턴 비교 시각화. (Direction 5)
+    """남성/여성 평균 AEC 교차 패턴 분석. (Direction 5)
 
-    2행 × 2열 그리드:
-      Row 0: Female — 평균 곡선(±std) / Normal−Sarco 차이 바 차트
-      Row 1: Male   — 동일 구성
+    Row-normalized AEC 기준으로 Normal/Sarcopenia 그룹별 성별 교차 패턴 비교.
+    2행 × 2열:
+      [0,0] Normal     — Female vs Male 평균 row-norm AEC 곡선 (±std)
+      [0,1] Normal     — Female − Male 차이 바 차트
+      [1,0] Sarcopenia — Female vs Male 평균 row-norm AEC 곡선 (±std)
+      [1,1] Sarcopenia — Female − Male 차이 바 차트
     cross_idx=79: 80번째 슬라이스(0-indexed) 교차 가설선.
+    x축 방향: aec_1=pubis(caudal) → aec_128=liver_upper(cranial)
     """
-    def _stats(X, y):
-        n_mean  = X[y == 0].mean(0);  n_std  = X[y == 0].std(0)
-        s_mean  = X[y == 1].mean(0);  s_std  = X[y == 1].std(0)
-        diff    = n_mean - s_mean
-        changes = np.where(np.diff(np.sign(diff)))[0]
-        return n_mean, n_std, s_mean, s_std, diff, changes
+    # 각 환자 row를 자신의 합으로 나눠 상대적 AEC 분포만 비교
+    row_sum = X_aec_raw.sum(axis=1, keepdims=True)
+    row_sum = np.where(row_sum == 0, 1, row_sum)
+    X = X_aec_raw / row_sum
 
-    groups = [
-        ("Female", sex_te == "F", "steelblue", "tomato"),
-        ("Male",   sex_te == "M", "royalblue",  "orangered"),
-    ]
+    x = np.arange(1, X.shape[1] + 1)
+    class_spec = [(0, "Normal"), (1, "Sarcopenia")]
 
     fig, axes = plt.subplots(2, 2, figsize=(16, 10))
     fig.suptitle(
-        "AEC Crossing Pattern Analysis — Female vs Male Subgroup Comparison\n"
+        "AEC Crossing Pattern by Sex — Row-Normalized\n"
         f"(가설 교차 기점: Slice {cross_idx + 1},  gold 점선 / 실제 교차 gray 점선)",
         fontsize=13, fontweight="bold"
     )
 
-    for row, (label, mask, c_norm, c_sarco) in enumerate(groups):
-        X_s = X_aec_raw[mask];  y_s = y_te[mask]
-        n_s = int(mask.sum());  n_pos_s = int((y_s == 1).sum())
+    for row, (cls_label, cls_name) in enumerate(class_spec):
+        cls_mask = (y_te == cls_label)
+        f_mask = cls_mask & (sex_te == "F")
+        m_mask = cls_mask & (sex_te == "M")
 
-        if len(np.unique(y_s)) < 2:
-            axes[row, 0].text(0.5, 0.5, f"{label}: 클래스 부족",
-                              ha="center", va="center", transform=axes[row, 0].transAxes)
-            axes[row, 1].axis("off")
-            continue
+        f_mean = X[f_mask].mean(0);  f_std = X[f_mask].std(0)
+        m_mean = X[m_mask].mean(0);  m_std = X[m_mask].std(0)
+        diff    = f_mean - m_mean
+        changes = np.where(np.diff(np.sign(diff)))[0]
 
-        n_mean, n_std, s_mean, s_std, diff, changes = _stats(X_s, y_s)
-        x = np.arange(1, X_s.shape[1] + 1)
-
-        # ── 왼쪽: 평균 AEC 곡선 ──────────────────────────────────────────
+        # ── 왼쪽: Female vs Male 평균 row-norm AEC 곡선 ─────────────────
         ax = axes[row, 0]
-        ax.plot(x, n_mean, color=c_norm,  linewidth=2,
-                label=f"Normal (n={n_s - n_pos_s})")
-        ax.fill_between(x, n_mean - n_std, n_mean + n_std,
-                        alpha=0.15, color=c_norm)
-        ax.plot(x, s_mean, color=c_sarco, linewidth=2,
-                label=f"Sarcopenia (n={n_pos_s})")
-        ax.fill_between(x, s_mean - s_std, s_mean + s_std,
-                        alpha=0.15, color=c_sarco)
+        ax.plot(x, f_mean, color="steelblue", linewidth=2,
+                label=f"Female (n={int(f_mask.sum())})")
+        ax.fill_between(x, f_mean - f_std, f_mean + f_std,
+                        alpha=0.15, color="steelblue")
+        ax.plot(x, m_mean, color="tomato", linewidth=2,
+                label=f"Male (n={int(m_mask.sum())})")
+        ax.fill_between(x, m_mean - m_std, m_mean + m_std,
+                        alpha=0.15, color="tomato")
         ax.axvline(cross_idx + 1, color="gold", linewidth=2, linestyle="--",
                    label=f"Slice {cross_idx + 1} (가설)")
         for sc in changes:
             ax.axvline(sc + 1.5, color="gray", linewidth=1, linestyle=":", alpha=0.7)
-        ax.set_xlabel("AEC Dimension (slice index)")
-        ax.set_ylabel("AEC mA (raw)")
-        ax.set_title(f"[{label}]  Mean AEC — Normal vs Sarcopenia\n"
-                     f"(n_total={n_s}, n_sarco={n_pos_s}, 실제 교차 {len(changes)}건)")
+        ax.set_xlabel("AEC Dimension  [pubis(1) → liver_upper(128)]")
+        ax.set_ylabel("Row-Norm AEC")
+        ax.set_title(f"{cls_name} — Mean Row-Norm AEC\n(실제 교차 {len(changes)}건)")
         ax.legend(fontsize=9)
 
-        # ── 오른쪽: Normal − Sarco 차이 바 차트 ─────────────────────────
+        # ── 오른쪽: Female − Male 차이 바 차트 ─────────────────────────
         ax2 = axes[row, 1]
-        bar_colors = [c_norm if d > 0 else c_sarco for d in diff]
+        bar_colors = ["steelblue" if d > 0 else "tomato" for d in diff]
         ax2.bar(x, diff, color=bar_colors, alpha=0.75, width=0.9)
         ax2.axhline(0, color="black", linewidth=1)
         ax2.axvline(cross_idx + 1, color="gold", linewidth=2, linestyle="--",
                     label=f"Slice {cross_idx + 1}")
         for sc in changes:
             ax2.axvline(sc + 1.5, color="gray", linewidth=1, linestyle=":", alpha=0.7)
-
-        # 실제 교차 구간 주석
+        annotation_offset = np.abs(diff).max() * 0.7 if diff.any() else 0.01
         for sc in changes[:3]:
             ax2.annotate(f"↕{sc+1}", xy=(sc + 1.5, 0),
-                         xytext=(sc + 1.5, diff.max() * 0.7),
+                         xytext=(sc + 1.5, annotation_offset),
                          fontsize=7, ha="center", color="dimgray",
                          arrowprops=dict(arrowstyle="-", color="gray", lw=0.8))
-
-        ax2.set_xlabel("AEC Dimension (slice index)")
-        ax2.set_ylabel("Normal − Sarcopenia AEC")
-        ax2.set_title(f"[{label}]  AEC Difference: Normal − Sarcopenia\n"
-                      f"(blue=Normal↑  red=Sarco↑)")
+        ax2.set_xlabel("AEC Dimension  [pubis(1) → liver_upper(128)]")
+        ax2.set_ylabel("Female − Male Row-Norm AEC")
+        ax2.set_title(f"{cls_name} — AEC Difference: Female − Male\n(blue=Female↑  red=Male↑)")
         ax2.legend(fontsize=9)
 
     fig.tight_layout(rect=[0, 0, 1, 0.95])

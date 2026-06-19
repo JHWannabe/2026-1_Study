@@ -1,4 +1,4 @@
-DATA_PATH = "연구코드/data/강남/강남_liver_merged_features_ok.xlsx"
+DATA_PATH = "연구코드/data/강남/강남_liver_merged_features_ok_pre_exclude.xlsx"
 
 SEED      = 42
 TEST_SIZE = 0.2
@@ -22,7 +22,7 @@ AEC_NORM = ["global", "rowwise", "raw"]
 import torch
 DEVICE     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EPOCHS     = 500
-LR         = 1e-3
+LR         = 1e-4
 BATCH_SIZE = 32
 PATIENCE   = 15
 AEC_OUT    = 16    # AEC branch 출력 차원 (clinic과 concat 전)

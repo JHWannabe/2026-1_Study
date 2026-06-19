@@ -48,11 +48,11 @@ from tqdm import tqdm
 # Tesseract OCR 실행 파일 경로 (Windows 설치 기본 위치)
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
-file_path   = r"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\강남\metadata\강남_DLO_Results.xlsx"
-output_path = r"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\강남\metadata\강남_DLO_Results_Unique.xlsx"
+file_path   = r"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\신촌\metadata\신촌_DLO_Results.xlsx"
+output_path = r"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\신촌\metadata\신촌_DLO_Results_Unique.xlsx"
 
 # DLO 리포트 이미지가 저장된 기반 디렉토리
-DLO_BASE = r"D:\영상제공\강남\강남_결과"
+DLO_BASE = r"D:\영상제공\신촌\신촌_결과"
 
 # 대용량 처리 중 크래시로 인한 데이터 유실 방지를 위해
 # 이 건수마다 엑셀에 중간 저장을 수행한다.

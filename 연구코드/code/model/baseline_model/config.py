@@ -1,4 +1,4 @@
-DATA_PATH = "연구코드/data/강남/강남_liver_merged_features_ok.xlsx"
+DATA_PATH = "연구코드/data/강남/강남_liver_merged_features_ok_pre_exclude.xlsx"
 
 SEED      = 42
 TEST_SIZE = 0.2

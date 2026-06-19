@@ -38,7 +38,7 @@ from tqdm import tqdm
 # ── 설정 ─────────────────────────────────────────────────────────────────────
 
 # 강남 병원의 VB 코호트 내 지역병원코드
-SITE_CODE = "20"
+SITE_CODE = "10"
 
 # 이상치 판정 기준: 이 범위를 벗어나는 값을 가진 행을 제거한다
 VALID_HEIGHT = (130.0, 210.0)   # cm
@@ -56,9 +56,9 @@ def in_range(value, bounds: tuple) -> bool:
 
 
 # 파일 경로 (상대경로: 스크립트 위치 기준)
-unique_file_path  = r"연구코드\data\강남\metadata\강남_DLO_Results_Unique.xlsx"
+unique_file_path  = r"연구코드\data\신촌\metadata\신촌_DLO_Results_Unique.xlsx"
 vb_cohort_path    = r"연구코드\data\radiation_data_260421_VBcohort.xlsx"
-final_output_path = r"연구코드\data\강남\metadata\강남_DLO_Results_SMI.xlsx"
+final_output_path = r"연구코드\data\신촌\metadata\신촌_DLO_Results_SMI.xlsx"
 
 
 # ── STEP 1: VB 코호트 로드 ────────────────────────────────────────────────────

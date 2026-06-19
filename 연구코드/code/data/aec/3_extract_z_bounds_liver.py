@@ -151,7 +151,7 @@ def _silence():
 
 # ── 설정 ──────────────────────────────────────────────────────────────────────
 
-SITE       = "강남"
+SITE       = "신촌"
 DICOM_BASE = rf"D:/영상제공/{SITE}/{SITE}_axial"   # 환자별 DICOM 폴더 최상위 경로
 OUT_PATH   = rf"C:\Users\jhjun\OneDrive\Desktop\대학원\data\{SITE}\aec\liver_pubis\{SITE}_z_bounds.xlsx"
 CHECKPOINT       = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\.z_bounds_checkpoint.json"
