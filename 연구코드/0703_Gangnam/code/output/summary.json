@@ -1,0 +1,98 @@
+{
+  "data": {
+    "internal_xlsx": "C:\\Users\\jhjun\\OneDrive\\Desktop\\Gangnam\\excel\\강남_liver_merged_features_1090.xlsx",
+    "external_xlsx": "C:\\Users\\jhjun\\OneDrive\\Desktop\\Gangnam\\excel\\신촌_liver_merged_features.xlsx",
+    "internal_n": 1090,
+    "internal_low_smi_events": 241,
+    "external_n": 922,
+    "external_low_smi_events": 249
+  },
+  "preprocessing": {
+    "aec_sheet": "aec_128",
+    "smoothing": "gaussian_filter1d sigma=1.0, axis=1, mode=nearest",
+    "normalization": "patient-wise mean normalization after smoothing"
+  },
+  "clinical_model": {
+    "variables": [
+      "PatientAge",
+      "Height",
+      "Weight",
+      "sex_M"
+    ],
+    "threshold": "internal out-of-fold S90",
+    "clinical_threshold_z": -0.46609370981995757,
+    "target_sensitivity": 0.9
+  },
+  "locked_aec_gate": {
+    "branches": [
+      {
+        "region": "R1",
+        "feature": "R1_045_056__endpoint_delta",
+        "sign": -1,
+        "width": 0.5,
+        "lambda": 0.25
+      },
+      {
+        "region": "R2",
+        "feature": "R2_057_080__level_mean",
+        "sign": -1,
+        "width": 0.7,
+        "lambda": 0.25
+      },
+      {
+        "region": "R3",
+        "feature": "R3_097_128__linear_slope",
+        "sign": 1,
+        "width": 0.35,
+        "lambda": 0.25
+      },
+      {
+        "region": "R4",
+        "feature": "R4_117_128__endpoint_delta",
+        "sign": -1,
+        "width": 0.5,
+        "lambda": 0.25
+      }
+    ],
+    "selected_aec_positive_patterns": [
+      "++++",
+      "++--",
+      "+--+",
+      "--+-",
+      "---+"
+    ],
+    "aec_positive_meaning": "de-escalation / lower low-SMI probability morphology"
+  },
+  "secondary_cnn_mimic": {
+    "included": false,
+    "probability_file": "C:\\Users\\jhjun\\OneDrive\\Desktop\\Gangnam\\outputs\\aec_new_region_cnn_surrogate_mimic_gate\\surrogate_mimic_balanced_probabilities.npz",
+    "note": "CNN is secondary. This script reads saved branch probabilities rather than retraining the CNN.",
+    "branch_thresholds": [
+      0.8,
+      0.6,
+      0.9,
+      0.6
+    ],
+    "selected_patterns": [
+      "++++",
+      "+---",
+      "-+-+",
+      "---+"
+    ]
+  },
+  "external_conditional_result": {
+    "clinical_positive_aec_positive_n": 44,
+    "clinical_positive_aec_positive_low_smi_events": 7,
+    "clinical_positive_aec_positive_low_smi_rate": 0.1590909090909091,
+    "clinical_positive_aec_negative_n": 637,
+    "clinical_positive_aec_negative_low_smi_events": 227,
+    "clinical_positive_aec_negative_low_smi_rate": 0.3563579277864992,
+    "fisher_p": 0.007994525977829493
+  },
+  "output_files": {
+    "metrics_csv": "C:\\Users\\jhjun\\OneDrive\\Desktop\\Gangnam\\code\\output\\table_s90_primary_deescalation_metrics.csv",
+    "conditional_csv": "C:\\Users\\jhjun\\OneDrive\\Desktop\\Gangnam\\code\\output\\table_external_s90_clinical_positive_aec_split.csv",
+    "secondary_cnn_metrics_csv": null,
+    "figure_png": "C:\\Users\\jhjun\\OneDrive\\Desktop\\Gangnam\\code\\output\\figure_external_s90_core_1x3_with_r4_tangent.png"
+  }
+}
