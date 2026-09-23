@@ -20,7 +20,7 @@ import pandas as pd
 import numpy as np
 
 SITE = "강남"
-BASE = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}"
+BASE = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}"
 
 Z_BOUNDS_PATH = rf"{BASE}\{SITE}_z_bounds.xlsx"
 AEC_RAW_PATH  = rf"{BASE}\{SITE}_aec_raw.xlsx"

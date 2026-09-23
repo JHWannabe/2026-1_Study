@@ -34,12 +34,12 @@ from tqdm import tqdm
 
 SITE = "강남"
 
-META_DIR  = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}"
+META_DIR  = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}"
 META_PATH = os.path.join(META_DIR, f"{SITE}_metadata.xlsx")
 OUT_REPORT= os.path.join(META_DIR, f"{SITE}_verification_report.xlsx")
 
 DICOM_BASE = rf"D:/영상제공/{SITE}/{SITE}_axial"
-RAD_PATH   = r"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\radiation_data_260421_VBcohort.xlsx"
+RAD_PATH   = r"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\radiation_data_260421_VBcohort.xlsx"
 DLO_PATH   = rf"D:\영상제공\{SITE}\{SITE}_결과\{SITE}_DLO_Results.xlsx"
 DLO_BASE   = rf"D:\영상제공\{SITE}\{SITE}_결과"
 

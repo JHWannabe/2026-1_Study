@@ -1,0 +1,15 @@
+{
+  "total": 2257,
+  "no_height_weight": 5,
+  "under_20": 13,
+  "height_outlier": 11,
+  "weight_outlier": 41,
+  "bmi_outlier": 40,
+  "clinical_outlier_total": 61,
+  "remaining_na": 249,
+  "after_metadata_filter": 1929,
+  "aec_no_variability": 42,
+  "aec_cropped_total": 1273,
+  "common_patient_ids": 1123,
+  "final_rows": 1123
+}

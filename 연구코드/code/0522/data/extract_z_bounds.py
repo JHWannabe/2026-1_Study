@@ -36,11 +36,11 @@ from totalsegmentator.python_api import totalsegmentator
 # ── 설정 ─────────────────────────────────────────────────────────────────────
 SITE       = "강남"
 DICOM_BASE = rf"D:/영상제공/{SITE}/{SITE}_axial"
-META_PATH  = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_merged_features.xlsx"
-OUT_PATH   = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_z_bounds.xlsx"
-CHECKPOINT = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\.z_bounds_checkpoint.json"
-UPPER_DIR  = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\upper"
-BOTTOM_DIR = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\bottom"
+META_PATH  = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_merged_features.xlsx"
+OUT_PATH   = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_z_bounds.xlsx"
+CHECKPOINT = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\.z_bounds_checkpoint.json"
+UPPER_DIR  = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}\upper"
+BOTTOM_DIR = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}\bottom"
 
 ROI_SUBSET = ["vertebrae_T12", "hip_left", "hip_right"]
 BATCH_SIZE = 5

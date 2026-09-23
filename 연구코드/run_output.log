@@ -1,0 +1,65 @@
+
+============================================================
+  SITE: 강남
+============================================================
+메타데이터 전체: 2033명
+  임상 데이터(Height/Weight) 없음 387명 제외
+  나이<20세 5명 제외
+  Height IQR 이상치 5명 (범위: [139.0, 187.0])
+  Weight IQR 이상치 20명 (범위: [32.5, 92.5])
+  BMI IQR 이상치 34명 (범위: [15.4, 31.6])
+  Height/Weight/BMI 이상치 합계 45명 제외
+  기타 칼럼 결측치 27명 제외
+메타데이터 필터링 후: 1569명
+AEC Crop 변동성 없음 76명 제외
+5개 원본 공통 PatientID: 1260명
+  [metadata] 1260행
+  [aec_cropped] 1260행
+  [aec_128] 1260행
+  [aec_total] 1260행
+  [SFA_cropped] 1260행
+  [SFA_128] 1260행
+  [VFA_cropped] 1260행
+  [VFA_128] 1260행
+  [TAMA_cropped] 1260행
+  [TAMA_128] 1260행
+  [LAMA_cropped] 1260행
+  [LAMA_128] 1260행
+  [NAMA_cropped] 1260행
+  [NAMA_128] 1260행
+  [IMATA_cropped] 1260행
+  [IMATA_128] 1260행
+저장 완료: C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\강남\gangnam_final_dataset.xlsx
+
+============================================================
+  SITE: 신촌
+============================================================
+메타데이터 전체: 2257명
+  임상 데이터(Height/Weight) 없음 5명 제외
+  나이<20세 13명 제외
+  Height IQR 이상치 11명 (범위: [140.0, 188.0])
+  Weight IQR 이상치 41명 (범위: [35.0, 91.0])
+  BMI IQR 이상치 40명 (범위: [15.5, 31.4])
+  Height/Weight/BMI 이상치 합계 61명 제외
+  기타 칼럼 결측치 249명 제외
+메타데이터 필터링 후: 1929명
+AEC Crop 변동성 없음 42명 제외
+5개 원본 공통 PatientID: 1123명
+  [metadata] 1123행
+  [aec_cropped] 1123행
+  [aec_128] 1123행
+  [aec_total] 1123행
+  [SFA_cropped] 1123행
+  [SFA_128] 1123행
+  [VFA_cropped] 1123행
+  [VFA_128] 1123행
+  [TAMA_cropped] 1123행
+  [TAMA_128] 1123행
+  [LAMA_cropped] 1123행
+  [LAMA_128] 1123행
+  [NAMA_cropped] 1123행
+  [NAMA_128] 1123행
+  [IMATA_cropped] 1123행
+  [IMATA_128] 1123행
+저장 완료: C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\신촌\sinchon_final_dataset.xlsx
+데이터 흐름 저장 완료: C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\data_flowchart.xlsx

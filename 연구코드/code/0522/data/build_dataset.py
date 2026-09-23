@@ -28,16 +28,16 @@ SITE         = "강남"
 DICOM_BASE   = rf"D:/영상제공/{SITE}/{SITE}_axial"
 
 # 원본 임상 데이터 — 절대 덮어쓰지 않음 (읽기 전용)
-CLINICAL_SRC = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_metadata.xlsx"
+CLINICAL_SRC = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_metadata.xlsx"
 
 # Step 1 출력 (원본과 분리된 별도 파일)
-META_OUT     = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_dicom_meta.xlsx"
-AECRAW_PATH  = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_aec_raw.xlsx"
+META_OUT     = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_dicom_meta.xlsx"
+AECRAW_PATH  = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_aec_raw.xlsx"
 
 # Step 2 출력
-OUT_PATH     = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_merged_features.xlsx"
+OUT_PATH     = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_merged_features.xlsx"
 
-CHECKPOINT   = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\.pipeline_checkpoint.json"
+CHECKPOINT   = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\.pipeline_checkpoint.json"
 BATCH_SIZE   = 100
 
 # True → Step 1 건너뛰고 기존 META_OUT / AECRAW_PATH 파일 사용
@@ -445,7 +445,7 @@ def make_interp_sheet(aecraw_df, pid_list, s_cols, n_points, z_bounds=None, meta
     return pd.DataFrame(rows, columns=cols)
 
 
-Z_BOUNDS_PATH = rf"C:\Users\jhjun\OneDrive\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_z_bounds.xlsx"
+Z_BOUNDS_PATH = rf"C:\Users\jhjun\Desktop\2026-1_Study\연구코드\data\{SITE}\{SITE}_z_bounds.xlsx"
 if os.path.exists(Z_BOUNDS_PATH):
     _zb = pd.read_excel(Z_BOUNDS_PATH).query("seg_status == 'ok'")
     _zb["PatientID"] = _zb["PatientID"].astype(int)

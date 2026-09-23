@@ -1,0 +1,20 @@
+
+======================================================================
+2026-09-23 14:47:58.938489
+Traceback (most recent call last):
+  File "C:\Users\jhjun\Desktop\2026-1_Study\연구코드\code\data\aec\extract_liver_pubis_aec_new10000.py", line 218, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\jhjun\Desktop\2026-1_Study\연구코드\code\data\aec\extract_liver_pubis_aec_new10000.py", line 208, in main
+    _run_merge_step()
+    ~~~~~~~~~~~~~~~^^
+  File "C:\Users\jhjun\Desktop\2026-1_Study\연구코드\code\data\aec\extract_liver_pubis_aec_new10000.py", line 90, in _run_merge_step
+    mod.main()
+    ~~~~~~~~^^
+  File "C:\Users\jhjun\Desktop\2026-1_Study\연구코드\code\data\9_merge_body_composition.py", line 154, in main
+    _write_excel_atomic(INNER_JOIN_PATH, inner_join_sheets)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jhjun\Desktop\2026-1_Study\연구코드\code\data\9_merge_body_composition.py", line 56, in _write_excel_atomic
+    os.replace(tmp_path, path)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^
+PermissionError: [WinError 5] 액세스가 거부되었습니다: 'C:\\Users\\jhjun\\Desktop\\Clinical_Study\\data\\new10000_final_dataset.tmp.xlsx' -> 'C:\\Users\\jhjun\\Desktop\\Clinical_Study\\data\\new10000_final_dataset.xlsx'
