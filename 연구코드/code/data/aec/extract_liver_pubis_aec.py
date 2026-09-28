@@ -213,12 +213,14 @@ def _empty_bodycomp(pid: int) -> dict:
 
 
 def compute_body_composition(img: sitk.Image, lo_k: int, hi_k: int, tmp_dir: str, pid: int,
-                              reverse: bool = False) -> dict:
+                              reverse: bool = False, keep_arrays: bool = False) -> dict:
     """pubis~liver 구간(k-index)만 크롭해 tissue_4_types로 VAT/SAT 등 체적(면적×슬라이스) 합과,
     슬라이스별 면적(SFA/VFA/TAMA/LAMA/NAMA/IMATA, cm2) 배열을 계산한다.
     reverse=True면 슬라이스 배열을 뒤집어 aec_cropped와 동일하게 간→두덩뼈 방향으로 맞춘다
     (crop은 항상 k 오름차순으로 이뤄지는데, apex_k(간)가 bottom_k(두덩뼈)보다 크면 오름차순이
-    두덩뼈→간 방향이 되므로 뒤집어야 한다)."""
+    두덩뼈→간 방향이 되므로 뒤집어야 한다).
+    keep_arrays=True면 QC 시각화용으로 hu_data/각 조직 mask를 result에 그대로 담는다
+    (단일 슬라이스 호출 용도 — lo_k==hi_k가 아니면 3D 배열째로 담긴다)."""
     result = _empty_bodycomp(pid)
     cropped_nii_path = os.path.join(tmp_dir, f"{pid}_bc.nii.gz")
     seg_dir = os.path.join(tmp_dir, f"{pid}_bc_seg")
@@ -284,6 +286,14 @@ def compute_body_composition(img: sitk.Image, lo_k: int, hi_k: int, tmp_dir: str
         result["NAMA_slices"]  = nama_slices.tolist()
         result["IMATA_slices"] = imata_slices.tolist()
         result["seg_status"]    = "ok"
+
+        if keep_arrays:
+            result["hu_slice"]    = hu_data
+            result["sat_mask"]    = sat_mask
+            result["vat_mask"]    = vat_mask
+            result["nama_mask"]   = nama_mask
+            result["lama_mask"]   = lama_mask
+            result["imata_mask"]  = imata_mask
     except Exception as e:
         result["seg_status"] = f"error:{type(e).__name__}:{e}"
     finally:
