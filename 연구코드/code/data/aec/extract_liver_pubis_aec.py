@@ -101,9 +101,14 @@ def site_paths(site: str, shard: int | None = None) -> dict:
 @contextlib.contextmanager
 def _silence():
     old_out, old_err = sys.stdout, sys.stderr
-    sys.stdout = sys.stderr = io.StringIO()
+    buf = sys.stdout = sys.stderr = io.StringIO()
     try:
         yield
+    except SystemExit:
+        # 라이브러리가 sys.exit()로 끝낼 때(예: 라이선스 오류) 숨긴 출력을 보여줘야 원인을 알 수 있다.
+        sys.stdout, sys.stderr = old_out, old_err
+        print(buf.getvalue())
+        raise
     finally:
         sys.stdout, sys.stderr = old_out, old_err
 

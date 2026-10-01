@@ -61,7 +61,8 @@ OUT_PATH = DATA_DIR / "best_series.xlsx"
 CHECKPOINT_PATH = DATA_DIR / "best_series_checkpoint.pkl"
 DICOM_BASE = r"D:\데이터서비스팀 요청(이홍선)"
 
-PHASE_RANK = {"Portal": 1, "Contrast": 2, "Delay": 3, "Arterial": 4, "Pre/NonContrast": 5, "Unknown": 6}
+PHASE_RANK = {"Portal": 1, "Contrast": 2, "Delay": 3, "Arterial": 4, "Pre/NonContrast": 5,
+              "Unknown": 6, "Scout/Tracking": 7}   # Scout=볼루스 추적용, 진단용 아님
 MIN_RANGE_MM = 300  # 위 [liver~pubis 커버리지 필터] 참고
 BATCH_SIZE = 50
 
@@ -73,6 +74,17 @@ def _norm_series_name(s) -> str:
 
 def classify_phase(series_desc: str) -> str:
     s = series_desc.lower()
+    # 볼루스 추적/스카우트 — 진단용이 아니라 몇 장짜리 모니터링 시리즈다. 최하위로 뺀다.
+    if re.search(r"smart\s*prep|monitor|tracker|tracking|bolus|locator|scout|topogram", s):
+        return "Scout/Tracking"
+    # 신촌 명명 관례: HVP=hepatic venous phase(문맥기), LAP=late arterial, EP=equilibrium(지연).
+    # 이걸 넣지 않으면 신촌 시리즈의 52%가 Unknown(rank 6)이 되어 비조영(rank 5)보다 밀린다.
+    if re.search(r"\bhvp\b", s):
+        return "Portal"
+    if re.search(r"\blap\b", s):
+        return "Arterial"
+    if re.search(r"\bep\b", s):
+        return "Delay"
     if "arterial" in s or "artery" in s:
         return "Arterial"
     if "delay" in s:
