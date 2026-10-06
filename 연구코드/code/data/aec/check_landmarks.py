@@ -65,6 +65,8 @@ import pickle
 import re
 import shutil
 import tempfile
+import sys
+import time
 import warnings
 from pathlib import Path
 from typing import cast
@@ -270,7 +272,7 @@ def _aec_rows(pid: int, row: dict, by_inst: list[dict] | None) -> tuple[dict, di
 
 
 def _compute_bc_rows(pid: int, row: dict, img: sitk.Image | None, n_k: int, tmp_dir: str,
-                      report_path: str | None = None) -> list[dict]:
+                      report_path: str | None = None, vol: dict | None = None) -> list[dict]:
     """랜드마크로 찾은 anchor 슬라이스(최대 12개)마다 체성분(VAT/SAT/NAMA/LAMA/IMATA)을
     계산한다. compute_landmarks()가 이미 채운 row와, process_patient()에서 한 번만 읽은 img를
     재사용해 DICOM을 다시 읽지 않는다. report_path가 주어지면 anchor별 세그멘테이션 오버레이
@@ -289,11 +291,13 @@ def _compute_bc_rows(pid: int, row: dict, img: sitk.Image | None, n_k: int, tmp_
         if 0 <= k < n_k:
             anchor_k[anchor] = k
 
-    vol = None
+    slice_no = _slice_numbers(row)   # landmarks 시트의 {anchor}_slice와 같은 번호(리포트 제목에 표시)
+    lo = 0
     if anchor_k and img is not None:
-        lo, hi = min(anchor_k.values()), max(anchor_k.values())
-        vol = compute_body_composition(img, lo, hi, tmp_dir, pid,
-                                       keep_arrays=report_path is not None)
+        if vol is None:   # vol이 주어지면(스캔 전체 세그멘테이션 결과, lo=0) 다시 돌리지 않는다
+            lo, hi = min(anchor_k.values()), max(anchor_k.values())
+            vol = compute_body_composition(img, lo, hi, tmp_dir, pid,
+                                           keep_arrays=report_path is not None)
 
     # 구간 전체 결과에서 anchor 슬라이스별 면적(cm2)을 꺼낸다(배열은 k 오름차순).
     area_keys = {"VAT_sum_cm2": "VFA_slices", "SAT_sum_cm2": "SFA_slices",
@@ -313,7 +317,8 @@ def _compute_bc_rows(pid: int, row: dict, img: sitk.Image | None, n_k: int, tmp_
 
         i = anchor_k[anchor] - lo
         bc = {"seg_status": "ok", "anchor_k": anchor_k[anchor],
-              "anchor_instance": row.get(f"{anchor}_instance")}
+              "anchor_instance": row.get(f"{anchor}_instance"),
+              "slice_no": slice_no.get(f"{anchor}_slice")}
         for out_key, slice_key in area_keys.items():
             vals = vol.get(slice_key) or []
             bc[out_key] = round(float(vals[i]), 2) if i < len(vals) else None
@@ -385,15 +390,17 @@ def _save_landmark_report(pid: int, bc_by_anchor: dict[str, dict], report_path: 
                 for c in range(3):
                     rgb[..., c] = np.where(mask, 0.55 * rgb[..., c] + 0.45 * color[c], rgb[..., c])
 
-        inst = bc.get("anchor_instance")
+        inst = bc.get("slice_no")
+        if inst is None or pd.isna(inst):
+            inst = bc.get("anchor_instance")
         inst_str = f"slice #{int(inst)}" if inst is not None and not pd.isna(inst) else "slice #?"
         ax.set_title(f"{anchor} / {inst_str}", fontsize=12)
         # nii 축 순서는 (X=환자 왼쪽, Y=환자 뒤쪽, Z). imshow는 axis0을 화면 세로로 쓰므로
         # 그대로/rot90으로 그리면 상하가 뒤집힌다(전면이 아래로 감). transpose하면 화면 세로=
         # 앞→뒤, 가로=환자 오른쪽→왼쪽이 되어 DICOM pixel_array와 정확히 일치한다(MAE=0 검증).
         ax.imshow(np.transpose(rgb, (1, 0, 2)))
-        txt = (f"VAT {bc['VAT_sum_cm2']:.1f}  SAT {bc['SAT_sum_cm2']:.1f}\n"
-               f"NAMA {bc['NAMA_sum_cm2']:.1f}  LAMA {bc['LAMA_sum_cm2']:.1f}  IMATA {bc['IMATA_sum_cm2']:.1f}")
+        txt = (f"VAT {bc['VAT_sum_cm2']:.2f}  SAT {bc['SAT_sum_cm2']:.2f}\n"
+               f"TAMA {round(bc['NAMA_sum_cm2'] + bc['LAMA_sum_cm2'] + bc['IMATA_sum_cm2'], 2):.2f}")
         ax.text(0.5, -0.14, txt, ha="center", va="top", fontsize=12, transform=ax.transAxes)
 
     for ax in axes[len(ANCHOR_ORDER):]:
@@ -521,7 +528,7 @@ def compute_landmarks(row: dict, seg_dir: str, nii_path: str, n_k: int, k_to_sli
 
 
 def process_patient(pid: int, series_dir: str, tmp_dir: str,
-                     report_path: str | None = None) -> tuple[dict, list[dict], dict, dict]:
+                     report_path: str | None = None, want_total=None) -> tuple[dict, list[dict], dict, dict]:
     """랜드마크 검출·체성분·AEC를 한 번에 수행한다(DICOM을 한 번만 읽어 재사용).
     (landmarks row, body-composition rows, aec_total row, aec_landmark row)를 반환한다.
     AEC는 랜드마크 검출에 이미 읽은 by_inst를 그대로 쓰므로 추가 I/O가 없다 — 별도
@@ -638,7 +645,17 @@ def process_patient(pid: int, series_dir: str, tmp_dir: str,
         if os.path.isdir(seg_dir):
             shutil.rmtree(seg_dir, ignore_errors=True)
 
-    bc_rows = _compute_bc_rows(pid, row, img, n_k, tmp_dir, report_path=report_path)
+    # filtered 대상(want_total)이면 스캔 전체 볼륨을 한 번만 세그멘테이션해 total 시트와 리포트에 같이 쓴다.
+    # 대상이 아니면 anchor 구간만 세그멘테이션해 리포트만 만든다(시트에는 값을 저장하지 않는다).
+    vol = None
+    if want_total and want_total(pid, row["seg_status"], bool(_is_excluded_signal(_aec_values(by_inst)))):
+        vol = compute_body_composition(img, 0, n_k - 1, tmp_dir, pid, keep_arrays=report_path is not None)
+        if vol["seg_status"] == "ok":
+            row["_total"] = _total_rows_from_vol(pid, vol, by_inst, k_to_slice)
+        else:
+            row["_total"] = _empty_total_rows(pid, len(by_inst), vol["seg_status"])
+            vol = None   # 리포트는 anchor 구간 세그멘테이션으로 폴백
+    bc_rows = _compute_bc_rows(pid, row, img, n_k, tmp_dir, report_path=report_path, vol=vol)
     return (row, bc_rows, *_aec_rows(pid, row, by_inst))
 
 
@@ -647,6 +664,134 @@ def process_patient(pid: int, series_dir: str, tmp_dir: str,
 def _clean_ws(s):
     return re.sub(r"\s+", " ", str(s)).strip() if pd.notna(s) else s
 
+
+# 스캔 전체 슬라이스의 조직별 면적(cm2) 시트. 컬럼 {조직}_{i}의 i는 aec_total의 aec_{i}와 같은 위치
+# (InstanceNumber 오름차순 1부터)라서 AEC와 슬라이스별로 바로 대응한다.
+# TAMA_total은 NAMA + LAMA + IMATA를 슬라이스별로 합산한 값이다(세 성분을 소수 둘째 자리로 반올림한 뒤 합산해 리포트 수치와 일치).
+TOTAL_SHEETS = {"VAT_total": "VFA_slices", "SAT_total": "SFA_slices", "TAMA_total": None}
+TOTAL_META = ["PatientID", "n_slices", "seg_status"]
+TOTAL_BACKFILL_BATCH = 20   # 이미 처리된 환자의 total만 채우는 작업은 저장 비용 대비 환자당 시간이 짧아 묶어서 저장
+
+
+# 시리즈 폴더에서 볼륨을 읽는다(다중 UID 정리 + det<0 보정, process_patient와 동일 로직).
+# 반환: (img, by_inst, k_to_slice) 또는 읽을 수 없으면 None.
+def _load_volume(series_dir: str):
+    by_inst = read_slices(series_dir)
+    if by_inst is None:
+        return None
+    reader = sitk.ImageSeriesReader()
+    series_ids = reader.GetGDCMSeriesIDs(series_dir)
+    if not series_ids:
+        return None
+    by_file = {os.path.basename(r["file"]): r for r in by_inst}
+
+    def _coverage(kf: list) -> tuple:
+        zs = [by_file[b]["z"] for b in map(os.path.basename, kf) if b in by_file]
+        zs = [z for z in zs if not np.isnan(z)]
+        return (len(kf), (max(zs) - min(zs)) if len(zs) >= 2 else 0.0)
+
+    candidates = [kf for kf in (list(reader.GetGDCMSeriesFileNames(series_dir, sid)) for sid in series_ids) if kf]
+    if not candidates:
+        return None
+    k_files = max(candidates, key=_coverage)
+    if len(series_ids) > 1:
+        sel = {os.path.basename(f) for f in k_files}
+        by_inst = [r for r in by_inst if os.path.basename(r["file"]) in sel]
+        by_file = {os.path.basename(r["file"]): r for r in by_inst}
+    if len(k_files) != len(by_inst):
+        return None
+    reader.SetFileNames(k_files)
+    img = reader.Execute()
+    d = np.array(img.GetDirection()).reshape(3, 3)
+    if np.linalg.det(d) < 0:
+        d[:, 2] = np.cross(d[:, 0], d[:, 1])
+        z_first = float(pydicom.dcmread(k_files[0], stop_before_pixels=True).ImagePositionPatient[2])
+        z_last = float(pydicom.dcmread(k_files[-1], stop_before_pixels=True).ImagePositionPatient[2])
+        if (d[2, 2] > 0) != (z_last > z_first):
+            return None
+        img.SetDirection(tuple(d.flatten()))
+    return img, by_inst, [by_file.get(os.path.basename(f)) for f in k_files]
+
+
+def _empty_total_rows(pid: int, n, status: str) -> dict:
+    return {sheet: {"PatientID": pid, "n_slices": n, "seg_status": status, "values": []}
+            for sheet in TOTAL_SHEETS}
+
+
+# 전체 볼륨 세그멘테이션 결과(vol)를 aec_total과 같은 슬라이스 순서(InstanceNumber 오름차순)의 total 행으로 바꾼다.
+def _total_rows_from_vol(pid: int, vol: dict, by_inst: list, k_to_slice: list) -> dict:
+    n = len(by_inst)
+    pos = {r["file"]: i for i, r in enumerate(by_inst)}
+    out = {}
+    r2 = lambda key, k: round(float(vol[key][k]), 2)
+    for sheet, key in TOTAL_SHEETS.items():
+        arr = [np.nan] * n
+        for k, sl in enumerate(k_to_slice):
+            if sl is not None and k < len(vol[key or "NAMA_slices"]):
+                arr[pos[sl["file"]]] = (round(r2("NAMA_slices", k) + r2("LAMA_slices", k) + r2("IMATA_slices", k), 2)
+                                        if key is None else r2(key, k))
+        out[sheet] = {"PatientID": pid, "n_slices": n, "seg_status": "ok", "values": arr}
+    return out
+
+
+# 이미 처리된 환자의 total만 채울 때: 볼륨을 읽어 스캔 전체에 tissue_4_types를 한 번 돌린다.
+def compute_total_rows(pid: int, series_dir: str, tmp_dir: str) -> dict:
+    try:
+        loaded = _load_volume(series_dir)
+        if loaded is None:
+            return _empty_total_rows(pid, None, "volume_load_failed")
+        img, by_inst, k_to_slice = loaded
+        vol = compute_body_composition(img, 0, int(img.GetSize()[2]) - 1, tmp_dir, pid)
+        if vol["seg_status"] != "ok":
+            return _empty_total_rows(pid, len(by_inst), vol["seg_status"])
+        return _total_rows_from_vol(pid, vol, by_inst, k_to_slice)
+    except Exception as e:
+        return _empty_total_rows(pid, None, f"error:{type(e).__name__}:{e}")
+
+
+# 기존 total 시트(o)에 새 행(new_rows)을 합친다. 컬럼은 {접두사}_1..n.
+def _merge_total(o, new_rows: list | None, prefix: str):
+    if not new_rows and o is None:
+        return None
+    flat = []
+    for r in (new_rows or []):
+        d = {c: r.get(c) for c in TOTAL_META}
+        d.update({f"{prefix}_{i + 1}": v for i, v in enumerate(r["values"])})
+        flat.append(d)
+    n_old = sum(1 for c in (o.columns if o is not None else []) if str(c).startswith(prefix + "_"))
+    n_new = max((len(r["values"]) for r in (new_rows or [])), default=0)
+    cols = TOTAL_META + [f"{prefix}_{i + 1}" for i in range(max(n_old, n_new))]
+    nt = pd.DataFrame(flat).reindex(columns=cols) if flat else None
+    t = pd.concat([o, nt], ignore_index=True) if (o is not None and nt is not None) else (o if nt is None else nt)
+    t = t.drop_duplicates(subset=["PatientID"], keep="first").sort_values("PatientID").reset_index(drop=True)
+    last = max((i + 1 for i, c in enumerate(cols[len(TOTAL_META):]) if t[c].notna().any()), default=0)
+    return t.reindex(columns=TOTAL_META + cols[len(TOTAL_META):][:last])   # 값이 있는 마지막 슬라이스까지만
+
+
+# landmarks의 k(볼륨 순서, 0부터)·instance(InstanceNumber, 시작값/간격이 시리즈마다 다름)를 aec_total·*_total
+# 시트의 컬럼 번호(InstanceNumber 오름차순 1..n)로 바꾼다. k와 instance의 증가 방향이 반대면 n-k, 같으면 k+1.
+def _slice_numbers(r) -> dict:
+    pts = [(r[f"{b}_k"], r[f"{b}_instance"]) for b in ALL_ANCHORS
+           if f"{b}_k" in r and pd.notna(r[f"{b}_k"]) and pd.notna(r.get(f"{b}_instance"))]
+    rev = True   # 기본: 대부분(강남 100%, 신촌 99.4%) 볼륨 순서와 InstanceNumber 순서가 반대
+    for (k1, i1), (k2, i2) in zip(pts, pts[1:]):
+        if k1 != k2 and i1 != i2:
+            rev = (k1 - k2) * (i1 - i2) < 0
+            break
+    out = {}
+    for a in ALL_ANCHORS:
+        k = r.get(f"{a}_k")
+        st = r.get(f"{a}_status")
+        if st is not None and not pd.isna(st) and st != "ok":
+            k = np.nan   # truncated(스캔 끝에 걸린 liver_dome, 두덩뼈 아래 여유가 없는 경우)/missing은 번호를 비워 둔다
+        out[f"{a}_slice"] = (pd.NA if pd.isna(k) or pd.isna(r.get("n_slices"))
+                             else int(r["n_slices"] - k) if rev else int(k + 1))
+    return out
+
+
+# landmarks 시트에 남기는 메타 컬럼(원래 컬럼 순서의 앞부분). 그 뒤로는 12개 anchor의 슬라이스 번호만 둔다.
+LANDMARK_META = ["PatientID", "series_description", "manufacturer_model", "n_slices", "seg_status",
+                 "direction_fixed", "multi_series_in_folder"]
 
 SHEETS = {"landmarks": "landmarks", "bodycomp": "body_composition",
           "aec_total": "aec_total", "aec_landmark": "aec_landmark"}
@@ -662,12 +807,59 @@ def _read_sheets(path: str) -> dict:
         return {}
 
 
-def _write_all(path: str, rows: list[dict], bc_rows: list[dict],
-               aec_t: list[dict], aec_m: list[dict], site: str | None = None) -> None:
-    """landmarks / body_composition / aec_total / aec_landmark 네 시트를 한 파일에
-    한 번에 저장한다. 기존 행은 보존하고 신규만 append하며, 중복은 기존 값을 유지한다
+# 결과 파일(landmark.xlsx)에 여러 프로세스가 동시에 쓰면 "읽고-합치고-쓰기"가 서로의 결과를 덮어쓴다.
+# 프로세스 간 배타 잠금(lock 파일)을 잡고 그 구간에서만 읽기/쓰기를 한다. 10분 넘은 잠금은 죽은 프로세스의 것으로 본다.
+# Windows에서는 다른 프로세스(엑셀, 읽기 스크립트, 백신 등)가 대상 파일을 열고 있으면 os.replace가 PermissionError로 실패한다.
+# 열려 있는 동안만 잠깐 기다렸다가 다시 시도한다(최대 약 2분).
+def _replace_retry(tmp: str, path: str, tries: int = 120, delay: float = 1.0) -> None:
+    for i in range(tries):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(delay)
+
+
+class _xlsx_lock:
+    def __init__(self, path: str):
+        self.lock = path + ".lock"
+
+    def __enter__(self):
+        while True:
+            try:
+                self.fd = os.open(self.lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                return self
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(self.lock) > 600:
+                        os.remove(self.lock)
+                        continue
+                except OSError:
+                    pass
+                time.sleep(1)
+
+    def __exit__(self, *exc):
+        os.close(self.fd)
+        try:
+            os.remove(self.lock)
+        except OSError:
+            pass
+
+
+def _write_all(path: str, *args, **kwargs) -> None:
+    with _xlsx_lock(path):
+        _write_all_locked(path, *args, **kwargs)
+
+
+def _write_all_locked(path: str, rows: list[dict], bc_rows: list[dict],
+               aec_t: list[dict], aec_m: list[dict], site: str | None = None,
+               total: dict | None = None) -> None:
+    """landmarks / aec_total / *_total(체성분 5개) 시트를 한 파일에 한 번에 저장한다
+    (body_composition·aec_landmark 시트는 total 시트와 landmarks로 대체돼 더 쓰지 않는다). 기존 행은 보존하고 신규만 append하며, 중복은 기존 값을 유지한다
     (시트마다 따로 저장하면 환자 1명당 파일을 세 번 열고 쓰게 된다)."""
-    if not (rows or bc_rows or aec_t or aec_m):
+    if not (rows or bc_rows or aec_t or aec_m or total):
         return
     old = _read_sheets(path)
 
@@ -681,19 +873,22 @@ def _write_all(path: str, rows: list[dict], bc_rows: list[dict],
 
     lm = merge("landmarks", rows, ["PatientID"])
     if lm is not None:
-        lm["series_description"] = lm["series_description"].map(_clean_ws)
+        if "series_description" in lm.columns:
+            lm["series_description"] = lm["series_description"].map(_clean_ws)
         # Excel에서 TRUE/FALSE는 숫자로 집계·필터하기 불편해 0/1로 저장한다(결측은 유지).
         for col in ("direction_fixed", "vertebra_order_anomaly",
                     "hip_hardware_suspected", "liver_below_T10"):
             if col in lm.columns:
                 lm[col] = lm[col].map(lambda v: v if pd.isna(v) else int(bool(v))).astype("Int64")
         lm = lm.sort_values("PatientID").reset_index(drop=True)
-
-    bc = merge("bodycomp", bc_rows, ["PatientID", "anchor"])
-    if bc is not None:
-        bc["anchor"] = pd.Categorical(bc["anchor"], categories=ANCHOR_ORDER, ordered=True)
-        bc = bc.sort_values(["PatientID", "anchor"]).reset_index(drop=True)
-        bc["anchor"] = bc["anchor"].astype(str)
+        # landmarks 시트는 multi_series_in_folder까지의 메타 컬럼과 12개 anchor의 슬라이스 번호({anchor}_slice)만 남긴다.
+        # {anchor}_slice는 1부터 시작하는 순서 번호로 aec_total/*_total 시트의 컬럼 번호와 같다.
+        # k/instance가 있는 행(새 행, 이전 형식의 기존 행)은 여기서 계산하고, 이미 번호만 남은 기존 행은 값을 유지한다.
+        sl = pd.DataFrame([_slice_numbers(r) for _, r in lm.iterrows()], index=lm.index).astype("Int64")
+        old_sl = lm[[c for c in sl.columns if c in lm.columns]].astype("Int64")
+        sl = sl.combine_first(old_sl)
+        lm = pd.concat([lm[[c for c in LANDMARK_META if c in lm.columns]],
+                        sl[[f"{a}_slice" for a in ANCHOR_ORDER]]], axis=1)   # liver_dome부터 inferior_pubic_margin 순
 
     # aec_total은 aec_full 리스트를 aec_1..aec_n 컬럼으로 펼친다.
     meta = ["PatientID", "series_description", "manufacturer_model",
@@ -712,21 +907,34 @@ def _write_all(path: str, rows: list[dict], bc_rows: list[dict],
     if flat or o_t is not None:
         cols = meta + [f"aec_{i + 1}" for i in range(max(n_old, n_new))]
         nt = pd.DataFrame(flat).reindex(columns=cols) if flat else None
+        if o_t is not None and nt is not None:
+            # 사전 저장한 aec_only 행은 전체 처리 결과가 들어오면 그 행으로 교체한다(그 외 중복은 기존 값 유지).
+            full_new = set(nt.loc[nt["seg_status"] != "aec_only", "PatientID"])
+            o_t = o_t[~((o_t["seg_status"] == "aec_only") & o_t["PatientID"].isin(full_new))]
         at = pd.concat([o_t, nt], ignore_index=True) if (o_t is not None and nt is not None) else (o_t if nt is None else nt)
         at = at.drop_duplicates(subset=["PatientID"], keep="first").sort_values("PatientID").reset_index(drop=True)
+        at["series_description"] = at["series_description"].map(_clean_ws)   # landmarks 시트와 동일하게 정리
 
-    am = merge("aec_landmark", aec_m, ["PatientID"])
-    if am is not None:
-        am = am.sort_values("PatientID").reset_index(drop=True)
+    # 이전 형식(NAMA/LAMA/IMATA_total 3개)이면 합산한 TAMA_total을 만든다. 이전 3개 시트는 저장 때 빠진다.
+    if old.get("TAMA_total") is None and all(f"{t}_total" in old for t in ("NAMA", "LAMA", "IMATA")):
+        n_, l_, i_ = (old[f"{t}_total"].set_index("PatientID") for t in ("NAMA", "LAMA", "IMATA"))
+        tama = n_[["n_slices", "seg_status"]].copy()
+        for c in [c for c in n_.columns if str(c).startswith("NAMA_")]:
+            i = str(c).split("_")[1]
+            tama[f"TAMA_{i}"] = (n_[c] + l_[f"LAMA_{i}"].reindex(n_.index) + i_[f"IMATA_{i}"].reindex(n_.index)).round(2)
+        old["TAMA_total"] = tama.reset_index()
+
+    totals = {sheet: _merge_total(old.get(sheet), (total or {}).get(sheet), sheet.split("_")[0])
+              for sheet in TOTAL_SHEETS}
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp.xlsx"
     with pd.ExcelWriter(tmp, engine="openpyxl") as w:
-        for df, sheet in ((lm, SHEETS["landmarks"]), (bc, SHEETS["bodycomp"]),
-                          (at, SHEETS["aec_total"]), (am, SHEETS["aec_landmark"])):
+        for df, sheet in ((lm, SHEETS["landmarks"]), (at, SHEETS["aec_total"]),
+                          *((totals[n], n) for n in TOTAL_SHEETS)):
             if df is not None:
                 df.to_excel(w, sheet_name=sheet, index=False)
-    os.replace(tmp, path)
+    _replace_retry(tmp, path)
 
     # 본 결과 파일(site 지정)이 갱신될 때마다 full/filtered도 같이 갱신한다. 실패해도 본 처리는 계속한다.
     if site:
@@ -734,8 +942,8 @@ def _write_all(path: str, rows: list[dict], bc_rows: list[dict],
             import merge_metadata
             merge_metadata.write_full_and_filtered(
                 site, SITE_SLUG[site],
-                {SHEETS[k]: d for k, d in (("landmarks", lm), ("bodycomp", bc),
-                                           ("aec_total", at), ("aec_landmark", am)) if d is not None})
+                {SHEETS[k]: d for k, d in (("landmarks", lm), ("aec_total", at)) if d is not None},
+                filtered_extra={n: d for n, d in totals.items() if d is not None})
         except Exception as e:
             tqdm.write(f"  full/filtered 갱신 실패 ({type(e).__name__}: {e})")
 
@@ -756,12 +964,13 @@ def _save_checkpoint(path: str, attempted: set[int]) -> None:
 
 
 def _collect_failed(paths: dict, check_paths: dict) -> set[int]:
-    """기존 결과에서 seg_status가 ok가 아닌 PatientID를 모은다(재처리 대상)."""
+    """기존 결과에서 실패한 PatientID를 모은다(재처리 대상). partial은 촬영 범위 때문에 일부 anchor가 없는 정상 결과라
+    다시 계산해도 같으므로 제외한다(재시작할 때마다 지우고 다시 돌리면 같은 결과를 반복 계산하게 된다)."""
     failed: set[int] = set()
     for path in {check_paths["out"], paths["out"]}:
         d = _read_sheets(path).get(SHEETS["landmarks"])
         if d is not None and len(d):
-            failed |= set(d[d["seg_status"].astype(str) != "ok"]["PatientID"].astype(int))
+            failed |= set(d[~d["seg_status"].astype(str).isin(["ok", "partial"])]["PatientID"].astype(int))
     return failed
 
 
@@ -771,16 +980,17 @@ def _drop_pids(paths: dict, pids: set[int]) -> None:
     if not pids:
         return
     path = paths["out"]
-    sheets = _read_sheets(path)
-    if not sheets:
-        return
-    tmp = path + ".tmp.xlsx"
-    with pd.ExcelWriter(tmp, engine="openpyxl") as w:
-        for name, d in sheets.items():
-            if "PatientID" in d.columns:
-                d = d[~d["PatientID"].astype("Int64").isin(pids)]
-            d.to_excel(w, sheet_name=name, index=False)
-    os.replace(tmp, path)
+    with _xlsx_lock(path):
+        sheets = _read_sheets(path)
+        if not sheets:
+            return
+        tmp = path + ".tmp.xlsx"
+        with pd.ExcelWriter(tmp, engine="openpyxl") as w:
+            for name, d in sheets.items():
+                if "PatientID" in d.columns:
+                    d = d[~d["PatientID"].astype("Int64").isin(pids)]
+                d.to_excel(w, sheet_name=name, index=False)
+        _replace_retry(tmp, path)
 
 
 def _shard_filter(pid: int, shard_id: int, num_shards: int) -> bool:
@@ -823,6 +1033,8 @@ def run_site(site: str, shard_id: int = 0, num_shards: int = 1,
              retry_failed: bool = False):
     sharded = num_shards > 1
     paths = site_paths(site, shard=shard_id if sharded else None)
+    if sharded:
+        paths["out"] = site_paths(site)["out"]   # 샤드끼리 같은 결과 파일을 잠금으로 공유한다(체크포인트만 샤드별)
     if limit is not None or pids:
         # 샘플 모드: 본 결과 파일/리포트를 건드리지 않도록 _sample 경로로 분리한다.
         for key in ("out", "checkpoint"):
@@ -885,21 +1097,148 @@ def run_site(site: str, shard_id: int = 0, num_shards: int = 1,
         pending_pids = [pid for pid in all_pids if pid not in done_pids]
         if sharded:
             pending_pids = [pid for pid in pending_pids if _shard_filter(pid, shard_id, num_shards)]
-        # PatientID 큰 쪽부터 역순으로 처리하고, 재처리 대상(ok 아님)은 맨 마지막에 둔다.
-        pending_pids = ([p for p in reversed(pending_pids) if p not in retry_pids]
-                        + [p for p in reversed(pending_pids) if p in retry_pids])
+        # PatientID 오름차순으로 처리하고, 재처리 대상(ok 아님)은 맨 마지막에 둔다.
+        pending_pids = ([p for p in pending_pids if p not in retry_pids]
+                        + [p for p in pending_pids if p in retry_pids])
 
     print(f"[{tag}] 대상 {len(all_pids)}명(DICOM 폴더 전체)  |  완료 {len(done_pids)}명  |  "
           f"처리 예정(이 shard) {len(pending_pids)}명")
+
+    def _series_dir(pid: int) -> str | None:
+        """환자 폴더에서 분석할 시리즈 폴더를 고른다(본 처리와 같은 규칙)."""
+        patient_dir = os.path.join(paths["dicom_base"], str(pid))
+        subs = [s for s in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, s))]
+        if not subs:
+            return None
+        folder = subs[0] if len(subs) == 1 else pick_series_folder(pid, patient_dir, subs)
+        if folder is None and series_hint.get(pid) is not None:
+            folder = find_series_folder(patient_dir, series_hint[pid])
+        return os.path.join(patient_dir, folder) if folder else None
+
+    # total은 filtered.xlsx 조건(metadata 완비 + seg_status ok + aec_flat False)을 만족하는 환자만 계산한다.
+    meta_path = rf"{DATA_DIR}\{site}\metadata\{SITE_SLUG[site]}_patient_metadata.xlsx"
+    if os.path.exists(meta_path):
+        m = pd.read_excel(meta_path)
+        ok = m[["Height", "Weight", "BMI"]].notna().all(axis=1)
+        if "hw_implausible" in m.columns:
+            ok &= m["hw_implausible"] == 0
+        meta_ok = set(m.loc[ok, "PatientID"].astype(int))
+    else:
+        print(f"[{tag}] {meta_path} 없음 - metadata 조건 없이 진행")
+        meta_ok = None
+
+    def _in_filtered(pid: int, status, aec_flat) -> bool:
+        return (status == "ok" and aec_flat is False
+                and (meta_ok is None or pid in meta_ok))
+
+    # AEC 사전 저장: 새 환자의 aec_total 행(seg_status=aec_only)을 DICOM 헤더만 읽어 백그라운드 스레드로 채운다.
+    # 세그멘테이션은 기다리지 않고 바로 시작하고, 다음 환자는 그 시점까지 flat 여부를 알아낸 환자 중
+    # 비flat + metadata 완비(=filtered 후보)를 먼저 고른다. 아직 모르는 환자는 그다음, flat/metadata 불완전은 맨 뒤.
+    # 전체 처리 결과가 저장되면 aec_only 행은 그 행으로 교체된다.
+    order_iter = None
+    _start_scan = lambda: None   # 사전 저장 시작 함수. total 보충이 끝난 뒤에 호출한다(둘 다 디스크를 많이 써서 겹치면 서로 느려진다).
+    if pending_pids and not (limit is not None or pids):
+        at_sheet = _read_sheets(paths["out"]).get(SHEETS["aec_total"])
+        known = {} if at_sheet is None else dict(zip(at_sheet["PatientID"].astype(int), at_sheet["aec_flat"]))
+        scan = [p for p in pending_pids if p not in known]
+
+        def _aec_only_row(pid: int):
+            try:
+                sd = _series_dir(pid)
+                by = read_slices(sd) if sd else None
+                if not by:
+                    return None
+                row = {"PatientID": pid, "series_description": os.path.basename(sd), "manufacturer_model": None,
+                       "n_slices": len(by), "seg_status": "aec_only"}
+                return _aec_rows(pid, row, by)[0]
+            except Exception:
+                return None
+
+        def _scan_bg():
+            import threading  # noqa: F401
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            buf: list = []; done = 0
+            try:
+                with ThreadPoolExecutor(max_workers=4) as ex:   # 디스크(HDD) 위주라 스레드를 많이 늘려도 빨라지지 않는다
+                    futs = [ex.submit(_aec_only_row, p) for p in scan]
+                    for fu in as_completed(futs):               # 완료되는 순서대로 센다
+                        t = fu.result(); done += 1
+                        if t is not None:
+                            buf.append(t); known[t["PatientID"]] = t["aec_flat"]
+                        if len(buf) >= 200 or done == len(scan):
+                            if buf:
+                                _write_all(paths["out"], [], [], buf, [])
+                                buf = []
+                                tqdm.write(f"  [{tag}] AEC 사전 저장 {done}/{len(scan)}")
+            except Exception as e:
+                tqdm.write(f"  [{tag}] AEC 사전 저장 중단 ({type(e).__name__}: {e})")
+
+        def _start_scan():
+            if scan:
+                import threading
+                threading.Thread(target=_scan_bg, daemon=True).start()
+
+        is_cand = lambda p: str(known.get(p)).lower() == "false" and (meta_ok is None or p in meta_ok)
+
+        def _order():
+            rem = [p for p in pending_pids if p not in retry_pids]
+            tier = lambda p: 1 if p not in known else (0 if is_cand(p) else 2)
+            while rem:
+                best = min(rem, key=lambda p: (tier(p), p))
+                rem.remove(best)
+                yield best
+            yield from [p for p in pending_pids if p in retry_pids]
+
+        order_iter = _order()
+        print(f"[{tag}] 새 환자 {len(pending_pids) - len(retry_pids)}명: AEC 사전 저장 대상 {len(scan)}명 "
+              f"(total 보충이 끝난 뒤 백그라운드로 시작, 비flat+metadata 완비 환자부터 처리)")
+    if order_iter is None:
+        order_iter = iter(pending_pids)
+
+    # 이미 landmark가 끝난 환자 중 total 시트가 없는 환자의 total만 먼저 채운다(샘플/샤드 모드 제외).
+    if not (limit is not None or pids) and shard_id == 0:   # total 보충은 shard 0(또는 단일 실행)만
+        sheets_now = _read_sheets(paths["out"])
+        lm_now = sheets_now.get(SHEETS["landmarks"])
+        have_total = set(sheets_now.get("VAT_total", pd.DataFrame({"PatientID": []}))["PatientID"].astype(int))
+        at_now = sheets_now.get(SHEETS["aec_total"])
+        flat_false = (set() if at_now is None else
+                      set(at_now.loc[at_now["aec_flat"].astype(str).str.lower() == "false", "PatientID"].astype(int)))
+        todo = ([] if lm_now is None else
+                sorted(int(x) for x in lm_now[lm_now["seg_status"] == "ok"]["PatientID"]
+                       if int(x) not in have_total and int(x) in flat_false
+                       and (meta_ok is None or int(x) in meta_ok)))
+        todo = [p for p in todo if p not in retry_pids]   # 오름차순
+        if todo:
+            print(f"[{tag}] total 시트 보충 대상 {len(todo)}명")
+            tot_buf: dict = {sheet: [] for sheet in TOTAL_SHEETS}
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                for i, pid in enumerate(tqdm(todo, desc=f"{tag} total 보충"), 1):
+                    sd = _series_dir(pid)
+                    res = compute_total_rows(pid, sd, tmp_dir) if sd else _empty_total_rows(pid, None, "no_series")
+                    for sheet, r in res.items():
+                        tot_buf[sheet].append(r)
+                    if i % TOTAL_BACKFILL_BATCH == 0 or i == len(todo):
+                        _write_all(paths["out"], [], [], [], [], site=site, total=tot_buf)
+                        tot_buf = {sheet: [] for sheet in TOTAL_SHEETS}
+                        tqdm.write(f"  [{tag} total 저장 | {i}/{len(todo)}]")
+            # 보충이 끝나면 기존 리포트의 체성분 수치를 total 시트 값으로 맞춘다(이미지 글자만 교체, 여러 번 실행해도 같음).
+            try:
+                import update_report_values
+                update_report_values.run_site(site)
+            except Exception as e:
+                tqdm.write(f"  리포트 수치 갱신 실패 ({type(e).__name__}: {e})")
+
+    _start_scan()   # total 보충 이후(보충이 없으면 바로) AEC 사전 저장을 백그라운드로 시작
 
     rows: list[dict] = []
     bc_rows_all: list[dict] = []
     aec_t_all: list[dict] = []
     aec_m_all: list[dict] = []
+    tot_all: dict = {sheet: [] for sheet in TOTAL_SHEETS}
     n_processed = 0
     if pending_pids:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            for pid in tqdm(pending_pids, total=len(pending_pids), desc=f"{tag} 처리"):
+            for pid in tqdm(order_iter, total=len(pending_pids), desc=f"{tag} 처리"):
                 patient_dir = os.path.join(paths["dicom_base"], str(pid))
                 subs = [s for s in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, s))]
                 if not subs:
@@ -928,7 +1267,9 @@ def run_site(site: str, shard_id: int = 0, num_shards: int = 1,
                         report_path = os.path.join(paths["report_dir"], f"{pid}.png")
                         try:
                             row, bc_rows, aec_t, aec_m = process_patient(
-                                pid, series_dir, tmp_dir, report_path=report_path)
+                                pid, series_dir, tmp_dir, report_path=report_path, want_total=_in_filtered)
+                            for sheet, r in (row.pop("_total", None) or {}).items():
+                                tot_all[sheet].append(r)
                         except Exception as e:
                             row = _empty_landmark_row(pid, None, None, f"error:{type(e).__name__}:{e}")
                             bc_rows = _empty_bc_rows(pid, row)
@@ -944,7 +1285,9 @@ def run_site(site: str, shard_id: int = 0, num_shards: int = 1,
                 n_processed += 1
                 if n_processed % BATCH_SIZE == 0 or n_processed == len(pending_pids):
                     _write_all(paths["out"], rows, bc_rows_all, aec_t_all, aec_m_all,
-                               site=None if (sharded or limit is not None or pids) else site)
+                               site=None if (limit is not None or pids) else site,
+                               total=tot_all)
+                    tot_all = {sheet: [] for sheet in TOTAL_SHEETS}
                     _save_checkpoint(paths["checkpoint"], attempted)
                     rows = []
                     bc_rows_all = []
@@ -994,11 +1337,22 @@ def summarize_qc(sites: list[str], out_path: str) -> None:
     frames = []
     for site in sites:
         p = site_paths(site)
-        df = _read_sheets(p["out"]).get(SHEETS["landmarks"])
+        sheets = _read_sheets(p["out"])
+        df = sheets.get(SHEETS["landmarks"])
         if df is None or not len(df):
             print(f"[{site}] {p['out']} 없음 — QC 요약에서 제외")
             continue
         df = df.copy()
+        # landmarks 시트에는 번호만 남아, 제조사는 aec_total에서 가져오고 anchor 검출 여부는 번호 유무로 판정한다.
+        at_q = sheets.get(SHEETS["aec_total"])
+        if "manufacturer_model" not in df.columns and at_q is not None:
+            df = df.merge(at_q[["PatientID", "manufacturer_model"]], on="PatientID", how="left")
+        for a in ALL_ANCHORS:
+            if f"{a}_status" not in df.columns and f"{a}_slice" in df.columns:
+                df[f"{a}_status"] = np.where(df[f"{a}_slice"].notna(), "ok", "not_found")
+        for flag in ("vertebra_order_anomaly", "hip_hardware_suspected"):
+            if flag not in df.columns:
+                df[flag] = False
         df["site"] = site
         frames.append(df)
     if not frames:
@@ -1160,20 +1514,23 @@ def _self_test() -> None:
     import tempfile as _tf
     with _tf.TemporaryDirectory() as d:
         out_path = os.path.join(d, "test.xlsx")
-        _write_all(out_path, [], [{"PatientID": 1, "anchor": "L3_center", "anchor_instance": 50, "VAT_sum_cm2": 10.0}], [], [])
-        _write_all(out_path, [], [{"PatientID": 1, "anchor": "L3_center", "anchor_instance": 50, "VAT_sum_cm2": 999.0},
-                                  {"PatientID": 1, "anchor": "L1_center", "anchor_instance": 20, "VAT_sum_cm2": 20.0}], [], [])
-        result = pd.read_excel(out_path, sheet_name=SHEETS["bodycomp"])
-        assert len(result) == 2, "중복 (PatientID, anchor)는 기존 값을 유지해야 함"
-        assert float(result.loc[result["anchor"] == "L3_center", "VAT_sum_cm2"].iloc[0]) == 10.0
-        assert list(result["anchor"]) == ["L1_center", "L3_center"], "ANCHOR_ORDER 순으로 정렬돼야 함"
-
-        # 시트 4종이 한 파일에 공존하고, 기존 시트가 보존되는지
-        _write_all(out_path, [{"PatientID": 1, "series_description": "x", "seg_status": "ok"}], [],
-                   [{"PatientID": 1, "aec_full": [1.0, 2.0]}], [{"PatientID": 1, "L3_center_aec": 2.0}])
-        got = set(pd.read_excel(out_path, sheet_name=None).keys())
-        assert got == set(SHEETS.values()), f"시트 구성이 다름: {got}"
-        assert len(pd.read_excel(out_path, sheet_name=SHEETS["bodycomp"])) == 2, "기존 시트 보존"
+        # landmarks / aec_total 두 시트가 공존하고, 중복 PatientID는 기존 값을 유지하며, 기존 시트가 보존되는지
+        _write_all(out_path, [{"PatientID": 1, "seg_status": "ok", "n_slices": 100,
+                               "L3_center_k": 10, "L3_center_instance": 50}], [],
+                   [{"PatientID": 1, "aec_full": [1.0, 2.0]}], [])
+        _write_all(out_path, [{"PatientID": 1, "seg_status": "failed"},
+                              {"PatientID": 0, "seg_status": "ok"}], [], [], [])
+        sheets = pd.read_excel(out_path, sheet_name=None)
+        assert set(sheets) == {"landmarks", "aec_total"}, f"시트 구성이 다름: {set(sheets)}"
+        lm = sheets["landmarks"]
+        assert list(lm["PatientID"]) == [0, 1], "PatientID 오름차순이어야 함"
+        assert lm.loc[lm["PatientID"] == 1, "seg_status"].iloc[0] == "ok", "중복은 기존 값을 유지해야 함"
+        assert list(lm.columns) == ["PatientID", "n_slices", "seg_status"] + [f"{a}_slice" for a in ANCHOR_ORDER]
+        assert lm.loc[lm["PatientID"] == 1, "L3_center_slice"].iloc[0] == 90, "n_slices - k (방향 기본값)"
+        _write_all(out_path, [], [], [], [])   # 번호만 남은 기존 행의 슬라이스 번호가 재저장 후에도 유지돼야 함
+        _write_all(out_path, [{"PatientID": 5, "seg_status": "ok"}], [], [], [])
+        assert pd.read_excel(out_path, sheet_name="landmarks").set_index("PatientID").at[1, "L3_center_slice"] == 90
+        assert len(sheets["aec_total"]) == 1, "기존 aec_total 시트 보존"
 
         fake = np.zeros((20, 20, 1))
         mask = np.zeros((20, 20, 1), dtype=bool)
@@ -1230,14 +1587,26 @@ def main():
 
     # 인자 없이 그냥 실행해도 중단된 지점부터 이어서 돌고, 실패 건(seg_status!=ok)도
     # 자동으로 먼저 재시도한다 — --site/--retry-failed를 매번 챙길 필요가 없게 하기 위함.
-    for site in sites:
-        run_site(site, shard_id=args.shard, num_shards=args.num_shards,
-                 limit=args.limit, seed=args.seed,
-                 pids=[int(x) for x in args.pids.split(",")] if args.pids else None,
-                 retry_failed=True)
+    # 예외로 끝나면 원인을 로그 파일에 남기고 프로세스를 바로 종료한다. 사전 저장 스레드(ThreadPoolExecutor)가 남아 있으면
+    # 메인이 죽어도 프로세스가 살아 있어 감시가 정상으로 오인하므로, 종료까지 확실히 한다.
+    try:
+        for site in sites:
+            run_site(site, shard_id=args.shard, num_shards=args.num_shards,
+                     limit=args.limit, seed=args.seed,
+                     pids=[int(x) for x in args.pids.split(",")] if args.pids else None,
+                     retry_failed=True)
 
-    if args.num_shards <= 1 and args.limit is None and not args.pids:
-        summarize_qc(sites, qc_out)
+        if args.num_shards <= 1 and args.limit is None and not args.pids:
+            summarize_qc(sites, qc_out)
+    except BaseException:
+        import traceback
+        msg = f"{time.strftime('%m-%d %H:%M:%S')} {sys.argv[1:]}\n{traceback.format_exc()}\n"
+        with open(rf"{DATA_DIR}\check_landmarks_error.log", "a", encoding="utf-8") as f:
+            f.write(msg)
+        print(msg, flush=True)
+        os._exit(1)
+    sys.stdout.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":

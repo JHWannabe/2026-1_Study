@@ -1,0 +1,26 @@
+10-02 19:30:45 ['--site', '신촌']
+Traceback (most recent call last):
+  File "C:\Users\jhjun\Desktop\2026-1_Study\연구코드\code\data\aec\check_landmarks.py", line 1578, in main
+    run_site(site, shard_id=args.shard, num_shards=args.num_shards,
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+             limit=args.limit, seed=args.seed,
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+             pids=[int(x) for x in args.pids.split(",")] if args.pids else None,
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+             retry_failed=True)
+             ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jhjun\Desktop\2026-1_Study\연구코드\code\data\aec\check_landmarks.py", line 1271, in run_site
+    _write_all(paths["out"], rows, bc_rows_all, aec_t_all, aec_m_all,
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               site=None if (limit is not None or pids) else site,
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               total=tot_all)
+               ^^^^^^^^^^^^^^
+  File "C:\Users\jhjun\Desktop\2026-1_Study\연구코드\code\data\aec\check_landmarks.py", line 840, in _write_all
+    _write_all_locked(path, *args, **kwargs)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jhjun\Desktop\2026-1_Study\연구코드\code\data\aec\check_landmarks.py", line 924, in _write_all_locked
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] 액세스가 거부되었습니다: 'C:\\Users\\jhjun\\Desktop\\2026-1_Study\\연구코드\\data\\신촌\\landmark\\sinchon_landmark.xlsx.tmp.xlsx' -> 'C:\\Users\\jhjun\\Desktop\\2026-1_Study\\연구코드\\data\\신촌\\landmark\\sinchon_landmark.xlsx'
+

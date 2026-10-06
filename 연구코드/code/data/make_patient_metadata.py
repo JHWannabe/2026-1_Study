@@ -177,8 +177,10 @@ def pick_nearest(records: list[tuple], study_date) -> tuple:
     return records[0][1], records[0][2], None
 
 
-# 값이 생리학적 범위를 벗어나면 True (값은 그대로 두고 표시만 한다).
+# 키/몸무게/BMI가 결측이거나 값이 생리학적 범위를 벗어나면 True (값은 그대로 두고 표시만 한다).
 def implausible(h, w, age, bmi=None) -> bool:
+    if pd.isna(h) or pd.isna(w) or pd.isna(bmi):
+        return True
     r = _ranges(age)
     for v, (lo, hi) in ((h, r["height"]), (w, r["weight"]),
                         (age, AGE_RANGE), (bmi, r["bmi"])):
