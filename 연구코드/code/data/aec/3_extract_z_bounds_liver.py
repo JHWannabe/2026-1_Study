@@ -210,50 +210,6 @@ def save_slice_png(dcm_path: str, out_path: str) -> bool:
         return False
 
 
-def save_slice_png_with_seg(dcm_path: str, seg_masks: dict, out_path: str) -> bool:
-    try:
-        fig, ax = plt.subplots(figsize=(6, 6), dpi=150)
-        ax.imshow(_read_dicom_pixels(dcm_path), cmap="gray")
-        patches = []
-        for name, mask in seg_masks.items():
-            if mask is None or mask.sum() == 0:
-                continue
-            color = _SEG_COLORS.get(name, (0.0, 1.0, 0.0))
-            rgba  = np.zeros((*mask.shape, 4), dtype=np.float32)
-            rgba[mask > 0.5] = [*color, 0.45]
-            ax.imshow(rgba)
-            patches.append(mpatches.Patch(color=color, label=name, alpha=0.8))
-        if patches:
-            ax.legend(handles=patches, loc="lower right", fontsize=7,
-                      framealpha=0.6, edgecolor="white")
-        ax.axis("off")
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        plt.savefig(out_path, bbox_inches="tight", dpi=150, pad_inches=0)
-        plt.close(fig)
-        return True
-    except Exception:
-        plt.close("all")
-        return False
-
-
-def save_boundary_previews(pid_str: str, upper_dcm: str | None, bottom_dcm: str | None,
-                           upper_masks: dict | None = None, bottom_masks: dict | None = None,
-                           upper_dir: str = UPPER_DIR, bottom_dir: str = BOTTOM_DIR) -> None:
-    def _save(dcm_path: str, masks: dict | None, out_dir: str):
-        inst  = get_instance_number(dcm_path)
-        fname = f"{pid_str}_{inst}.png" if inst is not None else f"{pid_str}.png"
-        out   = os.path.join(out_dir, fname)
-        if masks:
-            if not save_slice_png_with_seg(dcm_path, masks, out):
-                tqdm.write(f"    [PNG] overlay 실패 → 단순 저장: {fname}")
-                save_slice_png(dcm_path, out)
-        else:
-            save_slice_png(dcm_path, out)
-
-    if upper_dcm:  _save(upper_dcm,  upper_masks,  upper_dir)
-    if bottom_dcm: _save(bottom_dcm, bottom_masks, bottom_dir)
-
-
 # ── 핵심 추출 (환자 1명) ──────────────────────────────────────────────────────
 
 def _empty_result() -> dict:
@@ -453,19 +409,6 @@ def extract_bounds(pid_str: str, tmp_dir: str, folder_map: dict,
         # PNG용 2D 슬라이스 추출 후 3D 볼륨 해제
         # liver_slice_2d = liver_vol[:, :, apex_k].T if liver_vol is not None and len(liver_k) > 0 else None
         del liver_vol
-        # bottom_masks = {
-        #     side: np.asarray(cast(Nifti1Image, nib.load(p)).dataobj[:, :, bottom_k]).T
-        #     for side in ("hip_left", "hip_right")
-        #     if os.path.exists(p := os.path.join(seg_dir, f"{side}.nii.gz"))
-        # }
-        # is_ok = result["seg_status"] == "ok"
-        # save_boundary_previews(
-        #     pid_str, upper_dcm, bottom_dcm,
-        #     upper_masks  = {"liver": liver_slice_2d} if liver_slice_2d is not None else {},
-        #     bottom_masks = bottom_masks,
-        #     upper_dir    = UPPER_DIR  if is_ok else MISSING_UPPER_DIR,
-        #     bottom_dir   = BOTTOM_DIR if is_ok else MISSING_BOTTOM_DIR,
-        # )
 
     except Exception as e:
         warnings.append(f"[ERROR] {type(e).__name__}: {e}")

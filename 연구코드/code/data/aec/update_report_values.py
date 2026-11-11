@@ -108,7 +108,8 @@ def run_site(site: str, limit: int | None = None) -> None:
     bak = rf"{DATA_DIR}\{site}\landmark\landmark_report_old_values_{date.today():%Y%m%d}"
     n = chg = same = fail = 0; fails = []
     for pid in tot["VAT"].index:
-        png = os.path.join(rep, f"{pid}.png")
+        png = next((q for q in (os.path.join(rep, k, str(pid), f"{pid}.png") for k in ("full", "partial"))
+                    if os.path.exists(q)), os.path.join(rep, f"{pid}.png"))   # 리포트는 full/partial/{pid}/ 아래
         if not os.path.exists(png) or pid not in lm.index or tot["VAT"].at[pid, "seg_status"] != "ok":
             continue
         values = {}

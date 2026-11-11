@@ -1,0 +1,42 @@
+﻿site,PatientID,series_description,manufacturer_model,n_slices,slice_thickness,ext_mm,dome_L3_mm,L3_fh_mm
+gangnam,4452225,2min-delay 3.0 B30f,Sensation 64,314,3.0,942.0,189.0,276.0
+gangnam,4991416,POST 5MM,LightSpeed VCT,82,5.0,410.0,140.0,140.0
+gangnam,5022329,,Sensation 64,426,3.0,1278.0,249.0,309.0
+gangnam,5121596,2min-delay 3.0 B30f,Sensation 64,330,3.0,990.0,246.0,285.0
+gangnam,5625574,2min-Delay 3.0 B30f,SOMATOM Definition AS+,332,3.0,996.0,204.0,255.0
+gangnam,5924943,,Sensation 64,332,3.0,996.0,213.0,270.0
+gangnam,8367607,Post Contrast 3.0 B30f,SOMATOM Definition AS+,138,3.0,414.0,171.0,135.0
+gangnam,8902746,,Sensation 64,405,3.0,1215.0,240.0,294.0
+gangnam,8929407,PORTAL,Revolution CT,181,2.5,452.5,187.5,132.5
+gangnam,9430117,Aorta 3.0 B30f,SOMATOM Definition AS+,350,3.0,1050.0,288.0,267.0
+gangnam,9512147,Body 3.0 Portal/70s/Axial.228 CE,Aquilion,228,3.0,684.0,264.0,285.0
+gangnam,9623536,2min-delay 3.0 B30f,Sensation 64,324,3.0,972.0,198.0,294.0
+gangnam,9722231,,SOMATOM Definition AS+,396,3.0,1188.0,267.0,330.0
+gangnam,9896772,portal CE 4.0 B40f,Sensation 64,156,4.0,624.0,224.0,240.0
+sinchon,1539988,Abd Pre 4.0 B30f,SOMATOM Definition AS+,184,4.0,736.0,332.0,244.0
+sinchon,1859865,7min delay 1mm,SOMATOM Definition Flash,670,1.0,670.0,272.0,244.0
+sinchon,1908993,7min delay 1.0 Br40 2,SOMATOM Force,744,1.0,744.0,290.0,259.0
+sinchon,1982746,7min delay 1.0 Br40 2,SOMATOM Force,685,1.0,685.0,233.0,250.0
+sinchon,2462472,7min delay 1mm,SOMATOM Definition Flash,755,1.0,755.0,267.0,267.0
+sinchon,2850370,Venous Phase 2.5 B10s_MPR,Emotion 6,424,2.5,1060.0,417.5,437.5
+sinchon,2983913,7min delay 1.0 Br40 2,SOMATOM Force,747,1.0,747.0,281.0,255.0
+sinchon,3240308,7min delay 1mm,SOMATOM Definition Flash,644,1.0,644.0,202.0,244.0
+sinchon,3538600,7min delay 1mm,SOMATOM Definition Flash,621,1.0,621.0,237.0,239.0
+sinchon,4026594,7min delay 1mm,SOMATOM Definition Flash,756,1.0,756.0,275.0,270.0
+sinchon,4157737,7min delay 1mm,SOMATOM Definition Flash,635,1.0,635.0,253.0,237.0
+sinchon,4403874,7min delay 1mm,SOMATOM Definition Flash,654,1.0,654.0,233.0,251.0
+sinchon,4840638,"CE 3/3mm I-3, iDose (3)",iCT 256,150,3.0,450.0,153.0,135.0
+sinchon,4972111,7min delay 1mm,SOMATOM Definition Flash,621,1.0,621.0,231.0,251.0
+sinchon,4976728,PRE,Brilliance 64,119,5.0,595.0,210.0,255.0
+sinchon,9570107,Body 3.0 FC18 AIDR 3D MILD,Aquilion ONE,231,3.0,693.0,201.0,240.0
+sinchon,9596708,CTA 5.0 CE,Aquilion ONE,292,5.0,1460.0,145.0,215.0
+sinchon,9597698,Venous Phase 5.0 I31f 1,SOMATOM Definition AS+,161,5.0,805.0,305.0,315.0
+sinchon,9625154,PVP,iCT 256,161,4.0,644.0,216.0,260.0
+sinchon,9630395,Venous Phase 5.0 I31f 1,SOMATOM Definition AS+,148,5.0,740.0,225.0,330.0
+sinchon,9687168,3min Delay 3.0 Br40 3,SOMATOM Force,237,3.0,711.0,264.0,291.0
+sinchon,9732300,Venous 5.0 I31f 1,SOMATOM Definition Edge,145,5.0,725.0,255.0,295.0
+sinchon,9766411,post,Discovery CT750 HD,285,5.0,1425.0,185.0,230.0
+sinchon,9836086,Venous phase 5.0 I31f 2,SOMATOM Definition Flash,160,5.0,800.0,245.0,305.0
+sinchon,9839288,Venous Phase 5.0 B30s,SOMATOM Scope,153,5.0,765.0,320.0,280.0
+sinchon,9851857,Venous Phase 3.0 B41s,SOMATOM Scope,192,3.0,576.0,228.0,240.0
+sinchon,9888740,PORTAL_PHASE 5.0 B50S,Spirit,143,5.0,715.0,265.0,310.0

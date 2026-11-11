@@ -8,7 +8,7 @@ from config import DATA_PATH, SEED, TEST_SIZE, SPLIT_TRAIN_ID_PATH, SPLIT_TEST_I
 
 def load_data():
     """임상 데이터(Age, Sex, Height, Weight)와 SMI, IMATA를 로드해 (X, smi, imata, sex, patient_ids) 반환.
-    레이블은 train split 이후 compute_thresholds() + make_labels()로 생성."""
+    레이블은 train split 이후 main_clinical_lr._make_labels()로 생성."""
     cols = ["PatientID", "PatientAge", "PatientSex", "Height", "Weight", "SMI", "IMATA",
             "kVp", "Manufacturer"]
     df = pd.read_excel(DATA_PATH, sheet_name="metadata")[cols].dropna().reset_index(drop=True)
@@ -42,20 +42,6 @@ def split_data(X, smi, imata, sex, patient_ids):
         X[cv_idx], smi[cv_idx], imata[cv_idx], sex[cv_idx],
         X[te_idx], smi[te_idx], imata[te_idx], sex[te_idx],
     )
-
-
-def compute_thresholds(smi_cv, sex_cv):
-    """Train set SMI의 성별별 하위 25th percentile을 임계값으로 반환."""
-    thresh_m = float(np.percentile(smi_cv[sex_cv == "M"], 25))
-    thresh_f = float(np.percentile(smi_cv[sex_cv == "F"], 25))
-    print(f"[compute_thresholds] M Q1={thresh_m:.4f}, F Q1={thresh_f:.4f}")
-    return thresh_m, thresh_f
-
-
-def make_labels(smi, sex, thresh_m, thresh_f):
-    """SMI ≤ 임계값이면 1(근감소증), 초과면 0."""
-    thresh = np.where(sex == "M", thresh_m, thresh_f)
-    return np.where(smi <= thresh, 1, 0).astype(np.int64)
 
 
 def _make_labels_tmp(smi, sex):

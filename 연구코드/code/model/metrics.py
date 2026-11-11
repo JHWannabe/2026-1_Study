@@ -27,22 +27,6 @@ def _placement_values(y_true, y_score):
     return auc, var, V10, V01
 
 
-def delong_test_vs_chance(y_true, y_score):
-    """AUC가 0.5(무작위 분류)보다 유의하게 높은지 검정.
-
-    Returns
-    -------
-    auc : float
-    z   : float  (z-statistic)
-    p   : float  (two-sided p-value)
-    """
-    auc, var, _, _ = _placement_values(y_true, y_score)
-    se = np.sqrt(max(var, 1e-12))
-    z = (auc - 0.5) / se
-    p = 2 * stats.norm.sf(abs(z))
-    return auc, z, p
-
-
 def delong_test_pair(y_true, y_score1, y_score2):
     """같은 피험자에서 얻은 두 AUC를 DeLong 방법으로 쌍 비교.
 

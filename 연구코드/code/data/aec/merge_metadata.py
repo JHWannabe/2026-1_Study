@@ -1,7 +1,7 @@
 """
 {slug}_landmark.xlsx(landmarks/body_composition/aec_total/aec_landmark 4개 시트)와
 {slug}_patient_metadata.xlsx(PatientSex/PatientAge/Height/Weight/BMI/hw_implausible)를
-합쳐 {slug}_landmark_full.xlsx(시트 5개)와 세 조건 충족 환자만 남긴 _filtered.xlsx로 저장한다. 강남/신촌 둘 다 처리한다.
+합쳐 {slug}_landmark_full.xlsx(시트 5개)와 조건 충족 환자만 남긴 _filtered.xlsx로 저장한다. 강남/신촌 둘 다 처리한다.
 
 [왜 landmark 파일에 직접 시트를 추가하지 않는가]
 landmark 파이프라인(check_landmarks.py)이 지금도 {slug}_landmark.xlsx에 계속 쓰고 있다.
@@ -47,19 +47,75 @@ def _roster_disease(site: str):
     return _roster_cache[site][1]
 
 
-# 세 조건(metadata 완비, seg_status==ok, aec_flat==False)에 HTN/DM/CKD 완비까지 모두 만족하는 PatientID만 남긴다.
+# raw/기저질환.xlsx에서 환자별 HTN/DM/CKD를 만든다: CT 촬영월 >= 해당 ICD-10 진단연월최소값이면 1(같은 달 포함), 아니면 0.
+_ICD = {"HTN": r"^I1[0-5]", "DM": r"^E1[0-4]", "CKD": r"^N18"}
+_HOSP = {"강남": "강남병원", "신촌": "신촌병원"}
+
+
+def _dx_labels(site: str) -> pd.DataFrame:
+    b = pd.read_excel(os.path.join(DATA_DIR, "raw", "기저질환.xlsx"))
+    b.columns = ["hosp", "hosp_nm", "id", "sex", "sex_nm", "birth", "visit", "dx", "dx_nm", "icd", "icd_nm", "dxm", "diff"]
+    b = b[b.hosp_nm == _HOSP[site]]
+    dxm = pd.to_datetime(b.dxm.astype(str)).dt.to_period("M")
+    # CT 촬영월 = DICOM StudyDate(extract_ct_study_dates.py가 raw/ct_study_dates.csv로 저장). 진료연월최소값은 첫 진료월이라 촬영월과 다르다.
+    c = pd.read_csv(os.path.join(DATA_DIR, "raw", "ct_study_dates.csv"), dtype=str)
+    c = c[c.site == site]
+    ct = pd.Series(pd.to_datetime(c.study_dates.str.split(",").str[0], format="%Y%m%d").dt.to_period("M").values,
+                   index=c.PatientID.astype(int).values)
+    out = {}
+    for k, pat in _ICD.items():
+        m = b.icd.astype(str).str.contains(pat)
+        first = dxm[m].groupby(b.id[m]).min()
+        out[k] = (ct.reindex(first.index) >= first).astype(int)
+    return pd.DataFrame(out)
+
+
+# 정리본의 기저질환+악성질환 시트에서 환자별 진단 이력(코드/명칭/ICD-10/진단연월을 진단연월 순으로 "; "로 이어붙임)과
+# 암진단연월(악성질환 최소값), CT촬영연월(raw/ct_study_dates.csv에서 가장 이른 촬영월(질환 라벨링과 동일))을 만든다.
+_DX_COLS = ["진단코드", "진단코드(코드명)", "ICD-10 코드", "ICD-10 코드(코드명)"]
+EXTRA_META_COLS = [*_DX_COLS, "진단연월", "CT촬영연월", "암진단연월"]
+
+
+def _dx_extra(site: str) -> pd.DataFrame:
+    import glob
+    f = glob.glob(os.path.join(DATA_DIR, "raw", f"{site} 데이터 정리본*.xlsx"))[0]
+    cols = ["연구등록번호", *_DX_COLS, "진단연월최소값"]
+    mal = pd.read_excel(f, sheet_name="악성질환")[cols]
+    b = pd.concat([pd.read_excel(f, sheet_name="기저질환")[cols], mal]).dropna(subset=["연구등록번호"])
+    for d in (b, mal):
+        d["id"] = d["연구등록번호"].astype(int)
+        d["dxm"] = d["진단연월최소값"].astype(str).str[:7]
+    g = b.sort_values(["id", "dxm"], kind="stable").groupby("id")
+    join = lambda s: "; ".join(s.astype(str))
+    out = pd.DataFrame({**{c: g[c].agg(join) for c in _DX_COLS}, "진단연월": g["dxm"].agg(join)})
+    mal = mal.dropna(subset=["연구등록번호"])
+    out["암진단연월"] = mal.groupby("id").dxm.min()
+    c = pd.read_csv(os.path.join(DATA_DIR, "raw", "ct_study_dates.csv"), dtype=str)
+    c = c[(c.site == site) & c.study_dates.notna()]
+    ct = pd.to_datetime(c.study_dates.str.split(",").str[0], format="%Y%m%d").dt.strftime("%Y-%m")
+    out = out.join(pd.Series(ct.values, index=c.PatientID.astype(int).values, name="CT촬영연월"), how="outer")
+    return out[EXTRA_META_COLS]
+
+
+# 조건(metadata 완비, seg_status==ok)에 HTN/DM/CKD 완비, 체성분 total 성공, landmark slice 단조증가까지 모두 만족하는 PatientID만 남긴다.
 def _filter_sheets(sheets: dict) -> dict:
-    m, lm, at = sheets["patient_metadata"], sheets.get("landmarks"), sheets.get("aec_total")
+    m, lm = sheets["patient_metadata"], sheets.get("landmarks")
     ok = m[["Height", "Weight", "BMI"]].notna().all(axis=1)
+    ok &= m["BMI"].between(13, 50)                            # BMI가 극단값(<13 또는 >50)인 환자는 제외한다
     if all(c in m.columns for c in DISEASE_COLS):
         ok &= m[DISEASE_COLS].notna().all(axis=1)             # 질환 정보를 구할 수 없는 환자는 filtered에서 뺀다
+    ok &= m["PatientAge"] >= 20                               # 20세 미만은 제외
     if "hw_implausible" in m.columns:
         ok &= m["hw_implausible"] == 0                        # 키/몸무게가 비현실적인 환자는 제외
     ids = set(m.PatientID[ok])
     if lm is not None:
         ids &= set(lm.PatientID[lm.seg_status == "ok"])
-    if at is not None:
-        ids &= set(at.PatientID[at.aec_flat.astype(str).str.lower() == "false"])
+        # landmark slice 번호가 T10→치골 순서로 엄격히 증가하지 않는 환자는 제외한다(결측은 건너뜀).
+        # liver_dome은 T10과의 상하 위치가 해부학적으로 달라 검사하지 않는다.
+        sc = [c for c in lm.columns if c.endswith("_slice") and c != "liver_dome_slice"]
+        v = lm[sc].to_numpy(float)
+        mono = [(np.diff(r[~np.isnan(r)]) > 0).all() for r in v]
+        ids &= set(lm.PatientID[mono])
     return {k: d[d.PatientID.isin(ids)] for k, d in sheets.items()}
 
 
@@ -110,13 +166,27 @@ def write_full_and_filtered(site: str, slug: str, sheets: dict, filtered_extra: 
         if c not in meta.columns:
             meta[c] = np.nan
         meta[c] = meta[c].astype("float").fillna(meta["PatientID"].map(ros[c])).astype("Int64")
-    full = {"patient_metadata": meta, **sheets}   # metadata가 맨 앞 시트
+    # 값이 있는 칸은 기저질환.xlsx 기준(CT 촬영월 >= 진단연월최소값이면 1)으로 다시 라벨링한다. 결측은 유지.
+    dx = _dx_labels(site)
+    for c in DISEASE_COLS:
+        meta[c] = meta["PatientID"].map(dx[c]).fillna(0).astype("Int64").where(meta[c].notna())
+    meta = meta.drop(columns=EXTRA_META_COLS, errors="ignore").join(_dx_extra(site), on="PatientID")   # 질환 칼럼 옆에 진단 이력 칼럼 추가
+    full = {"patient_metadata": meta, **sheets, **(filtered_extra or {})}   # metadata가 맨 앞 시트, *_total도 full에 포함
     base = os.path.join(DATA_DIR, site, "landmark", f"{slug}_landmark")
     _write_xlsx(base + "_full.xlsx", full)
-    filt = _filter_sheets(full)
-    # filtered에만 넣는 시트(예: *_total) — filtered 환자의 행만 남긴다.
+    filt = _filter_sheets({"patient_metadata": meta, **sheets})
+    # *_total은 filtered 환자의 행만 남긴다.
     ids = set(filt["patient_metadata"].PatientID)
+    # 체성분 total(VAT/SAT/TAMA) 계산이 실패(seg_status != ok)한 환자는 filtered에서 뺀다.
+    for k, d in {**sheets, **(filtered_extra or {})}.items():
+        if k.endswith("_total") and k != "aec_total" and "seg_status" in d.columns:
+            ids -= set(d.PatientID[d.seg_status.astype(str) != "ok"])
+    filt = {k: d[d.PatientID.isin(ids)] for k, d in filt.items()}
     filt.update({k: d[d.PatientID.isin(ids)] for k, d in (filtered_extra or {}).items()})
+    m = filt["patient_metadata"]
+    if m["hw_implausible"].nunique() <= 1:   # filtered에서는 비현실 값을 이미 걸러 단일 값(0)이라 칼럼을 뺀다
+        filt["patient_metadata"] = m.drop(columns="hw_implausible")
+    filt.pop("aec_total", None)   # filtered에는 aec_total 시트를 넣지 않는다
     _write_xlsx(base + "_filtered.xlsx", filt)
 
 
@@ -165,7 +235,7 @@ def _self_test() -> None:
 
         assert list(out.keys())[0] == "patient_metadata", "patient_metadata가 맨 앞 시트여야 함"
         assert set(out.keys()) == {"landmarks", "body_composition", "aec_total", "patient_metadata"}
-        assert list(flt["landmarks"]["PatientID"]) == [1], "aec_flat==False인 환자만 남아야 함"
+        assert list(flt["landmarks"]["PatientID"]) == [1, 2], "aec_flat은 filtered 조건이 아님"
         assert len(out["landmarks"]) == 2 and len(out["patient_metadata"]) == 2
         assert list(out["patient_metadata"]["Height"]) == [170.0, 160.0]
     print("self-test OK")

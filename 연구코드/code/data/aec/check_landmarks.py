@@ -60,6 +60,7 @@ TotalSegmentator가 환자를 머리-발 뒤집힌 상태로 봐서 척추 번�
 """
 
 import importlib.util
+import json
 import os
 import pickle
 import re
@@ -204,6 +205,12 @@ def _femoral_head_k(seg_dir: str) -> tuple[int | None, int]:
     return int(round(sum(centers) / len(centers))), total_vox
 
 
+# 슬라이스 z좌표의 범위(mm). 위치 정보가 없으면 NaN.
+def _mm_range(by_inst) -> float:
+    zs = [r["z"] for r in by_inst or [] if not np.isnan(r["z"])]
+    return round(max(zs) - min(zs), 2) if len(zs) >= 2 else np.nan
+
+
 # ── 환자 1명 처리 ─────────────────────────────────────────────────────────────
 
 def _empty_landmark_row(pid: int, series_desc, manufacturer, status: str) -> dict:
@@ -343,10 +350,47 @@ def _compute_bc_rows(pid: int, row: dict, img: sitk.Image | None, n_k: int, tmp_
     if report_path is not None and bc_by_anchor:
         try:
             _save_landmark_report(pid, bc_by_anchor, report_path)
+            _save_tissue_images(pid, bc_by_anchor, os.path.dirname(report_path) + "_seg")
         except Exception as e:
             tqdm.write(f"  PID {pid}: report 저장 실패 ({type(e).__name__}: {e})")
 
     return bc_rows
+
+
+def _save_tissue_images(pid: int, bc_by_anchor: dict[str, dict], out_dir: str) -> None:
+    """리포트와 같은 anchor 그리드로 환자당 4장을 {out_dir}/{pid}/ 에 저장한다:
+    {pid}_seg.png(VAT∪SAT∪TAMA 픽셀만 남긴 CT 원본, 장기·뼈 등은 검정), {pid}_vat/sat/tama.png(이진 마스크).
+    TAMA = NAMA+LAMA+IMATA."""
+    wl, ww = 40, 400
+    d = os.path.join(out_dir, str(pid))
+    os.makedirs(d, exist_ok=True)
+
+    def render(bc, kind):
+        vat, sat = np.squeeze(bc["vat_mask"]), np.squeeze(bc["sat_mask"])
+        tama = np.squeeze(bc["nama_mask"] | bc["lama_mask"] | bc["imata_mask"])
+        if kind == "seg":
+            hu = np.squeeze(bc["hu_slice"])
+            return np.clip((hu - (wl - ww / 2)) / ww, 0, 1) * (vat | sat | tama)
+        return {"vat": vat, "sat": sat, "tama": tama}[kind].astype(float)
+
+    # matplotlib 그리드는 패널을 줄여 해상도가 깎이므로, 512x512 타일을 그대로 이어 붙인다
+    # (원본이 512가 아니면 512로 리사이즈: 회색조는 bilinear, 마스크는 0.5 임계).
+    T, ncols = 512, 4
+    nrows = -(-len(ANCHOR_ORDER) // ncols)
+    for kind in ("seg", "vat", "sat", "tama"):
+        canvas = Image.new("L", (T * ncols, T * nrows), 0)
+        for i, anchor in enumerate(ANCHOR_ORDER):
+            bc = bc_by_anchor.get(anchor)
+            if bc is None or bc.get("seg_status") != "ok" or "hu_slice" not in bc:
+                continue
+            tile = Image.fromarray(render(bc, kind).T.astype(np.float32), mode="F")  # 리포트와 같은 방향
+            if tile.size != (T, T):
+                tile = tile.resize((T, T), Image.BILINEAR)
+            a = np.asarray(tile)
+            a = (a > 0.5) * 255 if kind != "seg" else a * 255
+            x, y = (i % ncols) * T, (i // ncols) * T
+            canvas.paste(Image.fromarray(a.astype(np.uint8)), (x, y))
+        canvas.save(os.path.join(d, f"{pid}_{kind}.png"))
 
 
 def _save_landmark_report(pid: int, bc_by_anchor: dict[str, dict], report_path: str) -> None:
@@ -359,9 +403,7 @@ def _save_landmark_report(pid: int, bc_by_anchor: dict[str, dict], report_path: 
     overlay_colors = {
         "sat_mask":   (1.0, 1.0, 0.0),  # SAT: 노랑
         "vat_mask":   (1.0, 0.0, 0.0),  # VAT: 빨강
-        "nama_mask":  (0.0, 0.4, 1.0),  # NAMA: 파랑
-        "lama_mask":  (0.0, 1.0, 1.0),  # LAMA: 청록
-        "imata_mask": (0.0, 1.0, 0.0),  # IMATA: 초록
+        "tama_mask":  (0.0, 0.4, 1.0),  # TAMA(NAMA+LAMA+IMATA): 파랑
     }
     wl, ww = 40, 400  # soft tissue window
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
@@ -384,6 +426,7 @@ def _save_landmark_report(pid: int, bc_by_anchor: dict[str, dict], report_path: 
         hu = np.squeeze(bc["hu_slice"])
         gray = np.clip((hu - (wl - ww / 2)) / ww, 0, 1)
         rgb = np.stack([gray] * 3, axis=-1)
+        bc = dict(bc, tama_mask=bc["nama_mask"] | bc["lama_mask"] | bc["imata_mask"])
         for key, color in overlay_colors.items():
             mask = np.squeeze(bc[key])
             if mask.any():
@@ -411,7 +454,7 @@ def _save_landmark_report(pid: int, bc_by_anchor: dict[str, dict], report_path: 
     from matplotlib.patches import Patch
     fig.legend(handles=[Patch(facecolor=c, label=k.replace("_mask", "").upper())
                         for k, c in overlay_colors.items()],
-               loc="upper center", bbox_to_anchor=(0.5, 0.972), ncol=5,
+               loc="upper center", bbox_to_anchor=(0.5, 0.972), ncol=3,
                frameon=False, fontsize=11, handlelength=1.4, columnspacing=1.8)
     # 마지막 행 아래 여백(rect 하단)을 0으로 두면 ax.text(y=-0.14, 축 밖)로 그린 수치
     # 텍스트가 캔버스 밖으로 잘린다 — 하단에 여백을 남겨 마지막 줄도 다 보이게 한다.
@@ -527,95 +570,127 @@ def compute_landmarks(row: dict, seg_dir: str, nii_path: str, n_k: int, k_to_sli
         "partial" if found_core > 0 else "both_missing")
 
 
+# 시리즈의 SliceThickness(mm)를 npy/json 헤더 또는 첫 DICOM에서 읽는다(없으면 NaN).
+def _slice_thickness(series_dir: str) -> float:
+    meta, _ = _find_npy(series_dir)
+    if meta is not None:
+        v = ((meta["header"].get("00180050") or {}).get("Value") or [None])[0]
+    else:
+        try:
+            f = next(os.path.join(series_dir, f) for f in os.listdir(series_dir)
+                     if os.path.isfile(os.path.join(series_dir, f)))
+            v = getattr(pydicom.dcmread(f, stop_before_pixels=True), "SliceThickness", None)
+        except Exception:
+            v = None
+    return float(v) if v not in (None, "") else np.nan
+
+
 def process_patient(pid: int, series_dir: str, tmp_dir: str,
                      report_path: str | None = None, want_total=None) -> tuple[dict, list[dict], dict, dict]:
     """랜드마크 검출·체성분·AEC를 한 번에 수행한다(DICOM을 한 번만 읽어 재사용).
     (landmarks row, body-composition rows, aec_total row, aec_landmark row)를 반환한다.
     AEC는 랜드마크 검출에 이미 읽은 by_inst를 그대로 쓰므로 추가 I/O가 없다 — 별도
     스크립트로 돌리면 전체 DICOM 헤더를 한 번 더 읽게 되는데, 병목이 디스크라 그 비용이 크다."""
-    try:
-        hdr_file = next(os.path.join(series_dir, f) for f in os.listdir(series_dir)
-                         if os.path.isfile(os.path.join(series_dir, f)))
-        hdr = pydicom.dcmread(hdr_file, stop_before_pixels=True)
-        series_desc  = str(getattr(hdr, "SeriesDescription", ""))
-        manufacturer = str(getattr(hdr, "ManufacturerModelName", ""))
-    except StopIteration:
-        row = _empty_landmark_row(pid, None, None, "no_series")
-        return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, None))
-    except Exception:
-        series_desc = manufacturer = None
+    npy = _load_volume_npy(series_dir)   # save_volumes_npy.py가 만든 npy/json이 있으면 DICOM 대신 쓴다
+    if npy is not None:
+        npy_img, by_inst, npy_k_to_slice, series_desc, manufacturer = npy
+    else:
+        try:
+            hdr_file = next(os.path.join(series_dir, f) for f in os.listdir(series_dir)
+                             if os.path.isfile(os.path.join(series_dir, f)))
+            hdr = pydicom.dcmread(hdr_file, stop_before_pixels=True)
+            series_desc  = str(getattr(hdr, "SeriesDescription", ""))
+            manufacturer = str(getattr(hdr, "ManufacturerModelName", ""))
+        except StopIteration:
+            row = _empty_landmark_row(pid, None, None, "no_series")
+            return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, None))
+        except Exception:
+            series_desc = manufacturer = None
 
-    by_inst = read_slices(series_dir)
-    if by_inst is None:
-        row = _empty_landmark_row(pid, series_desc, manufacturer, "no_position_data")
-        return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, None))
+        by_inst = read_slices(series_dir)
+        if by_inst is None:
+            row = _empty_landmark_row(pid, series_desc, manufacturer, "no_position_data")
+            return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, None))
 
     n = len(by_inst)
     row = _empty_landmark_row(pid, series_desc, manufacturer, "failed")
     row["n_slices"] = n
+    row["slice_thickness"] = _slice_thickness(series_dir)
+    row["mm_range"] = _mm_range(by_inst)
 
     nii_path = os.path.join(tmp_dir, f"{pid}.nii.gz")
     seg_dir  = os.path.join(tmp_dir, f"{pid}_seg")
     img, n_k = None, None
     try:
-        reader = sitk.ImageSeriesReader()
-        series_ids = reader.GetGDCMSeriesIDs(series_dir)
-        if not series_ids:
-            row["seg_status"] = "nifti_fail"
-            return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, by_inst))
+        if npy is None:
+            reader = sitk.ImageSeriesReader()
+            series_ids = reader.GetGDCMSeriesIDs(series_dir)
+            if not series_ids:
+                row["seg_status"] = "nifti_fail"
+                return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, by_inst))
 
-        # 한 폴더에 SeriesInstanceUID가 여러 개 섞여 있는 경우가 있다 — PACS 내보내기에서
-        # 같은 스캔이 통째로 두 번 저장되는 식이다(예: 강남 328371, 88장짜리 동일 시리즈 2벌).
-        # 예전엔 첫 UID의 파일 수가 폴더 전체 수와 달라 invalid_volume_match로 환자를 통째로
-        # 버렸다. 슬라이스가 가장 많은(동률이면 z범위가 넓은) 하위 시리즈 하나를 골라 쓴다.
-        basename_to_slice = {os.path.basename(r["file"]): r for r in by_inst}
-
-        def _coverage(kf: list) -> tuple:
-            zs = [basename_to_slice[b]["z"] for b in map(os.path.basename, kf)
-                  if b in basename_to_slice]
-            zs = [z for z in zs if not np.isnan(z)]
-            return (len(kf), (max(zs) - min(zs)) if len(zs) >= 2 else 0.0)
-
-        candidates = [list(reader.GetGDCMSeriesFileNames(series_dir, sid)) for sid in series_ids]
-        candidates = [kf for kf in candidates if kf]
-        if not candidates:
-            row["seg_status"] = "invalid_volume_match"
-            return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, by_inst))
-        k_files = max(candidates, key=_coverage)
-
-        if len(series_ids) > 1:
-            # 고른 하위 시리즈에 속한 슬라이스만 남긴다. 그러지 않으면 InstanceNumber가
-            # 중복돼(각 벌이 1~88) AEC 인덱싱과 슬라이스 매핑이 어긋난다.
-            sel = {os.path.basename(f) for f in k_files}
-            by_inst = [r for r in by_inst if os.path.basename(r["file"]) in sel]
-            n = len(by_inst)
-            row["n_slices"] = n
-            row["multi_series_in_folder"] = len(series_ids)
+            # 한 폴더에 SeriesInstanceUID가 여러 개 섞여 있는 경우가 있다 — PACS 내보내기에서
+            # 같은 스캔이 통째로 두 번 저장되는 식이다(예: 강남 328371, 88장짜리 동일 시리즈 2벌).
+            # 예전엔 첫 UID의 파일 수가 폴더 전체 수와 달라 invalid_volume_match로 환자를 통째로
+            # 버렸다. 슬라이스가 가장 많은(동률이면 z범위가 넓은) 하위 시리즈 하나를 골라 쓴다.
             basename_to_slice = {os.path.basename(r["file"]): r for r in by_inst}
 
-        if len(k_files) != n:
-            row["seg_status"] = "invalid_volume_match"
-            return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, by_inst))
+            def _coverage(kf: list) -> tuple:
+                zs = [basename_to_slice[b]["z"] for b in map(os.path.basename, kf)
+                      if b in basename_to_slice]
+                zs = [z for z in zs if not np.isnan(z)]
+                return (len(kf), (max(zs) - min(zs)) if len(zs) >= 2 else 0.0)
 
-        reader.SetFileNames(k_files)
-        img = reader.Execute()
-
-        # [중요] 일부 시리즈(특히 GE Revolution CT)는 ITK가 direction의 slice축 부호를 뒤집어
-        # 좌수좌표계(det=-1)로 읽는다. 그러면 여기서 쓰는 NIfTI의 affine이 실제 DICOM의 z진행과
-        # 반대가 되고(axcodes가 S가 아니라 I), TotalSegmentator가 환자를 머리-발 뒤집힌 상태로
-        # 보게 돼 척추 번호 라벨이 뒤죽박죽이 된다(강남 Revolution CT 490명 중 454명에서 발생).
-        # slice축을 IOP 두 축의 외적(=우수계)으로 되돌리고, 실제 IPP 진행 방향과 맞는지 확인한다.
-        d = np.array(img.GetDirection()).reshape(3, 3)
-        if np.linalg.det(d) < 0:
-            d[:, 2] = np.cross(d[:, 0], d[:, 1])
-            z_first = float(pydicom.dcmread(k_files[0], stop_before_pixels=True).ImagePositionPatient[2])
-            z_last  = float(pydicom.dcmread(k_files[-1], stop_before_pixels=True).ImagePositionPatient[2])
-            if (d[2, 2] > 0) != (z_last > z_first):
-                # 외적으로 복원한 방향이 실제 슬라이스 진행과 반대면 보정할 수 없는 형상이다.
-                row["seg_status"] = "direction_unresolved"
+            candidates = [list(reader.GetGDCMSeriesFileNames(series_dir, sid)) for sid in series_ids]
+            candidates = [kf for kf in candidates if kf]
+            if not candidates:
+                row["seg_status"] = "invalid_volume_match"
                 return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, by_inst))
-            img.SetDirection(tuple(d.flatten()))
-            row["direction_fixed"] = True
+            want_no = SERIES_NUMBER_OVERRIDE.get(pid)
+            if want_no is not None:
+                candidates = [kf for kf in candidates
+                              if str(pydicom.dcmread(kf[0], stop_before_pixels=True).SeriesNumber) == want_no] or candidates
+            k_files = max(candidates, key=_coverage)
+
+            # len(k_files) < n: GDCM이 읽지 못하는 손상 슬라이스가 1장 섞인 경우(강남 3639829, 8965018).
+            # 읽히는 슬라이스만 남겨 진행한다(해당 위치는 한 칸 건너뛴 간격이 된다).
+            if len(series_ids) > 1 or len(k_files) < n:
+                # 고른 하위 시리즈에 속한 슬라이스만 남긴다. 그러지 않으면 InstanceNumber가
+                # 중복돼(각 벌이 1~88) AEC 인덱싱과 슬라이스 매핑이 어긋난다.
+                sel = {os.path.basename(f) for f in k_files}
+                by_inst = [r for r in by_inst if os.path.basename(r["file"]) in sel]
+                n = len(by_inst)
+                row["n_slices"] = n
+                row["mm_range"] = _mm_range(by_inst)
+                if len(series_ids) > 1:
+                    row["multi_series_in_folder"] = len(series_ids)
+                basename_to_slice = {os.path.basename(r["file"]): r for r in by_inst}
+
+            if len(k_files) != n:
+                row["seg_status"] = "invalid_volume_match"
+                return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, by_inst))
+
+            reader.SetFileNames(k_files)
+            img = reader.Execute()
+
+            # [중요] 일부 시리즈(특히 GE Revolution CT)는 ITK가 direction의 slice축 부호를 뒤집어
+            # 좌수좌표계(det=-1)로 읽는다. 그러면 여기서 쓰는 NIfTI의 affine이 실제 DICOM의 z진행과
+            # 반대가 되고(axcodes가 S가 아니라 I), TotalSegmentator가 환자를 머리-발 뒤집힌 상태로
+            # 보게 돼 척추 번호 라벨이 뒤죽박죽이 된다(강남 Revolution CT 490명 중 454명에서 발생).
+            # slice축을 IOP 두 축의 외적(=우수계)으로 되돌리고, 실제 IPP 진행 방향과 맞는지 확인한다.
+            d = np.array(img.GetDirection()).reshape(3, 3)
+            if np.linalg.det(d) < 0:
+                d[:, 2] = np.cross(d[:, 0], d[:, 1])
+                z_first = float(pydicom.dcmread(k_files[0], stop_before_pixels=True).ImagePositionPatient[2])
+                z_last  = float(pydicom.dcmread(k_files[-1], stop_before_pixels=True).ImagePositionPatient[2])
+                if (d[2, 2] > 0) != (z_last > z_first):
+                    # 외적으로 복원한 방향이 실제 슬라이스 진행과 반대면 보정할 수 없는 형상이다.
+                    row["seg_status"] = "direction_unresolved"
+                    return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, by_inst))
+                img.SetDirection(tuple(d.flatten()))
+                row["direction_fixed"] = True
+        else:
+            img, k_to_slice = npy_img, npy_k_to_slice
 
         sitk.WriteImage(img, nii_path)
 
@@ -625,14 +700,16 @@ def process_patient(pid: int, series_dir: str, tmp_dir: str,
             # 영역만 크롭한 뒤 본 모델을 돌린다 — 척추가 전체 척추(경추~천추) 맥락 없이 잘려서
             # 번호가 밀리는 원인이 됐다. roi_subset 없이 전신을 그대로 세그멘테이션한다.
             totalsegmentator(input=nii_path, output=seg_dir, task="total",
-                             fast=False, quiet=True, device=DEVICE)
+                             fast=False, quiet=True, device=DEVICE,
+                             nr_thr_resamp=1, nr_thr_saving=1)
 
         n_k = int(cast(Nifti1Image, nib.load(nii_path)).shape[2])
         if n_k != n:
             row["seg_status"] = "invalid_volume_match"
             return (row, _empty_bc_rows(pid, row), *_aec_rows(pid, row, by_inst))
 
-        k_to_slice = [basename_to_slice.get(os.path.basename(f)) for f in k_files]
+        if npy is None:
+            k_to_slice = [basename_to_slice.get(os.path.basename(f)) for f in k_files]
 
         compute_landmarks(row, seg_dir, nii_path, n_k, k_to_slice)
 
@@ -673,9 +750,79 @@ TOTAL_META = ["PatientID", "n_slices", "seg_status"]
 TOTAL_BACKFILL_BATCH = 20   # 이미 처리된 환자의 total만 채우는 작업은 저장 비용 대비 환자당 시간이 짧아 묶어서 저장
 
 
+NPY_ROOT = r"\\heart-lab.tail38ea6b.ts.net\home\jhjun\npy_json"   # save_volumes_npy.py의 저장 위치: {NPY_ROOT}\{slug}\{pid}\{pid}_{tag}.npy
+NPY_SLUG = {"강남": "gangnam", "신촌": "sinchon"}
+
+
+# series_dir의 npy/json을 찾는다: 공유 폴더({NPY_ROOT}) → 환자 폴더(옛 위치) 순서. 반환 (meta, npy_path) 또는 (None, None).
+def _find_npy(series_dir: str):
+    pdir, folder = os.path.split(os.path.normpath(series_dir))
+    pid = os.path.basename(pdir)
+    site = next((k for k in NPY_SLUG if f"{os.sep}{k}_axial{os.sep}" in pdir + os.sep), None)
+    dirs = ([os.path.join(NPY_ROOT, NPY_SLUG[site], pid)] if site else []) + [pdir]
+    for d in dirs:
+        try:
+            for fn in os.listdir(d):
+                if fn.endswith(".json") and os.path.exists(os.path.join(d, fn[:-5] + ".npy")):
+                    with open(os.path.join(d, fn), encoding="utf-8") as f:
+                        m = json.load(f)
+                    if m.get("series_folder") == folder:
+                        return m, os.path.join(d, fn[:-5] + ".npy")
+        except OSError:
+            continue
+    return None, None
+
+
+# 시리즈의 npy/json(_find_npy: 공유 폴더 → 환자 폴더)이 있으면 DICOM 대신 그걸로 볼륨을 만든다.
+# 반환: (img, by_inst, k_to_slice, series_desc, manufacturer) 또는 쓸 수 없으면 None(→ DICOM 경로).
+# k 순서는 sitk/GDCM과 같게 IPP를 슬라이스 법선(IOP 외적)에 투영한 값의 오름차순이다.
+def _load_volume_npy(series_dir: str):
+    meta, npy_path = _find_npy(series_dir)
+    # SeriesInstanceUID가 섞인 폴더는 DICOM 경로가 하위 시리즈를 골라 쓴다
+    if meta is None or "0020000E" in meta["per_slice"]:
+        return None
+    if "00200013" not in meta["per_slice"] or "00200032" not in meta["per_slice"]:
+        return None   # InstanceNumber/IPP가 슬라이스마다 안 달라지는 시리즈(1장짜리 등)는 DICOM 경로로
+    code = {v: k for k, v in meta["keywords"].items()}
+
+    def vals(name):   # 슬라이스별 값 목록(상수 태그는 header 값을 반복). 각 원소는 Value 리스트 또는 None
+        tag = code.get(name)
+        if tag in meta["per_slice"]:
+            return [(v or {}).get("Value") for v in meta["per_slice"][tag]]
+        return [(meta["header"].get(tag) or {}).get("Value")] * n
+
+    n = len(meta["per_slice"]["00200013"])
+    inst = [v[0] for v in vals("InstanceNumber")]
+    ipp = np.array([v for v in vals("ImagePositionPatient")], dtype=float)
+    aec = [v[0] if v else np.nan for v in vals("XRayTubeCurrent")]
+    iop = np.array(vals("ImageOrientationPatient")[0], dtype=float)
+    r, c = iop[:3], iop[3:]
+    normal = np.cross(r, c)
+    proj = ipp @ normal
+    order = np.argsort(proj, kind="stable")
+    vol = np.load(npy_path)[order]
+    if vol.shape[0] != n:
+        return None
+    px = vals("PixelSpacing")[0]
+    if px is None:
+        return None   # npy 메타에 PixelSpacing이 없으면 DICOM 경로로
+    dz = (proj[order[-1]] - proj[order[0]]) / (n - 1) if n > 1 else float(vals("SliceThickness")[0][0])
+    img = sitk.GetImageFromArray(vol)
+    img.SetSpacing((float(px[1]), float(px[0]), float(dz)))
+    img.SetOrigin(tuple(float(x) for x in ipp[order[0]]))
+    img.SetDirection(tuple(np.column_stack([r, c, normal]).flatten()))
+    by_inst = [{"file": str(i), "inst": int(i), "z": float(ipp[k][2]), "aec": float(a) if a else float("nan")}
+               for k, (i, a) in enumerate(zip(inst, aec))]
+    str_ = lambda name: str((vals(name)[0] or [""])[0])
+    return img, by_inst, [by_inst[i] for i in order], str_("SeriesDescription"), str_("ManufacturerModelName")
+
+
 # 시리즈 폴더에서 볼륨을 읽는다(다중 UID 정리 + det<0 보정, process_patient와 동일 로직).
 # 반환: (img, by_inst, k_to_slice) 또는 읽을 수 없으면 None.
 def _load_volume(series_dir: str):
+    npy = _load_volume_npy(series_dir)
+    if npy is not None:
+        return npy[:3]
     by_inst = read_slices(series_dir)
     if by_inst is None:
         return None
@@ -790,7 +937,7 @@ def _slice_numbers(r) -> dict:
 
 
 # landmarks 시트에 남기는 메타 컬럼(원래 컬럼 순서의 앞부분). 그 뒤로는 12개 anchor의 슬라이스 번호만 둔다.
-LANDMARK_META = ["PatientID", "series_description", "manufacturer_model", "n_slices", "seg_status",
+LANDMARK_META = ["PatientID", "series_description", "manufacturer_model", "n_slices", "slice_thickness", "mm_range", "seg_status",
                  "direction_fixed", "multi_series_in_folder"]
 
 SHEETS = {"landmarks": "landmarks", "bodycomp": "body_composition",
@@ -798,6 +945,9 @@ SHEETS = {"landmarks": "landmarks", "bodycomp": "body_composition",
 
 
 # 기존 시트를 모두 읽어온다(없으면 빈 dict).
+EXTRA_SHEETS = ("metadata_summary", "icd10_codes", "patient_metadata")   # run_prognosis_landmark.finalize가 넣는 시트. 저장 때 지우지 않는다
+
+
 def _read_sheets(path: str) -> dict:
     if not os.path.exists(path):
         return {}
@@ -929,9 +1079,9 @@ def _write_all_locked(path: str, rows: list[dict], bc_rows: list[dict],
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp.xlsx"
-    with pd.ExcelWriter(tmp, engine="openpyxl") as w:
-        for df, sheet in ((lm, SHEETS["landmarks"]), (at, SHEETS["aec_total"]),
-                          *((totals[n], n) for n in TOTAL_SHEETS)):
+    with pd.ExcelWriter(tmp, engine="xlsxwriter") as w:
+        for df, sheet in ((*((old.get(n), n) for n in EXTRA_SHEETS), (lm, SHEETS["landmarks"]), (at, SHEETS["aec_total"]),   # EXTRA_SHEETS는 맨 앞에 그대로 보존
+                          *((totals[n], n) for n in TOTAL_SHEETS))):
             if df is not None:
                 df.to_excel(w, sheet_name=sheet, index=False)
     _replace_retry(tmp, path)
@@ -985,7 +1135,7 @@ def _drop_pids(paths: dict, pids: set[int]) -> None:
         if not sheets:
             return
         tmp = path + ".tmp.xlsx"
-        with pd.ExcelWriter(tmp, engine="openpyxl") as w:
+        with pd.ExcelWriter(tmp, engine="xlsxwriter") as w:
             for name, d in sheets.items():
                 if "PatientID" in d.columns:
                     d = d[~d["PatientID"].astype("Int64").isin(pids)]
@@ -997,33 +1147,62 @@ def _shard_filter(pid: int, shard_id: int, num_shards: int) -> bool:
     return num_shards <= 1 or (pid % num_shards) == shard_id
 
 
-def pick_series_folder(pid: int, patient_dir: str, subs: list[str]) -> str | None:
+# 자동 선택으로는 처리가 안 되는 환자의 시리즈를 직접 지정한다(신촌 9784713: Body 3.0은 WinError 87로 실패, Body 2.0은 정상).
+SERIES_OVERRIDE = {9784713: "2.0 Body 2.0", 8405801: "ABD 2.5 40KeV",
+                   5629010: "series_1.2.410", 8454412: "series_1.2.410",
+                   9565388: "Abd Post  5.0  B45f",
+                   1718562: "Portal   2.0  B30f"}
+# 한 폴더에 SeriesInstanceUID가 여러 개이고 슬라이스 수가 같아 자동 선택이 모호할 때 SeriesNumber로 고정한다
+SERIES_NUMBER_OVERRIDE = {8405801: "93051", 5629010: "730916", 8454412: "730416"}
+
+
+# n_slices 극단 이상치(IQR 3배, filtered.xlsx 기준) 바깥인 시리즈는 정상범위 후보가 있을 때 후보에서 뺀다.
+N_SLICES_RANGE = {"강남": (54, 285), "신촌": (100, 245)}
+
+
+def pick_series_folder(pid: int, patient_dir: str, subs: list[str],
+                       n_range: tuple[int, int] | None = None) -> str | None:
     """환자 폴더의 series 서브폴더들을 7_select_best_series.py와 동일한 phase 우선순위
     (Portal > Contrast > Delay > Arterial > Pre/NonContrast > Unknown > Scout/Tracking)로
     골라 폴더명을 반환한다. 시리즈가 여러 개인 환자는 DLO_Results의 Series_Desc 힌트 대신
     항상 이 함수로 고른다 — 힌트를 그대로 따르면 비조영을 집는 경우가 많다."""
+    if SERIES_OVERRIDE.get(pid) in subs:
+        return SERIES_OVERRIDE[pid]
     rows = []
     for sub in subs:
         sub_dir = os.path.join(patient_dir, sub)
-        files = [f for f in os.listdir(sub_dir) if os.path.isfile(os.path.join(sub_dir, f))]
-        if not files:
-            continue
-        try:
-            hdr = pydicom.dcmread(os.path.join(sub_dir, files[0]), stop_before_pixels=True)
-        except Exception:
-            continue
-        series_desc = str(getattr(hdr, "SeriesDescription", sub))
-        thickness = getattr(hdr, "SliceThickness", None)
-        by_inst = read_slices(sub_dir)
-        z_vals = [r["z"] for r in by_inst] if by_inst else []
+        meta, _ = _find_npy(sub_dir)
+        if meta is not None:   # npy/json이 있으면 DICOM 헤더를 다시 읽지 않는다
+            h = meta["header"]
+            first = lambda tag: (h.get(tag) or {}).get("Value", [None])[0]
+            series_desc = str(first("0008103E") or sub)
+            thickness = first("00180050")
+            # 상수 태그는 per_slice에 없다(1장짜리 시리즈 등 → z범위 0)
+            z_vals = [v["Value"][2] for v in meta["per_slice"].get("00200032", [])]
+        else:
+            files = [f for f in os.listdir(sub_dir) if os.path.isfile(os.path.join(sub_dir, f))]
+            if not files:
+                continue
+            try:
+                hdr = pydicom.dcmread(os.path.join(sub_dir, files[0]), stop_before_pixels=True)
+            except Exception:
+                continue
+            series_desc = str(getattr(hdr, "SeriesDescription", sub))
+            thickness = getattr(hdr, "SliceThickness", None)
+            by_inst = read_slices(sub_dir)
+            z_vals = [r["z"] for r in by_inst] if by_inst else []
         z_range_mm = round(max(z_vals) - min(z_vals), 2) if len(z_vals) >= 2 else 0.0
         rows.append({"PatientID": pid, "series_desc": sub,
                      "phase_rank": sb.PHASE_RANK[sb.classify_phase(series_desc)],
-                     "z_range_mm": z_range_mm,
+                     "z_range_mm": z_range_mm, "n_slices": len(z_vals),
                      "slice_thickness_mm": float(thickness) if thickness not in (None, "") else 99.0})
     if not rows:
         return None
-    return str(sb.pick_best(pd.DataFrame(rows)).iloc[0]["series_desc"])
+    # 스펙트럴 CT의 파생 맵(Iodine/VNC/MonoE)은 HU 영상이 아니라 세그멘테이션이 죽는다(강남 9863353) → 일반 시리즈가 있으면 제외. SPO는 coronal 재구성이라 같이 제외(강남 3993660)
+    plain = [r for r in rows if not re.search(r"iodine|vnc|mono\s?e|virtual|(?<![a-z])spo(?![a-z])", r["series_desc"], re.I)]
+    if n_range:   # 정상범위 후보가 하나라도 있으면 그 안에서만 phase 우선순위로 고른다
+        plain = [r for r in (plain or rows) if n_range[0] <= r["n_slices"] <= n_range[1]] or plain
+    return str(sb.pick_best(pd.DataFrame(plain or rows)).iloc[0]["series_desc"])
 
 
 # ── 사이트 실행 ───────────────────────────────────────────────────────────────
@@ -1045,9 +1224,11 @@ def run_site(site: str, shard_id: int = 0, num_shards: int = 1,
     print("=" * 78)
     print(f"[{tag}] 시작 (전체 range 랜드마크 QC)  |  DICOM: {paths['dicom_base']}")
 
-    dlo = pd.read_excel(paths["dlo_path"])[["PatientID", "Series_Desc"]]
-    dlo["PatientID"] = dlo["PatientID"].astype(int)
-    series_hint = dict(zip(dlo["PatientID"], dlo["Series_Desc"]))
+    series_hint = {}   # DLO 파일이 없으면 힌트 없이 pick_series_folder로 고른다
+    if os.path.exists(paths["dlo_path"]):
+        dlo = pd.read_excel(paths["dlo_path"])[["PatientID", "Series_Desc"]]
+        dlo["PatientID"] = dlo["PatientID"].astype(int)
+        series_hint = dict(zip(dlo["PatientID"], dlo["Series_Desc"]))
 
     check_paths = site_paths(site)
 
@@ -1110,7 +1291,7 @@ def run_site(site: str, shard_id: int = 0, num_shards: int = 1,
         subs = [s for s in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, s))]
         if not subs:
             return None
-        folder = subs[0] if len(subs) == 1 else pick_series_folder(pid, patient_dir, subs)
+        folder = subs[0] if len(subs) == 1 else pick_series_folder(pid, patient_dir, subs, N_SLICES_RANGE.get(site))
         if folder is None and series_hint.get(pid) is not None:
             folder = find_series_folder(patient_dir, series_hint[pid])
         return os.path.join(patient_dir, folder) if folder else None
@@ -1128,8 +1309,7 @@ def run_site(site: str, shard_id: int = 0, num_shards: int = 1,
         meta_ok = None
 
     def _in_filtered(pid: int, status, aec_flat) -> bool:
-        return (status == "ok" and aec_flat is False
-                and (meta_ok is None or pid in meta_ok))
+        return status == "ok"   # full에도 체성분(total)을 넣으려고 seg ok 환자 전체를 계산한다(filtered 조건 제거)
 
     # AEC 사전 저장: 새 환자의 aec_total 행(seg_status=aec_only)을 DICOM 헤더만 읽어 백그라운드 스레드로 채운다.
     # 세그멘테이션은 기다리지 않고 바로 시작하고, 다음 환자는 그 시점까지 flat 여부를 알아낸 환자 중
@@ -1204,9 +1384,8 @@ def run_site(site: str, shard_id: int = 0, num_shards: int = 1,
         flat_false = (set() if at_now is None else
                       set(at_now.loc[at_now["aec_flat"].astype(str).str.lower() == "false", "PatientID"].astype(int)))
         todo = ([] if lm_now is None else
-                sorted(int(x) for x in lm_now[lm_now["seg_status"] == "ok"]["PatientID"]
-                       if int(x) not in have_total and int(x) in flat_false
-                       and (meta_ok is None or int(x) in meta_ok)))
+                sorted(int(x) for x in lm_now[lm_now["seg_status"].isin(["ok", "partial"])]["PatientID"]
+                       if int(x) not in have_total))
         todo = [p for p in todo if p not in retry_pids]   # 오름차순
         if todo:
             print(f"[{tag}] total 시트 보충 대상 {len(todo)}명")
@@ -1254,7 +1433,7 @@ def run_site(site: str, shard_id: int = 0, num_shards: int = 1,
                     if len(subs) == 1:
                         folder = subs[0]
                     else:
-                        folder = pick_series_folder(pid, patient_dir, subs)
+                        folder = pick_series_folder(pid, patient_dir, subs, N_SLICES_RANGE.get(site))
                     if folder is None:   # phase 선택 실패 시에만 힌트로 폴백
                         hint = series_hint.get(pid)
                         folder = find_series_folder(patient_dir, hint) if hint is not None else None

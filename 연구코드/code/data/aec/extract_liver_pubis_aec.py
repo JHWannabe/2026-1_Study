@@ -239,7 +239,7 @@ def compute_body_composition(img: sitk.Image, lo_k: int, hi_k: int, tmp_dir: str
         os.makedirs(seg_dir, exist_ok=True)
         with _silence():
             totalsegmentator(input=cropped_nii_path, output=seg_dir, task=TISSUE_TASK,
-                             fast=False, quiet=True, device=DEVICE)
+                             fast=False, quiet=True, device=DEVICE, nr_thr_resamp=1, nr_thr_saving=1)
 
         class_files = {
             "subcutaneous_fat": "subcutaneous_fat.nii.gz", "torso_fat": "torso_fat.nii.gz",
@@ -370,7 +370,8 @@ def process_patient(pid: int, series_dir: str, tmp_dir: str) -> tuple[dict | Non
         os.makedirs(seg_dir, exist_ok=True)
         with _silence():
             totalsegmentator(input=nii_path, output=seg_dir, task="total",
-                             roi_subset=ROI_SUBSET, fast=False, quiet=True, device=DEVICE)
+                             roi_subset=ROI_SUBSET, fast=False, quiet=True, device=DEVICE,
+                             nr_thr_resamp=1, nr_thr_saving=1)
 
         n_k = int(cast(Nifti1Image, nib.load(nii_path)).shape[2])
         if n_k != n:
